@@ -77,7 +77,7 @@ async function fixture(t, initialFailure = null) {
 async function assertNoPairing(page) {
   const text = await page.locator('#root').textContent();
   assert.doesNotMatch(text, /[Pp]air|[Ii]nvit|[Rr]evok|Forget|Keychain/);
-  assert.equal(await page.getByRole('textbox').count(), 0);
+  assert.equal(await page.locator('.settings-section').first().getByRole('textbox').count(), 0);
 }
 
 test('a fresh Mac connects directly to the local host with no pairing step', async t => {

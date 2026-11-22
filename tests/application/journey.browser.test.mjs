@@ -518,6 +518,7 @@ test('an unreadable foreign saved view leaves the current conversation and draft
 
 test('committed custom artifact sends one exact prompt, retains drafts and restores the healthy composer', { timeout: 90_000 }, async t => {
   const custom = repository();
+  custom.write('desktop/index.tsx', await readFile(join(root, 'tests/application/fixtures/global-layout.tsx'), 'utf8'));
   t.after(() => rm(custom.directory, { recursive: true, force: true }));
   const commit = custom.commit();
   custom.write('shared/prompts.ts', "export const reviewPrompt = 'DIRTY PROMPT';");
