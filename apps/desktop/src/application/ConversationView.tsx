@@ -1,7 +1,6 @@
 import { canRetryObservation } from '@openpane/contracts';
 import type { ConversationClosure, ObservationStopReason } from '@openpane/contracts';
-import { IMAGE_MAX_BYTES } from '@openpane/contracts/image';
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { useConversation } from '@openpane/client/react';
 import type { ConversationActions, ConversationContinuation, OpenConversation, ConversationObservation, PermissionState } from './application-controller.js';
 import { ContinuationChoices, ContinuationHistory } from './ContinuationNotice.js';
@@ -16,6 +15,7 @@ import { AssistantReply } from './AssistantReply.js';
 import { CustomizationActivity, CustomizationTranscript, type ActivitySelection, type ContentLayoutSelection, type TranscriptSelection } from './DesktopCustomizations.js';
 import { CustomizationContent } from './CustomizationContent.js';
 import { ImageAttachmentCard, imageSize } from './ImageAttachmentCard.js';
+import { dragVerdict, intakeFile, type DropVerdict } from './image-intake.js';
 
 const OBSERVATION_NOTICE: Record<ObservationStopReason, string> = {
   'unsupported': 'This provider does not support live updates.',
@@ -66,6 +66,17 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
   const [approving, setApproving] = useState<ReadonlySet<string>>(new Set());
   const [stopPending, setStopPending] = useState<typeof stopGuard.current>(null);
   const imageInput = useRef<HTMLInputElement>(null);
+  const intaking = useRef<OpenConversation['store'] | null>(null);
+  const removals = useRef(0);
+  const dragDepth = useRef(0);
+  const [drop, setDrop] = useState<DropVerdict | null>(null);
+  useEffect(() => {
+    // dragend fires on the drag source, not on the panel; a cancelled drag must not leave the outline behind.
+    const reset = () => { dragDepth.current = 0; setDrop(null); };
+    document.addEventListener('dragend', reset);
+    document.addEventListener('drop', reset);
+    return () => { document.removeEventListener('dragend', reset); document.removeEventListener('drop', reset); };
+  }, []);
   const composer = useRef<HTMLTextAreaElement>(null);
   // The textarea grows with its text; CSS max-height caps it, then it scrolls. A hidden view has no layout, so skip it.
   function fitComposer(): void {
@@ -154,6 +165,62 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
     setImageError(null);
     void operation().catch((error: unknown) => setImageError({ store, message: error instanceof Error ? error.message : 'The image could not be changed.' }));
   }
+  // Why a new image cannot be attached right now; the same conditions disable "+".
+  const blocked = !acceptsImages ? (active.agent.imageInput.kind === 'unsupported' ? active.agent.imageInput.reason : 'This agent cannot receive images.')
+    : storageFailure ? 'Images can’t be attached while drafts can’t be saved.'
+    : !enabled ? 'Connect to your host to attach an image.'
+    : image?.status === 'uploading' ? 'Wait for the current upload to finish.' : null;
+  /** The one path for picked and dropped files: eligibility, then intake, then the store. */
+  function attach(files: readonly File[]): void {
+    const store = active.store;
+    setImageError(null);
+    const refuse = (message: string) => setImageError({ store, message });
+    if (blocked) return refuse(blocked);
+    if (intaking.current === store) return refuse('Wait for the current image to finish.');
+    const result = intakeFile(files);
+    if (result.kind === 'reject') return refuse(result.reason);
+    const generation = removals.current;
+    intaking.current = store;
+    void (async () => {
+      try {
+        const bytes = new Uint8Array(await result.file.arrayBuffer());
+        // Remove while reading wins: a late read must not bring the image back.
+        if (generation === removals.current) await store.selectImage({ name: result.file.name, bytes });
+      } catch (error) {
+        refuse(error instanceof Error ? error.message : 'The image could not be changed.');
+      } finally {
+        if (intaking.current === store) intaking.current = null;
+      }
+    })();
+  }
+  function dragging(event: DragEvent): DropVerdict | null {
+    const verdict = dragVerdict([...event.dataTransfer.types], event.dataTransfer.items, blocked);
+    if (verdict === 'ignore') return null;
+    // Always copy, so the drop event fires and a refusal can explain itself; the outline shows the verdict.
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    return verdict;
+  }
+  function hover(verdict: DropVerdict): void {
+    setDrop(previous => previous && previous.kind === verdict.kind && (previous.kind === 'accept' || (verdict.kind === 'reject' && previous.reason === verdict.reason)) ? previous : verdict);
+  }
+  const dropHandlers = {
+    onDragEnter(event: DragEvent) { const verdict = dragging(event); if (verdict) { dragDepth.current++; hover(verdict); } },
+    onDragOver(event: DragEvent) { const verdict = dragging(event); if (verdict) hover(verdict); },
+    onDragLeave(event: DragEvent) {
+      if (!event.dataTransfer.types.includes('Files')) return;
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (dragDepth.current === 0) setDrop(null);
+    },
+    onDrop(event: DragEvent) {
+      if (!event.dataTransfer.types.includes('Files')) return;
+      event.preventDefault();
+      const files = [...event.dataTransfer.files];
+      dragDepth.current = 0;
+      setDrop(null);
+      attach(files);
+    },
+  };
   const recovery = recoveryModel(view);
   const showPermissions = permissionState !== undefined && permissionsShown(permissionState);
   // Centre the composer only when nothing else can render in the column; when unsure, keep the normal layout.
@@ -186,7 +253,7 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
       context={{ ...context, updates: paused ? 'paused' : view.connection.kind === 'connected' ? 'connected' : 'reconnecting' }} />
   </div>;
 
-  return <section className="conversation-panel" aria-label="Conversation" data-empty={empty ? 'true' : undefined}>
+  return <section className="conversation-panel" aria-label="Conversation" data-empty={empty ? 'true' : undefined} {...dropHandlers}>
     <header className="visually-hidden"><p className="eyebrow">{agent === 'recorded' ? 'RECORDED CONVERSATION' : 'CONVERSATION'}</p><h1>Your conversation</h1><p className="agent-label">{active.agent.label}</p><p className="scope-label">{active.scope.conversationId}</p></header>
     {active.agent.availability.kind === 'unavailable' && <p role="status">{active.agent.availability.reason} Saved history remains available.</p>}
     {observationStatus?.kind === 'unknown' && <p role="status">Observation status unavailable. Reconnect to check for updates.</p>}
@@ -217,34 +284,32 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
       </div>
     </section>)}
     {permissionState && showPermissions && <ConversationPermissions retained={recovery.retained} state={permissionState} actions={actions} enabled={connected} />}
-    <form className="composer" onSubmit={event => { event.preventDefault(); if (canSend) void actions.submit(() => active.store.send()); }}>
+    <form className="composer" data-drop={drop?.kind} onSubmit={event => { event.preventDefault(); if (canSend) void actions.submit(() => active.store.send()); }}>
+      {drop && <p className="composer-drop-hint" aria-hidden="true">{drop.kind === 'reject' ? drop.reason : image ? `Drop to replace ${image.name}` : 'Drop to attach image'}</p>}
+      {image && <div className="composer-image" aria-label="Attached image">
+        <span>{image.name} · {imageSize(image.byteLength)}</span>
+        <span role="status">{image.status === 'uploading' ? 'Uploading…' : image.status === 'ready' ? 'Ready' : image.status === 'interrupted' ? 'Upload interrupted' : image.reason}</span>
+        {(image.status === 'failed' || image.status === 'interrupted') && <button type="button" disabled={!enabled}
+          onClick={() => imageAction(() => active.store.retryImage())}>Retry</button>}
+        <button type="button" className="composer-image-remove" aria-label="Remove" title="Remove image" disabled={Boolean(storageFailure)}
+          onClick={() => { removals.current++; imageAction(() => active.store.removeImage()); }}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" /></svg></button>
+      </div>}
+      {image && !acceptsImages && <p className="composer-note">{active.agent.imageInput.kind === 'unsupported' ? active.agent.imageInput.reason : 'This agent cannot receive images.'} Remove the image to send.</p>}
+      {imageError?.store === active.store && <p className="composer-note" role="alert">{imageError.message}</p>}
       <label htmlFor="message">Message</label>
       <textarea ref={composer} id="message" value={editor.text} onChange={event => void edit(event.target.value)} readOnly={Boolean(storageFailure)} placeholder={presentation.placeholder} rows={1} />
       {editor.kind === 'failed' && <p role={storageFailure ? 'note' : 'alert'}>Draft not saved. {storageFailure ? 'Copy your text before reloading.' : editor.message}</p>}
-      {(image || acceptsImages) && <div className="composer-attachments">
-        {image && <div className="composer-image" aria-label="Attached image">
-          <span>{image.name} · {imageSize(image.byteLength)}</span>
-          <span role="status">{image.status === 'uploading' ? 'Uploading…' : image.status === 'ready' ? 'Ready' : image.status === 'interrupted' ? 'Upload interrupted' : image.reason}</span>
-          {(image.status === 'failed' || image.status === 'interrupted') && <button type="button" disabled={!enabled}
-            onClick={() => imageAction(() => active.store.retryImage())}>Retry</button>}
-          <button type="button" disabled={Boolean(storageFailure)} onClick={() => imageAction(() => active.store.removeImage())}>Remove</button>
-        </div>}
-        {image && !acceptsImages && <span>{active.agent.imageInput.kind === 'unsupported' ? active.agent.imageInput.reason : 'This agent cannot receive images.'} Remove the image to send.</span>}
+      <div className="composer-footer">
         {acceptsImages && <>
           <input ref={imageInput} type="file" accept="image/png,image/jpeg" aria-label="Image file" hidden onChange={event => {
             const file = event.target.files?.[0];
             event.target.value = '';
-            if (file) imageAction(async () => {
-              if (file.size > IMAGE_MAX_BYTES) throw new Error('Choose an image of at most 4 MB.');
-              await active.store.selectImage({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
-            });
+            if (file) attach([file]);
           }} />
-          <button type="button" disabled={!enabled || Boolean(storageFailure) || image?.status === 'uploading'}
-            onClick={() => imageInput.current?.click()}>{image ? 'Replace image' : 'Add image'}</button>
+          <button type="button" className="composer-setting composer-add" aria-label={image ? 'Replace image' : 'Add image'} title="Add image, or drop a PNG or JPEG"
+            disabled={Boolean(blocked)} onClick={() => imageInput.current?.click()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg></button>
         </>}
-        {imageError?.store === active.store && <p role="alert">{imageError.message}</p>}
-      </div>}
-      <div className="composer-footer">{composerControls?.(enabled && editor.kind === 'saved' && !responding)}<div className="composer-send-actions">
+        {composerControls?.(enabled && editor.kind === 'saved' && !responding)}<div className="composer-send-actions">
         {run && run.kind !== 'ended' && !concluded && <button type="button" className="composer-setting" disabled={!connected || !active.agent.commands.includes('cancel') || stopping} onClick={stop}>{stopping ? 'Stopping…' : 'Stop'}</button>}
         <button className="composer-send" aria-label="Send" disabled={!canSend}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg></button></div>
       </div>

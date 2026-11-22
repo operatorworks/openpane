@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { repository, buildCustom } from '../customization/build/support.mjs';
-import { root, fixture, connected, draft, revealRecovery, customRuntime, wait } from './browser-support.mjs';
+import { root, fixture, connected, tools, chats, draft, revealRecovery, customRuntime, wait } from './browser-support.mjs';
 
 const entry = body => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { ${body} } } })`;
 const override = `function Transcript(context) {
@@ -68,8 +68,8 @@ test('delayed override preserves draft and DOM through activation, descendant fa
   await page.getByLabel('Messages', { exact: true }).waitFor();
   await page.getByRole('alert').filter({ hasText: /Transcript descendant failed|Cleanup rejected/ }).waitFor();
   await wait(() => page.evaluate(() => window.disposals === 1), 'failed override disposal');
-  await page.getByText('Healthy namespace', { exact: true }).waitFor(); await unchanged(page, previous, 'Stable draft');
-  await page.getByRole('button', { name: 'Send sibling', exact: true }).click();
+  await tools(page); await page.getByText('Healthy namespace', { exact: true }).waitFor(); await chats(page); await unchanged(page, previous, 'Stable draft');
+  await tools(page); await page.getByRole('button', { name: 'Send sibling', exact: true }).click(); await chats(page);
   await page.getByRole('heading', { name: 'Approval required', exact: true }).waitFor();
   await revealRecovery(page); await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   await unchanged(page, previous, 'Stable draft');
@@ -89,8 +89,8 @@ test('override getter failure during capture releases only its namespace and pre
   await wait(() => page.evaluate(() => window.disposals === 1), 'getter failure disposal');
   await page.getByLabel('Messages', { exact: true }).waitFor();
   assert.equal(await page.getByText('Uncaptured transcript', { exact: true }).count(), 0);
-  await page.getByText('Healthy namespace', { exact: true }).waitFor(); await unchanged(page, previous, 'Getter failure draft');
-  await page.getByRole('button', { name: 'Send sibling', exact: true }).click();
+  await tools(page); await page.getByText('Healthy namespace', { exact: true }).waitFor(); await chats(page); await unchanged(page, previous, 'Getter failure draft');
+  await tools(page); await page.getByRole('button', { name: 'Send sibling', exact: true }).click(); await chats(page);
   await page.getByRole('heading', { name: 'Approval required', exact: true }).waitFor();
   await unchanged(page, previous, 'Getter failure draft');
   assert.equal((await host.entries()).length, 1);
@@ -119,8 +119,8 @@ test('captured override never rereads extension getters through shell changes, s
   await page.getByRole('button', { name: 'Chats', exact: true }).click();
   await page.getByText('Captured getter transcript', { exact: true }).waitFor();
   await unchanged(page, previous, 'Captured getter draft');
-  await page.getByText('Healthy namespace', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Send sibling', exact: true }).click();
+  await tools(page); await page.getByText('Healthy namespace', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Send sibling', exact: true }).click(); await chats(page);
   await page.getByRole('heading', { name: 'Approval required', exact: true }).waitFor();
   await page.getByText('Captured getter transcript', { exact: true }).waitFor();
   await unchanged(page, previous, 'Captured getter draft'); assert.equal((await host.entries()).length, 1);
@@ -138,11 +138,11 @@ for (const order of [[0, 1], [1, 0]]) test(`conflicts wait for every selected li
     overrides: { transcript() { return <p>Early winner ${index}</p>; } }, dispose() {} }); });`);
   await customRuntime(page, host, pending(0), false, `, { manifest: { ...manifest, namespace: 'alpha' }, ${pending(1)} }`);
   await wait(() => page.evaluate(() => window.finish?.length === 2), 'two pending activations');
-  await page.evaluate(index => window.finish[index](), order[0]); await page.getByText(`Alive ${order[0]}`, { exact: true }).waitFor();
+  await page.evaluate(index => window.finish[index](), order[0]); await tools(page); await page.getByText(`Alive ${order[0]}`, { exact: true }).waitFor(); await chats(page);
   assert.equal(await page.getByText(/Early winner/).count(), 0); await page.getByLabel('Messages', { exact: true }).waitFor();
   await page.evaluate(index => window.finish[index](), order[1]);
   await page.getByRole('alert').filter({ hasText: 'Transcript override conflict. alpha, fixture' }).waitFor();
-  await page.getByText('Alive 0', { exact: true }).waitFor(); await page.getByText('Alive 1', { exact: true }).waitFor();
+  await tools(page); await page.getByText('Alive 0', { exact: true }).waitFor(); await page.getByText('Alive 1', { exact: true }).waitFor(); await chats(page);
   assert.equal(await page.getByText(/Early winner/).count(), 0); await page.getByLabel('Messages', { exact: true }).waitFor();
 });
 
@@ -179,7 +179,8 @@ for (const [label, body] of [
   const { host, page } = await open(t);
   await customRuntime(page, host, entry(body), false, sibling);
   await page.getByRole('alert').filter({ hasText: 'Custom tools could not load.' }).waitFor();
-  await page.getByLabel('Messages', { exact: true }).waitFor(); await page.getByText('Healthy namespace', { exact: true }).waitFor();
+  await page.getByLabel('Messages', { exact: true }).waitFor();
+  await tools(page); await page.getByText('Healthy namespace', { exact: true }).waitFor(); await chats(page);
   assert.equal(await page.evaluate(() => window.disposals), 1);
   await draft(page, 'Invalid override draft'); await page.getByRole('button', { name: 'Send', exact: true }).click();
   await page.getByRole('heading', { name: 'Approval required', exact: true }).waitFor();
@@ -269,19 +270,20 @@ test('nested module and action capture survives author mutation through real she
   };
   return contribution;`));
   await page.getByText('Captured mutation transcript', { exact: true }).waitFor();
-  await page.getByText('Captured child content', { exact: true }).waitFor();
+  await tools(page); await page.getByText('Captured child content', { exact: true }).waitFor(); await chats(page);
   await draft(page, 'Mutation draft'); const previous = await editor(page).elementHandle();
   await page.evaluate(() => window.mutate());
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('heading', { name: 'Settings', exact: true, level: 1 }).waitFor();
   await page.getByRole('button', { name: 'Chats', exact: true }).click();
-  await page.getByText('Captured child content', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Send captured', exact: true }).click();
+  await tools(page); await page.getByText('Captured child content', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Send captured', exact: true }).click(); await chats(page);
   await page.getByRole('heading', { name: 'Approval required', exact: true }).waitFor();
   await page.getByText('Captured mutation transcript', { exact: true }).waitFor();
   await unchanged(page, previous, 'Mutation draft');
   assert.equal((await host.entries()).length, 1);
   assert.equal(await page.getByText(/Changed (root|child|transcript)/).count(), 0);
+  await tools(page); assert.equal(await page.getByText(/Changed (root|child|transcript)/).count(), 0); await chats(page);
   await revealRecovery(page); await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   await wait(() => page.evaluate(() => window.disposals === 1), 'mutated contribution disposal');
   await unchanged(page, previous, 'Mutation draft');

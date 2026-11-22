@@ -22,7 +22,7 @@ const bundle = await build({ stdin: { contents: `import React from 'react';
   const store = createConversationStore({ scope, projection: transcriptProjection, createCommandId: () => '00000000-0000-4000-8000-' + String(++count).padStart(12, '0'),
     drafts: { load: async () => records, async save(next, image) { records = next; for (const id of image?.remove ?? []) saved.delete(id); if (image?.put) saved.set(image.put.selectionId, image.put.bytes); },
       loadImage: async (_, id) => saved.get(id) ?? null },
-    images: { async upload({ name, bytes }) { globalThis.uploadAttempts++; globalThis.uploadedBytes = bytes.byteLength;
+    images: { async upload({ name, bytes }) { globalThis.uploadAttempts++; globalThis.uploadedBytes = bytes.byteLength; if (globalThis.holdUpload) await globalThis.holdUpload;
       if (globalThis.failUpload) throw Object.assign(new Error('Unsupported'), { kind: 'image-unsupported' });
       return { imageId: '00000000-0000-4000-8000-aaaaaaaaaaaa', name, mediaType: 'image/png', byteLength: bytes.byteLength, width: 1, height: 1 }; } },
     port: { scope, receipt: async () => null,
@@ -200,4 +200,53 @@ test('a new conversation is a greeting over one quiet composer', async t => {
   await page.locator('.message-user').waitFor();
   assert.equal(await panel.getAttribute('data-empty'), null);
   assert.equal(await page.getByText('A conversation that stays with you.', { exact: true }).count(), 0);
+});
+
+/** Dispatches a real DataTransfer drag sequence on the panel; `files` are [name, type, byteLength or byte array] triples. */
+async function dragFiles(page, files, { drop = true, text = false } = {}) {
+  return page.evaluate(async ({ files, drop, text }) => {
+    const transfer = new DataTransfer();
+    if (text) transfer.setData('text/plain', 'dragged words');
+    for (const [name, type, content] of files) transfer.items.add(new File([typeof content === 'number' ? new Uint8Array(content) : new Uint8Array(content)], name, { type }));
+    const panel = document.querySelector('.conversation-panel');
+    const fire = type => panel.dispatchEvent(new DragEvent(type, { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    fire('dragenter'); fire('dragover');
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    const over = document.querySelector('.composer').getAttribute('data-drop');
+    if (drop) fire('drop');
+    return over;
+  }, { files, drop, text });
+}
+
+test('dropping images on the conversation attaches one PNG or JPEG and explains every refusal', async t => {
+  const page = await quietConversation(t);
+  const message = page.getByRole('textbox', { name: 'Message', exact: true }), alert = page.locator('.composer [role="alert"]');
+  await message.fill('Keep this caption');
+  assert.equal(await dragFiles(page, [], { text: true, drop: false }), null, 'text drags are left alone');
+  assert.equal(await dragFiles(page, [['anim.gif', 'image/gif', 10]]), 'reject');
+  assert.equal(await alert.textContent(), 'Drop a PNG or JPEG image.');
+  assert.equal(await dragFiles(page, [['a.png', 'image/png', 10], ['b.png', 'image/png', 10]]), 'reject');
+  assert.equal(await alert.textContent(), 'Drop one image at a time.');
+  assert.equal(await dragFiles(page, [['huge.png', 'image/png', 4 * 1024 * 1024 + 1]]), 'accept');
+  assert.equal(await alert.textContent(), 'Choose an image of at most 4 MB.');
+  assert.equal(await page.getByLabel('Attached image').count(), 0);
+  assert.equal(await page.evaluate(() => globalThis.uploadAttempts), 0);
+  await page.evaluate(() => { globalThis.holdUpload = new Promise(resolve => { globalThis.releaseUpload = resolve; }); });
+  assert.equal(await dragFiles(page, [['chart.png', 'image/png', [...png]]]), 'accept');
+  const card = page.getByLabel('Attached image');
+  await card.getByRole('status').filter({ hasText: 'Uploading…' }).waitFor();
+  assert.equal(await page.locator('.composer').getAttribute('data-drop'), null, 'the outline clears on drop');
+  assert.equal(await dragFiles(page, [['second.png', 'image/png', [...png]]]), 'reject');
+  assert.equal(await alert.textContent(), 'Wait for the current upload to finish.');
+  await page.evaluate(() => globalThis.releaseUpload());
+  await card.getByRole('status').filter({ hasText: 'Ready' }).waitFor();
+  assert.match(await card.textContent(), /chart\.png · 70 B/);
+  assert.equal(await page.getByRole('button', { name: 'Replace image', exact: true }).count(), 1);
+  assert.equal(await message.inputValue(), 'Keep this caption');
+  await page.evaluate(() => globalThis.refuseNewImages());
+  assert.equal(await dragFiles(page, [['other.png', 'image/png', [...png]]]), 'reject');
+  assert.equal(await alert.textContent(), 'This model cannot read images.');
+  assert.match(await card.textContent(), /chart\.png/, 'a refused drop keeps the existing image');
+  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await card.waitFor({ state: 'detached' });
 });

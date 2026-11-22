@@ -6,7 +6,7 @@ import { build } from 'esbuild';
 import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { chromium } from 'playwright';
 import { repository, buildCustom } from '../customization/build/support.mjs';
-import { root, fixture, connected, draft, revealRecovery, customRuntime, wait } from './browser-support.mjs';
+import { root, fixture, connected, draft, revealRecovery, customRuntime, wait, tools, chats } from './browser-support.mjs';
 
 const tool = `{ definition: { name: 'echo', description: 'Echo' }, decodeInput: x => x, async execute() { return 'ok'; } }`;
 const entry = body => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '${EXTENSION_SDK_VERSION}', activate({frontendTools}) { ${body} } } })`;
@@ -82,6 +82,7 @@ test('committed tool and module artifact loads in the actual application alongsi
   const host = await fixture(t, join(custom.directory, 'browser')), page = await host.page(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.getByRole('button', { name: 'New recorded conversation' }).click(); await connected(page);
+  // The committed parent claims the content layout, so its modules stay in the conversation column.
   await page.getByRole('button', { name: 'Committed tool module 0', exact: true }).click();
   await page.getByRole('button', { name: 'Committed tool module 1', exact: true }).waitFor();
   await draft(page, 'Keep tool draft'); const previous = await editor(page).elementHandle();
@@ -105,14 +106,16 @@ for (const [label, registration] of [
     resolve({ get modules() { window.moduleReads = (window.moduleReads || 0) + 1; ${label === 'presentation getter' ? "throw new Error('Presentation getter failed');" : 'return [];'} },
       get dispose() { window.disposeReads = (window.disposeReads || 0) + 1; return () => { window.disposals = (window.disposals || 0) + 1; return Promise.reject(new Error('Cleanup rejected')); }; } });
   }; });`), false, sibling);
-  await page.getByText('Healthy namespace', { exact: true }).waitFor();
+  await (await tools(page)).getByText('Healthy namespace', { exact: true }).waitFor();
+  await chats(page);
   await draft(page, 'Keep tool draft'); const previous = await editor(page).elementHandle();
   await page.evaluate(() => window.finish());
   await page.getByRole('alert').filter({ hasText: 'Custom tools could not load.' }).waitFor();
   await wait(() => page.evaluate(() => window.disposals === 1), 'failed activation cleanup');
   assert.deepEqual(await page.evaluate(() => [window.disposeReads, window.moduleReads ?? 0]), [1, label === 'presentation getter' ? 1 : 0]);
   await unchanged(page, previous);
-  await page.getByRole('button', { name: 'Send sibling', exact: true }).click();
+  await (await tools(page)).getByRole('button', { name: 'Send sibling', exact: true }).click();
+  await chats(page);
   await page.getByRole('heading', { name: 'Approval required', exact: true }).waitFor();
   await revealRecovery(page); await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   assert.equal(await page.evaluate(() => window.disposals), 1); await unchanged(page, previous); assert.deepEqual(errors, []);
@@ -135,7 +138,8 @@ for (const [label, registration, modules, message] of [
         return new Promise((resolve, reject) => { window.resolveCleanup = resolve; window.rejectCleanup = () => reject(new Error('Deferred cleanup rejected')); });
       }; } });
   }; });`), false, transcriptSibling);
-  await page.getByText('Healthy namespace', { exact: true }).waitFor();
+  await (await tools(page)).getByText('Healthy namespace', { exact: true }).waitFor();
+  await chats(page);
   await draft(page, 'Keep tool draft'); const previous = await editor(page).elementHandle();
   assert.equal(await page.getByText('Healthy sibling transcript', { exact: true }).count(), 0);
   await page.evaluate(() => window.finish());
@@ -143,9 +147,13 @@ for (const [label, registration, modules, message] of [
   await page.getByRole('alert').filter({ hasText: message }).waitFor();
   await page.getByText('Healthy sibling transcript', { exact: true }).waitFor();
   assert.equal(await page.getByText('Rejected tool module', { exact: true }).count(), 0);
+  await tools(page);
+  assert.equal(await page.getByText('Rejected tool module', { exact: true }).count(), 0);
+  await chats(page);
   assert.deepEqual(await page.evaluate(() => [window.disposeReads, window.moduleReads ?? 0]), [1, label === 'invalid presentation' ? 1 : 0]);
   await unchanged(page, previous);
-  await page.getByRole('button', { name: 'Send sibling', exact: true }).click();
+  await (await tools(page)).getByRole('button', { name: 'Send sibling', exact: true }).click();
+  await chats(page);
   await wait(async () => (await host.entries()).length === 1, 'sibling command during failed cleanup');
   await unchanged(page, previous);
   if (settlement === 'remove then reject') {
@@ -180,7 +188,11 @@ test('late tool activation after disable is never published and rejected retirem
   await draft(page, 'Keep tool draft'); const previous = await editor(page).elementHandle();
   await revealRecovery(page); await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   await page.evaluate(() => window.finish()); await wait(() => page.evaluate(() => window.disposals === 1), 'late tool disposal');
-  assert.equal(await page.getByText('Late tool module').count(), 0); await unchanged(page, previous); assert.deepEqual(errors, []);
+  assert.equal(await page.getByText('Late tool module').count(), 0);
+  await tools(page);
+  assert.equal(await page.getByText('Late tool module').count(), 0);
+  await chats(page);
+  await unchanged(page, previous); assert.deepEqual(errors, []);
 });
 
 test('in-process only: actual hook retains A before a run exists and binds after disable and fresh B activation', { timeout: 45_000 }, async t => {

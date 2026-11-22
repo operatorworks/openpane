@@ -91,8 +91,10 @@ export function extensionRows({ customizations, activations, enabled, metadata }
   });
 }
 
-export function ExtensionsList({ rows, onOpen, enabled }: {
+export function ExtensionsList({ rows, onOpen, enabled, tools = null, conversation = null }: {
   readonly rows: readonly ExtensionRow[]; readonly onOpen: (namespace: string) => void; readonly enabled: boolean;
+  /** Runnable modules for the active conversation; null when no extension contributes any. */
+  readonly tools?: ReactNode | null; readonly conversation?: string | null;
 }) {
   return <section className="extensions-panel" aria-label="Extensions">
     <h1>Extensions</h1>
@@ -110,6 +112,11 @@ export function ExtensionsList({ rows, onOpen, enabled }: {
           </li>;
         })}
       </ul>}
+    {tools != null && <section className="conversation-tools" aria-label="Conversation tools">
+      <h2>Conversation tools</h2>
+      <p>Runs in {conversation}.</p>
+      {tools}
+    </section>}
   </section>;
 }
 

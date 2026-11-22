@@ -65,6 +65,7 @@ function ConversationModules({ modules, active, actions, enabled, agent }: {
   readonly enabled: boolean; readonly agent: string;
 }) {
   const view = useConversation(active.store);
+  if (modules.length === 0) return null;
   const context: ConversationModuleProps = { conversation: active.scope, activity: view.document, commands: actions.commands, permissions: actions.permissions };
   const available = enabled && active.agent.availability.kind === 'ready' && active.agent.commands.includes('send') && view.connection.kind === 'connected' && !conversationResponding(agent, view.document.domain);
   return <fieldset disabled={!available} className="customization-modules">
@@ -74,10 +75,25 @@ function ConversationModules({ modules, active, actions, enabled, agent }: {
   </fieldset>;
 }
 
-export function CustomizationModules({ owner, active, actions, enabled, agent }: {
+/**
+ * Where a namespace's tools render. `status` is the conversation column: only loading and failure notices.
+ * `tools` is the Extensions view: only runnable modules. `all` is a claimed content layout: both.
+ */
+export type ModuleSurface = 'status' | 'tools' | 'all';
+
+export function CustomizationModules({ owner, active, actions, enabled, agent, surface }: {
   readonly owner: NamespaceActivation; readonly active: OpenConversation | null;
   readonly actions: ConversationActions | null; readonly enabled: boolean; readonly agent: string;
+  readonly surface: ModuleSurface;
 }) {
+  const notice = owner.kind === 'loading' || owner.kind === 'failed';
+  const tools = owner.kind === 'ready' && owner.presentation.modules.length > 0;
+  const label = `Customization ${owner.namespace}`;
+  if (surface === 'tools') { if (!tools) return null; }
+  else if (surface === 'status' ? !notice : !notice && !tools) {
+    // Nothing to show, but the activation state stays readable (the customization qualifier checks it): no box, no landmark.
+    return <aside hidden aria-label={label} data-customization-namespace={owner.namespace} data-customization-state={owner.kind} />;
+  }
   return <aside className="customization-panel" aria-label={`Customization ${owner.namespace}`}
     data-customization-namespace={owner.namespace} data-customization-state={owner.kind}>
     {owner.kind === 'loading' && <p role="status">Loading custom tools…</p>}

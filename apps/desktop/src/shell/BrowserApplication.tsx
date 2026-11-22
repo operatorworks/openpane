@@ -1,4 +1,4 @@
-import { useState, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { DesktopShell } from './Shell.js';
 import { HostStatusLabel } from './HostStatusLabel.js';
 import { applicationEnabled } from '../application/application-controller.js';
@@ -8,7 +8,7 @@ import { agentPresentation, conversationPresentation } from '../application/agen
 import '../application/application.css';
 import customization from '../application/customization-selection.js';
 import { useDesktopCustomizations } from '../application/DesktopCustomizations.js';
-import { CustomizationModules } from '../application/CustomizationModules.js';
+import { CustomizationModules, type ModuleSurface } from '../application/CustomizationModules.js';
 import { ConversationSearch } from '../application/ConversationSearch.js';
 import { ComposerAgentControls } from '../application/ComposerAgentControls.js';
 import { continuationAnnouncement } from '../application/continuation-copy.js';
@@ -26,6 +26,18 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   readonly suspended?: boolean;
 }) {
   const { controller, snapshot: app } = useApplication(supplied);
+  useEffect(() => {
+    // The webview receives OS file drops itself; a file dropped anywhere the conversation panel did not handle must
+    // not navigate the window away from the app.
+    const guard = (event: DragEvent) => {
+      if (event.defaultPrevented || !event.dataTransfer?.types.includes('Files')) return;
+      event.preventDefault();
+      if (event.type === 'dragover') event.dataTransfer.dropEffect = 'none';
+    };
+    window.addEventListener('dragover', guard);
+    window.addEventListener('drop', guard);
+    return () => { window.removeEventListener('dragover', guard); window.removeEventListener('drop', guard); };
+  }, []);
   const [selectedView, setSelectedView] = useState<'chats' | 'extensions' | 'settings'>('chats');
   const [selectedExtension, setSelectedExtension] = useState<string | null>(null);
   const [customizationEnabled, setCustomizationEnabled] = useState(true);
@@ -51,8 +63,11 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const runtime = displayedAgent ? ('runtime' in displayedAgent ? displayedAgent.runtime : displayedAgent) : metadata?.compatibility.nativeRuntime ?? null;
   const { agent, presentation } = agentPresentation(runtime);
   const activeActions = app.active ? controller.conversationActions(app.active) : null;
-  const modules = custom.namespaces.map(owner => <CustomizationModules key={owner.namespace} owner={owner}
-    active={app.active} actions={activeActions} enabled={enabled} agent={agent} />);
+  const moduleList = (surface: ModuleSurface) => custom.namespaces.map(owner => <CustomizationModules key={owner.namespace} owner={owner}
+    active={app.active} actions={activeActions} enabled={enabled} agent={agent} surface={surface} />);
+  // Tools leave the conversation column: it keeps load notices, a claimed layout places everything, Extensions runs the rest.
+  const layoutClaimed = custom.contentLayout.kind === 'claimed';
+  const modules = moduleList(layoutClaimed ? 'all' : 'status');
   const customizationsOn = children === undefined && customizationEnabled;
   const rows = extensionRows({ customizations: customization, activations: custom.namespaces, enabled: customizationsOn, metadata });
   const workspaceRow = openableRow(rows.find(row => row.namespace === selectedExtension));
@@ -68,6 +83,12 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
       />
     : null;
   const workspaceConversation = slots.workspace ? activeConversation : null;
+  const toolsEligible = Boolean(app.active) && slots.contentLayout.kind !== 'claimed' &&
+    custom.namespaces.some(owner => owner.kind === 'ready' && owner.presentation.modules.length > 0);
+  const toolsTarget = app.active && toolsEligible ? (() => {
+    const scope = app.active.scope, entry = app.catalog.items.find(item => item.scope.conversationId === scope.conversationId && item.scope.hostId === scope.hostId);
+    return entry ? conversationLabel(entry) : scope.conversationId;
+  })() : null;
   // The footer carries the conversation's disclosure wherever its composer is on screen.
   const composerVisible = Boolean(activeConversation) && ((selectedView === 'chats' && !slots.workspace) || (workspaceOpen && Boolean(slots.workspace)));
   const conversation = !slots.workspace && activeConversation
@@ -95,7 +116,8 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     {workspaceOpen
       ? <ExtensionWorkspace row={workspaceRow} metadata={metadata} workspaces={app.workspaces} active={app.active} controller={controller}
           conversation={workspaceConversation} status={<>{hostAlerts}{creationRecovery}</>} onBack={() => setSelectedExtension(null)} />
-      : <ExtensionsList rows={rows} enabled={!suspended} onOpen={setSelectedExtension} />}
+      : <ExtensionsList rows={rows} enabled={!suspended} onOpen={setSelectedExtension}
+          tools={toolsEligible ? moduleList('tools') : null} conversation={toolsTarget} />}
   </div>;
   const controls = <div className="application-controls">
     <h2 className="sidebar-title">{selectedView === 'chats' ? 'Chats' : selectedView === 'extensions' ? 'Extensions' : 'Settings'}</h2>
@@ -136,7 +158,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   </div>;
   const views = <div className="chat-view" inert={suspended}>
       {conversation}
-      {!app.active && modules}
+      {!app.active && moduleList('status')}
     </div>;
   const settings = <section className="settings-panel" aria-label="Settings" id="connection-settings">
       <h1>Settings</h1>

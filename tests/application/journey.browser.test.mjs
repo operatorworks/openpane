@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { preview } from 'vite';
 import { repository, buildCustom } from '../customization/build/support.mjs';
-import { root, wait, fixture, connected, draft, revealRecovery, customRuntime } from './browser-support.mjs';
+import { root, wait, fixture, connected, draft, revealRecovery, customRuntime, tools, chats } from './browser-support.mjs';
 
 test('desktop connection action opens the host app directly and keeps conversations on return', { timeout: 45_000 }, async t => {
   const host = await fixture(t);
@@ -622,8 +622,11 @@ test('a prepared graph renders both hook modules and shares SDK generation state
   const host = await fixture(t, join(first.directory, 'browser')), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation' }).click();
   await connected(page);
-  await page.getByText('First graph hook').waitFor();
-  await page.getByText('Second graph hook').waitFor();
+  // Module content runs from the Extensions view's conversation tools.
+  const region = await tools(page);
+  await region.getByText('First graph hook').waitFor();
+  await region.getByText('Second graph hook').waitFor();
+  await chats(page);
   await revealRecovery(page);
   await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   await wait(() => page.evaluate(() => window.firstDisposed && window.secondDisposed), 'both graph disposals');
@@ -640,7 +643,8 @@ test('a failed customization leaves its hook-using sibling active and restore di
       dispose() { window.siblingDisposals = (window.siblingDisposals || 0) + 1; } }; } } }) }`;
   await customRuntime(page, host, failure, false, sibling);
   await page.getByRole('alert').filter({ hasText: 'Custom tools could not load.' }).waitFor();
-  await page.getByText('Sibling hook works').waitFor();
+  await (await tools(page)).getByText('Sibling hook works').waitFor();
+  await chats(page);
   await revealRecovery(page);
   await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   await wait(() => page.evaluate(() => window.siblingDisposals === 1), 'sibling disposal');
@@ -701,16 +705,22 @@ test('activation survives navigation and healthy restore disposes once while kee
       return React.createElement('button', { onClick: () => setCount(count + 1) }, 'Custom count ' + count + ' ' + conversation.conversationId);
     } }], dispose() { window.disposals = (window.disposals || 0) + 1; } };
   } } })`);
+  // Module state lives in the Extensions view's conversation tools and survives switching views.
+  await tools(page);
   await page.getByRole('button', { name: `Custom count 0 ${first}`, exact: true }).click();
   await page.getByRole('button', { name: `Custom count 1 ${first}`, exact: true }).waitFor();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Chats', exact: true }).click();
+  await tools(page);
   await page.getByRole('button', { name: `Custom count 1 ${first}`, exact: true }).waitFor();
+  await chats(page);
   await page.getByRole('button', { name: 'New recorded conversation' }).click();
   await wait(async () => await page.locator('.scope-label').textContent() !== first, 'next conversation selected');
   const second = await page.locator('.scope-label').textContent();
+  await tools(page);
   await page.getByRole('button', { name: `Custom count 0 ${second}`, exact: true }).waitFor();
   assert.equal(await page.evaluate(() => window.activations), 1);
+  await chats(page);
   await draft(page, 'Healthy lifetime draft');
   await revealRecovery(page);
   await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
