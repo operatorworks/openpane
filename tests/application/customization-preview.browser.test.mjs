@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -157,9 +157,17 @@ test('preview source policy rejects ambient imports and escaping links without r
   metadata.scripts = { prepare: 'exit 72', build: 'exit 72' };
   await writeFile(file, JSON.stringify(metadata));
   await writeFile(join(directory, 'vite.config.mjs'), "throw new Error('AUTHOR CONFIG MUST NOT EXECUTE');");
+  await mkdir(join(directory, 'node_modules/contained-dependency'), { recursive: true });
+  await writeFile(join(directory, 'node_modules/contained-dependency/package.json'), JSON.stringify({ name: 'contained-dependency', version: '1.0.0', type: 'module', main: 'index.js' }));
+  await writeFile(join(directory, 'node_modules/contained-dependency/index.js'), 'export const value = 7;');
   const running = await preview(t, directory, host);
   const entry = join(running.source, 'desktop/index.tsx');
+  await writeFile(entry, "import { value } from 'contained-dependency'; export default value;\n");
+  const dependency = await running.server.transformRequest(`/@fs${entry}`);
+  assert.match(dependency.code, /node_modules\/contained-dependency\/index\.js/);
+  assert.doesNotMatch(dependency.code, /\.vite\/deps\/contained/);
   await writeFile(entry, "import 'ambient-machine-package'; export default {};\n");
+  running.server.moduleGraph.invalidateAll();
   await assert.rejects(running.server.transformRequest(`/@fs${entry}`), /Unsupported customization import|resolve import/);
   const outside = await mkdtemp(join(tmpdir(), 'openpane-preview-outside-'));
   t.after(() => rm(outside, { recursive: true, force: true }));
