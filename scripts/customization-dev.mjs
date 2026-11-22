@@ -57,8 +57,8 @@ export async function startCustomizationPreview({ source, hostUrl, port }) {
   const config = desktopConfig('browser', mergePlans(bundledPlan(root), external), { development: true });
   const server = await createServer({ ...config, configFile: false, root: join(root, 'apps/desktop'), mode: 'browser', appType: 'custom',
     plugins: [previewRoutes(host, origin), ...config.plugins],
-    // Only installed host ABI dependencies are prebundled. Working-source dependencies must stay visible to the source policy.
-    optimizeDeps: { noDiscovery: true, include: ['react', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-markdown', 'fast-sha256'] },
+    // Only installed browser-host dependencies are prebundled. Working-source dependencies must stay visible to the source policy.
+    optimizeDeps: { noDiscovery: true, include: ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-markdown', 'fast-sha256', '@ag-ui/core', '@cfworker/json-schema', '@tauri-apps/api/core'] },
     server: { ...config.server, port: chosenPort, strictPort: true, hmr: false, ws: false, open: false,
       fs: { allow: [root, ...external.roots] } } });
   try { await server.listen(); }
