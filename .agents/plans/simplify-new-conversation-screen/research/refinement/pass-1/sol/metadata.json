@@ -1,0 +1,30 @@
+{
+  "seat": "sol",
+  "requested_model": "gpt-6.1-sol",
+  "status": "complete",
+  "started_at": "2026-11-22T02:23:13.361734+00:00",
+  "prompt_sha256": "44e9c29fbc64ee863566e59b3187269e8ef3789a18b3f5a5b91a115fd8ef5309",
+  "reported_model": null,
+  "command": [
+    "/opt/homebrew/bin/codex",
+    "--ask-for-approval",
+    "never",
+    "exec",
+    "--ignore-user-config",
+    "--skip-git-repo-check",
+    "--ephemeral",
+    "--sandbox",
+    "read-only",
+    "--model",
+    "gpt-6.1-sol",
+    "-c",
+    "model_reasoning_effort=\"high\"",
+    "--json",
+    "--output-last-message",
+    "/var/folders/3s/_jrxnd6s1tl_lhh2mqtxx1xc0000gn/T/plan-sol-r8sg9vyp/response.md",
+    "-"
+  ],
+  "exit_code": 0,
+  "usage_models": [],
+  "duration_seconds": 176.12
+}

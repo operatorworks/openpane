@@ -81,7 +81,7 @@ test('recovery UI keeps live pending commands distinct from retained unknown int
   await message.fill('Older edit');
   await message.fill('Newest saved edit');
   await page.evaluate(() => { globalThis.edits[1].reject(new Error('Older edit failed')); globalThis.edits[2].resolve(); });
-  await page.waitForFunction(() => [...document.querySelectorAll('button')].find(button => button.textContent === 'Send')?.disabled === false);
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].find(button => button.getAttribute('aria-label') === 'Send')?.disabled === false);
   assert.equal(await message.inputValue(), 'Newest saved edit');
   assert.equal(await page.getByRole('alert').count(), 0);
   await message.fill('Copy this text before reloading');
@@ -135,12 +135,12 @@ test(`${agent} Stop follows the persisted run, guards rapid clicks, preserves dr
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
   if (agent === 'pi') {
     assert.equal(await page.getByPlaceholder('Write to Pi…').count(), 1);
-    assert.match(await page.locator('.composer-footer').textContent(), /Pi · GLM 5.3 · OpenCode Go · Chat only · No tools/);
+    assert.equal(await page.locator('.composer-disclosure').count(), 0);
     assert.equal(await page.getByRole('heading', { name: 'Approval required' }).count(), 0);
   }
   if (agent === 'codex-sdk') {
     assert.equal(await page.getByPlaceholder('Write to Codex…').count(), 1);
-    assert.match(await page.locator('.composer-footer').textContent(), /Codex · GPT-6.1 Sol · ChatGPT subscription · Read-only · No interactive approvals/);
+    assert.equal(await page.locator('.composer-disclosure').count(), 0);
   }
   const send = page.getByRole('button', { name: 'Send', exact: true });
   assert.equal(await send.isDisabled(), true);

@@ -958,6 +958,25 @@ test('permission freshness follows opening, failed commands, reconnect and newer
   assert.equal(f.app.getSnapshot().active.store.getSnapshot().outbox.length, 1);
 });
 
+test('a conversation that does not report permissions stays unsupported across reads and reconnects', async t => {
+  const f = fixture(); t.after(() => f.app.dispose());
+  f.views.set('original-view/host', { ...empty(), route: scope });
+  f.behavior.permissions = async () => ({ kind: 'unsupported', reason: 'This conversation does not report permissions.' });
+  await f.app.start(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.app.getSnapshot().permissionState.kind, 'unsupported');
+  const held = deferred(), kinds = [];
+  const stop = f.app.subscribe(() => kinds.push(f.app.getSnapshot().permissionState.kind));
+  f.behavior.permissions = () => held.promise;
+  const pending = f.app.conversationActions(f.app.getSnapshot().active).permissions.read();
+  held.resolve({ kind: 'unsupported', reason: 'This conversation does not report permissions.' }); await pending;
+  const active = f.app.getSnapshot().active;
+  await active.store.setDraft('A command marks permissions for refresh');
+  await f.app.conversationActions(active).submit(() => active.store.send()).catch(() => {});
+  await f.app.reconnect(); await new Promise(resolve => setImmediate(resolve));
+  stop();
+  assert.deepEqual([...new Set(kinds)], ['unsupported']);
+});
+
 test('permission reads from a disposed session cannot populate its replacement', async t => {
   const f = fixture(); t.after(() => f.app.dispose());
   f.views.set('original-view/host', { ...empty(), route: scope });

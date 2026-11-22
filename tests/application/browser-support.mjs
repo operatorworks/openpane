@@ -64,6 +64,15 @@ export async function fixture(t, assets) {
   };
   return { ...info, directory, browser, page, control, entries, start, stop };
 }
+/** Custom tool modules run from the Extensions view; this shows it and returns the active conversation's tools. */
+export async function tools(page) {
+  await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Extensions', exact: true }).click();
+  return page.getByRole('region', { name: 'Conversation tools', exact: true });
+}
+/** Back to the Chats view, where the conversation and its composer are visible. */
+export async function chats(page) {
+  await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Chats', exact: true }).click();
+}
 export async function connected(page) { await page.getByRole('status').filter({ hasText: 'Conversation connected' }).first().waitFor(); }
 export async function draft(page, text) {
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill(text);

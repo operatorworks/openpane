@@ -10,7 +10,7 @@ import { chromium } from 'playwright';
 import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { crew, crewBackend, crewPresentation } from '../extensions/providers/contracts/crew.ts';
 import { repository, buildCustom, root } from '../customization/build/support.mjs';
-import { connected, draft, wait } from './browser-support.mjs';
+import { connected, draft, wait, tools, chats } from './browser-support.mjs';
 
 const artifact = new URL('../../apps/host/build/tsc/artifact.js', import.meta.url).href;
 registerHooks({ resolve(specifier, context, next) {
@@ -87,7 +87,9 @@ test('committed production browser captures both actual send paths and retains o
       else await route.fulfill({ response });
     } else await route.continue();
   });
-  await page.getByText('Capture activation 1', { exact: true }).waitFor();
+  // The capture fixture's module renders in the Extensions view's conversation tools.
+  await (await tools(page)).getByText('Capture activation 1', { exact: true }).waitFor();
+  await chats(page);
   await draft(page, 'Composer capture'); await page.getByRole('button', { name: 'Send', exact: true }).click();
   await wait(() => f.inputs.length === 1, 'actual composer HTTP input');
   const original = (await records(page)).find(row => row.frontendSends?.length).frontendSends[0];
@@ -114,10 +116,10 @@ test('committed production browser captures both actual send paths and retains o
   await page.getByLabel('Enable customizations', { exact: true }).uncheck();
   assert.deepEqual(await page.evaluate(() => window.captureFixture.disposed), []);
   await page.getByLabel('Enable customizations', { exact: true }).check();
-  await page.getByRole('button', { name: 'Chats', exact: true }).click(); await page.getByText('Capture activation 2', { exact: true }).waitFor();
+  await (await tools(page)).getByText('Capture activation 2', { exact: true }).waitFor(); await chats(page);
   await page.getByRole('button', { name: 'Retry original command', exact: true }).click();
   await wait(() => page.getByRole('button', { name: 'New conversation', exact: true }).isEnabled(), 'original retry settled');
-  await f.create(); await page.getByRole('button', { name: 'Send captured extension message', exact: true }).click();
+  await f.create(); await (await tools(page)).getByRole('button', { name: 'Send captured extension message', exact: true }).click(); await chats(page);
   await wait(() => f.inputs.length === 2, 'actual extension HTTP input');
   const extension = (await records(page)).flatMap(row => row.frontendSends ?? []).find(entry => entry.command.body.text === 'Extension capture');
   assert.notEqual(extension.command.body.frontend.tools[0].activationId, original.command.body.frontend.tools[0].activationId);

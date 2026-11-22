@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { repository, buildCustom } from '../customization/build/support.mjs';
-import { root, fixture, connected, draft, revealRecovery, customRuntime, wait } from './browser-support.mjs';
+import { root, fixture, connected, draft, revealRecovery, customRuntime, wait, tools, chats } from './browser-support.mjs';
 
 const editor = page => page.getByRole('textbox', { name: 'Message', exact: true });
 async function unchanged(page, previous, text) {
@@ -344,7 +344,8 @@ test('layout render failure retains healthy modules and rejected cleanup once', 
   await draft(page, 'Rejected cleanup draft'); const previous = await editor(page).elementHandle();
   await page.getByRole('button', { name: 'Fail layout', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'Layout cleanup rejected' }).waitFor();
-  await page.getByText('Healthy layout sibling', { exact: true }).waitFor();
+  // After the layout fails the default column renders no ready module; the healthy module lives in Extensions.
+  await (await tools(page)).getByText('Healthy layout sibling', { exact: true }).waitFor(); await chats(page);
   assert.equal(await page.evaluate(() => window.disposals), 1); await unchanged(page, previous, 'Rejected cleanup draft');
   await revealRecovery(page); await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   assert.equal(await page.evaluate(() => window.disposals), 1); await unchanged(page, previous, 'Rejected cleanup draft');

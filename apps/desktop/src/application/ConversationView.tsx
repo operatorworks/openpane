@@ -1,14 +1,13 @@
 import { canRetryObservation } from '@openpane/contracts';
 import type { ConversationClosure, ObservationStopReason } from '@openpane/contracts';
-import { IMAGE_MAX_BYTES } from '@openpane/contracts/image';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { useConversation } from '@openpane/client/react';
 import type { ConversationActions, ConversationContinuation, OpenConversation, ConversationObservation, PermissionState } from './application-controller.js';
 import { ContinuationChoices, ContinuationHistory } from './ContinuationNotice.js';
-import { ConversationPermissions } from './ConversationPermissions.js';
+import { ConversationPermissions, permissionsShown } from './ConversationPermissions.js';
 import { CommandRecovery } from './CommandRecovery.js';
 import { recoveryModel } from './recovery.js';
-import { AGENT_PRESENTATION, agentPresentation } from './agent-presentation.js';
+import { AGENT_PRESENTATION, conversationPresentation } from './agent-presentation.js';
 import { conversationResponding } from './responding.js';
 import { FileActivity } from './FileActivity.js';
 import { CommandActivity } from './CommandActivity.js';
@@ -16,6 +15,7 @@ import { AssistantReply } from './AssistantReply.js';
 import { CustomizationActivity, CustomizationTranscript, type ActivitySelection, type ContentLayoutSelection, type TranscriptSelection } from './DesktopCustomizations.js';
 import { CustomizationContent } from './CustomizationContent.js';
 import { ImageAttachmentCard, imageSize } from './ImageAttachmentCard.js';
+import { dragVerdict, intakeFile, type DropVerdict } from './image-intake.js';
 
 const OBSERVATION_NOTICE: Record<ObservationStopReason, string> = {
   'unsupported': 'This provider does not support live updates.',
@@ -44,7 +44,7 @@ export function ConversationStatus({ active }: { readonly active: OpenConversati
   return <span role="status">Conversation {view.connection.kind}{'reason' in view.connection ? ` · ${view.connection.reason}` : ''}</span>;
 }
 
-export function ConversationView({ actions, active, enabled, storageFailure, observation = null, continuation = null, permissionState, agent = 'recorded', composerControls, transcript = { kind: 'default' }, activity = { kind: 'default' }, contentLayout = { kind: 'default' }, modules = null }: {
+export function ConversationView({ actions, active, enabled, storageFailure, observation = null, continuation = null, permissionState, agent = 'recorded', composerControls, transcript = { kind: 'default' }, activity = { kind: 'default' }, contentLayout = { kind: 'default' }, modules = null, customizationNotices = false }: {
   readonly actions: ConversationActions; readonly active: OpenConversation; readonly enabled: boolean; readonly storageFailure: string; readonly agent?: keyof typeof AGENT_PRESENTATION;
   readonly permissionState?: PermissionState;
   readonly observation?: ConversationObservation | null;
@@ -53,9 +53,11 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
   readonly activity?: ActivitySelection;
   readonly contentLayout?: ContentLayoutSelection;
   readonly modules?: ReactNode;
+  /** A customization is loading or failed, so its notice renders in the column. */
+  readonly customizationNotices?: boolean;
   readonly composerControls?: (canSwitch: boolean) => ReactNode;
 }) {
-  const presentation = 'kind' in active.agent ? agentPresentation(active.agent).presentation : AGENT_PRESENTATION[agent];
+  const presentation = conversationPresentation(active.agent, agent);
   const view = useConversation(active.store);
   const [editor, setEditor] = useState<DraftEditor>({ kind: 'saved', text: view.draft });
   const editVersion = useRef(0);
@@ -64,7 +66,39 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
   const [approving, setApproving] = useState<ReadonlySet<string>>(new Set());
   const [stopPending, setStopPending] = useState<typeof stopGuard.current>(null);
   const imageInput = useRef<HTMLInputElement>(null);
+  const intaking = useRef<{ readonly store: OpenConversation['store'] } | null>(null);
+  const hoverExpiry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const removals = useRef(0);
+  const dragDepth = useRef(0);
+  const [drop, setDrop] = useState<DropVerdict | null>(null);
+  useEffect(() => {
+    // dragend fires on the drag source, not on the panel; a cancelled drag must not leave the outline behind.
+    const reset = () => { dragDepth.current = 0; setDrop(null); if (hoverExpiry.current) clearTimeout(hoverExpiry.current); };
+    document.addEventListener('dragend', reset);
+    document.addEventListener('drop', reset);
+    return () => { document.removeEventListener('dragend', reset); document.removeEventListener('drop', reset); if (hoverExpiry.current) clearTimeout(hoverExpiry.current); };
+  }, []);
   const composer = useRef<HTMLTextAreaElement>(null);
+  // The textarea grows with its text; CSS max-height caps it, then it scrolls. A hidden view has no layout, so skip it.
+  function fitComposer(): void {
+    const field = composer.current;
+    if (!field) return;
+    field.style.height = 'auto';
+    if (field.scrollHeight > 0) field.style.height = `${field.scrollHeight}px`;
+    else field.style.height = '';
+  }
+  useEffect(() => {
+    const field = composer.current;
+    if (!field || typeof ResizeObserver === 'undefined') return;
+    let width = field.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (field.clientWidth === width) return;
+      width = field.clientWidth;
+      fitComposer();
+    });
+    observer.observe(field);
+    return () => observer.disconnect();
+  }, []);
   const arrived = continuation?.arrived ?? null;
   useEffect(() => {
     // The click that led here removed its own control; focus the user moved elsewhere is left alone.
@@ -74,6 +108,7 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
   useEffect(() => {
     setEditor(previous => previous.kind === 'saved' && previous.text !== view.draft ? { kind: 'saved', text: view.draft } : previous);
   }, [view.draft]);
+  useLayoutEffect(fitComposer, [editor.text]);
   async function edit(value: string): Promise<void> {
     const version = ++editVersion.current;
     setEditor({ kind: 'saving', text: value });
@@ -131,10 +166,90 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
     setImageError(null);
     void operation().catch((error: unknown) => setImageError({ store, message: error instanceof Error ? error.message : 'The image could not be changed.' }));
   }
+  // Why a new image cannot be attached right now; the same conditions disable "+".
+  const blocked = !acceptsImages ? (active.agent.imageInput.kind === 'unsupported' ? active.agent.imageInput.reason : 'This agent cannot receive images.')
+    : storageFailure ? 'Images can’t be attached while drafts can’t be saved.'
+    : !enabled ? 'Connect to your host to attach an image.'
+    : image?.status === 'uploading' ? 'Wait for the current upload to finish.' : null;
+  /** The one path for picked and dropped files: eligibility, then intake, then the store. */
+  function attach(files: readonly File[]): void {
+    const store = active.store;
+    setImageError(null);
+    const refuse = (message: string) => setImageError({ store, message });
+    if (blocked) return refuse(blocked);
+    if (intaking.current?.store === store) return refuse('Wait for the current image to finish.');
+    const result = intakeFile(files);
+    if (result.kind === 'reject') return refuse(result.reason);
+    const generation = removals.current;
+    // The guard covers only the local file read; once the store has the bytes, its own upload state takes over.
+    const token = { store };
+    intaking.current = token;
+    const release = () => { if (intaking.current === token) intaking.current = null; };
+    void (async () => {
+      try {
+        const bytes = new Uint8Array(await result.file.arrayBuffer());
+        release();
+        // Remove while reading wins: a late read must not bring the image back.
+        if (generation === removals.current) await store.selectImage({ name: result.file.name, bytes });
+      } catch (error) {
+        refuse(error instanceof Error ? error.message : 'The image could not be changed.');
+      } finally {
+        release();
+      }
+    })();
+  }
+  function dragging(event: DragEvent): DropVerdict | null {
+    const verdict = dragVerdict([...event.dataTransfer.types], event.dataTransfer.items, blocked);
+    if (verdict === 'ignore') return null;
+    // Always copy, so the drop event fires and a refusal can explain itself; the outline shows the verdict.
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    return verdict;
+  }
+  function hover(verdict: DropVerdict): void {
+    setDrop(previous => previous && previous.kind === verdict.kind && (previous.kind === 'accept' || (verdict.kind === 'reject' && previous.reason === verdict.reason)) ? previous : verdict);
+  }
+  const dropHandlers = {
+    onDragEnter(event: DragEvent) { const verdict = dragging(event); if (verdict) { dragDepth.current++; hover(verdict); } },
+    onDragOver(event: DragEvent) {
+      const verdict = dragging(event);
+      if (!verdict) return;
+      hover(verdict);
+      // dragover repeats while a drag stays over the panel; when it stops (some webviews send no usable leave), clear.
+      if (hoverExpiry.current) clearTimeout(hoverExpiry.current);
+      hoverExpiry.current = setTimeout(() => { dragDepth.current = 0; setDrop(null); }, 1000);
+    },
+    onDragLeave(event: DragEvent) {
+      if (!event.dataTransfer.types.includes('Files')) return;
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      // A child removed mid-drag never sends its leave; leaving for a node outside the panel ends the hover regardless.
+      const into = event.relatedTarget;
+      if (dragDepth.current === 0 || (into instanceof Node && !event.currentTarget.contains(into))) { dragDepth.current = 0; setDrop(null); }
+    },
+    onDrop(event: DragEvent) {
+      if (!event.dataTransfer.types.includes('Files')) return;
+      event.preventDefault();
+      const files = [...event.dataTransfer.files];
+      dragDepth.current = 0;
+      setDrop(null);
+      attach(files);
+    },
+  };
+  const recovery = recoveryModel(view);
+  const showPermissions = permissionState !== undefined && permissionsShown(permissionState);
+  // Centre the composer only when nothing else can render in the column; when unsure, keep the normal layout.
+  const empty = view.document.domain.messages.length === 0 && !view.document.domain.activities?.length && !continuation?.boundary &&
+    Object.keys(view.document.decisions).length === 0 &&
+    (!observationStatus || observationStatus.kind === 'not-applicable' || observationStatus.kind === 'observing') &&
+    active.agent.availability.kind === 'ready' &&
+    transcript.kind === 'default' && activity.kind === 'default' && contentLayout.kind === 'default' &&
+    recovery.retained.length === 0 && recovery.uncertain.length === 0 && recovery.pending.length === 0 &&
+    !customizationNotices && !showPermissions;
+
   const conversationKey = `${active.viewId}/${active.scope.hostId}/${active.scope.conversationId}`;
   const context = { conversation: active.scope, activity: view.document, commands: actions.commands, permissions: actions.permissions };
   const nativeMessages = <>
-      {view.document.domain.messages.length === 0 && <p className="empty-state">{agent === 'recorded' ? 'Send a message to begin this recorded demonstration.' : 'Send a message to begin.'}</p>}
+      {view.document.domain.messages.length === 0 && !view.document.domain.activities?.length && !continuation?.boundary && <p className="conversation-greeting">A conversation that stays with you.</p>}
       {view.document.domain.messages.map(message => <article className={`message message-${message.role}`} key={message.messageId}>
         <strong>{message.role === 'user' ? 'You' : presentation.assistant}</strong>
         {message.role === 'assistant' ? <AssistantReply text={message.text} /> : message.text && <p>{message.text}</p>}
@@ -152,8 +267,8 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
       context={{ ...context, updates: paused ? 'paused' : view.connection.kind === 'connected' ? 'connected' : 'reconnecting' }} />
   </div>;
 
-  return <section className="conversation-panel" aria-label="Conversation">
-    <header><p className="eyebrow">{agent === 'recorded' ? 'RECORDED CONVERSATION' : 'CONVERSATION'}</p><h1>Your conversation</h1><p className="agent-label">{active.agent.label}</p><p className="scope-label">{active.scope.conversationId}</p></header>
+  return <section className="conversation-panel" aria-label="Conversation" data-empty={empty ? 'true' : undefined} {...dropHandlers}>
+    <header className="visually-hidden"><p className="eyebrow">{agent === 'recorded' ? 'RECORDED CONVERSATION' : 'CONVERSATION'}</p><h1>Your conversation</h1><p className="agent-label">{active.agent.label}</p><p className="scope-label">{active.scope.conversationId}</p></header>
     {active.agent.availability.kind === 'unavailable' && <p role="status">{active.agent.availability.reason} Saved history remains available.</p>}
     {observationStatus?.kind === 'unknown' && <p role="status">Observation status unavailable. Reconnect to check for updates.</p>}
     {observationStatus?.kind === 'recovering' && <p role="status">Resuming provider updates…</p>}
@@ -169,7 +284,6 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
       <p>This conversation ended: {CLOSURE_NOTICE[observationStatus.cause]}. Earlier messages and your draft stay available.</p>
       {continuation && <ContinuationChoices continuation={continuation} actions={actions} enabled={enabled && available} />}
     </div>}
-    {permissionState && <ConversationPermissions retained={recoveryModel(view).retained} state={permissionState} actions={actions} enabled={connected} />}
     <CustomizationContent before={continuation && <ContinuationHistory continuation={continuation} actions={actions} enabled={enabled} assistant={presentation.assistant} />}
       selection={contentLayout} conversationKey={conversationKey} modules={modules} nativeTranscript={nativeTranscript}
       transcript={<CustomizationTranscript selection={transcript} conversationKey={conversationKey}
@@ -183,36 +297,35 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
         {decision.choices.map(choice => <button key={choice} disabled={!connected || !active.agent.commands.includes('approve') || decision.reserved || approving.has(decision.pendingId)} onClick={() => approve(decision.pendingId, choice)}>{decision.choiceLabels?.[choice] ?? (agent === 'codex' && choice === 'accept' ? 'Allow' : agent === 'codex' && choice === 'decline' ? 'Deny' : choice)}</button>)}
       </div>
     </section>)}
-    <form className="composer" onSubmit={event => { event.preventDefault(); if (canSend) void actions.submit(() => active.store.send()); }}>
+    {permissionState && showPermissions && <ConversationPermissions retained={recovery.retained} state={permissionState} actions={actions} enabled={connected} />}
+    <form className="composer" data-drop={drop?.kind} onSubmit={event => { event.preventDefault(); if (canSend) void actions.submit(() => active.store.send()); }}>
+      {drop && <p className="composer-drop-hint" aria-hidden="true">{drop.kind === 'reject' ? drop.reason : image ? `Drop to replace ${image.name}` : 'Drop to attach image'}</p>}
+      {image && <div className="composer-image" aria-label="Attached image">
+        <span>{image.name} · {imageSize(image.byteLength)}</span>
+        <span role="status">{image.status === 'uploading' ? 'Uploading…' : image.status === 'ready' ? 'Ready' : image.status === 'interrupted' ? 'Upload interrupted' : image.reason}</span>
+        {(image.status === 'failed' || image.status === 'interrupted') && <button type="button" disabled={!enabled}
+          onClick={() => imageAction(() => active.store.retryImage())}>Retry</button>}
+        <button type="button" className="composer-image-remove" aria-label="Remove" title="Remove image" disabled={Boolean(storageFailure)}
+          onClick={() => { removals.current++; intaking.current = null; imageAction(() => active.store.removeImage()); }}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" /></svg></button>
+      </div>}
+      {image && !acceptsImages && <p className="composer-note">{active.agent.imageInput.kind === 'unsupported' ? active.agent.imageInput.reason : 'This agent cannot receive images.'} Remove the image to send.</p>}
+      {imageError?.store === active.store && <p className="composer-note" role="alert">{imageError.message}</p>}
       <label htmlFor="message">Message</label>
-      <textarea ref={composer} id="message" value={editor.text} onChange={event => void edit(event.target.value)} readOnly={Boolean(storageFailure)} placeholder={presentation.placeholder} rows={3} />
+      <textarea ref={composer} id="message" value={editor.text} onChange={event => void edit(event.target.value)} readOnly={Boolean(storageFailure)} placeholder={presentation.placeholder} rows={1} />
       {editor.kind === 'failed' && <p role={storageFailure ? 'note' : 'alert'}>Draft not saved. {storageFailure ? 'Copy your text before reloading.' : editor.message}</p>}
-      {(image || acceptsImages) && <div className="composer-attachments">
-        {image && <div className="composer-image" aria-label="Attached image">
-          <span>{image.name} · {imageSize(image.byteLength)}</span>
-          <span role="status">{image.status === 'uploading' ? 'Uploading…' : image.status === 'ready' ? 'Ready' : image.status === 'interrupted' ? 'Upload interrupted' : image.reason}</span>
-          {(image.status === 'failed' || image.status === 'interrupted') && <button type="button" disabled={!enabled}
-            onClick={() => imageAction(() => active.store.retryImage())}>Retry</button>}
-          <button type="button" disabled={Boolean(storageFailure)} onClick={() => imageAction(() => active.store.removeImage())}>Remove</button>
-        </div>}
-        {image && !acceptsImages && <span>{active.agent.imageInput.kind === 'unsupported' ? active.agent.imageInput.reason : 'This agent cannot receive images.'} Remove the image to send.</span>}
+      <div className="composer-footer">
         {acceptsImages && <>
           <input ref={imageInput} type="file" accept="image/png,image/jpeg" aria-label="Image file" hidden onChange={event => {
             const file = event.target.files?.[0];
             event.target.value = '';
-            if (file) imageAction(async () => {
-              if (file.size > IMAGE_MAX_BYTES) throw new Error('Choose an image of at most 4 MB.');
-              await active.store.selectImage({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
-            });
+            if (file) attach([file]);
           }} />
-          <button type="button" disabled={!enabled || Boolean(storageFailure) || image?.status === 'uploading'}
-            onClick={() => imageInput.current?.click()}>{image ? 'Replace image' : 'Add image'}</button>
+          <button type="button" className="composer-setting composer-add" aria-label={image ? 'Replace image' : 'Add image'} title={blocked ?? 'Add image, or drop a PNG or JPEG'}
+            disabled={Boolean(blocked)} onClick={() => imageInput.current?.click()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg></button>
         </>}
-        {imageError?.store === active.store && <p role="alert">{imageError.message}</p>}
-      </div>}
-      <div className="composer-footer">{composerControls?.(enabled && editor.kind === 'saved' && !responding)}<div className="composer-send-actions"><button disabled={!canSend}>Send</button>
-        {run && run.kind !== 'ended' && !concluded && <button type="button" disabled={!connected || !active.agent.commands.includes('cancel') || stopping} onClick={stop}>{stopping ? 'Stopping…' : 'Stop'}</button>}</div>
-      <p className="composer-disclosure">{presentation.footer}</p>
+        {composerControls?.(enabled && editor.kind === 'saved' && !responding)}<div className="composer-send-actions">
+        {run && run.kind !== 'ended' && !concluded && <button type="button" className="composer-setting" disabled={!connected || !active.agent.commands.includes('cancel') || stopping} onClick={stop}>{stopping ? 'Stopping…' : 'Stop'}</button>}
+        <button className="composer-send" aria-label="Send" title="Send" disabled={!canSend}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg></button></div>
       </div>
     </form>
     <CommandRecovery view={view} actions={actions} enabled={enabled} canRetry={available} retry={id => active.store.retry(id)} />

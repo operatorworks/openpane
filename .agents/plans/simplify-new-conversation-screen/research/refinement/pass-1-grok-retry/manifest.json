@@ -1,0 +1,25 @@
+[
+  {
+    "seat": "grok",
+    "requested_model": "grok-4.7-high",
+    "status": "complete",
+    "started_at": "2026-11-22T02:33:21.937584+00:00",
+    "prompt_sha256": "44e9c29fbc64ee863566e59b3187269e8ef3789a18b3f5a5b91a115fd8ef5309",
+    "reported_model": "Grok 4.7 256K High",
+    "command": [
+      "/Users/punk1290/.local/bin/cursor-agent",
+      "--print",
+      "--trust",
+      "--mode",
+      "ask",
+      "--output-format",
+      "stream-json",
+      "--model",
+      "grok-4.7-high",
+      "<prompt>"
+    ],
+    "exit_code": 0,
+    "usage_models": [],
+    "duration_seconds": 1182.77
+  }
+]
