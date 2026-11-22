@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { OutboxEntry } from '@agentui/client';
-import type { ConversationPermission } from '@agentui/contracts';
+import type { OutboxEntry } from '@openpane/client';
+import type { ConversationPermission } from '@openpane/contracts';
 import type { ConversationActions, PermissionState } from './application-controller.js';
+
+/** Hidden when the provider does not report permissions, and while the first read is in progress. */
+export function permissionsShown(state: PermissionState): boolean {
+  return state.kind !== 'unsupported' && !(state.kind === 'loading' && state.listing === null);
+}
 
 export function ConversationPermissions({ state, actions, enabled, retained }: {
   readonly retained: readonly OutboxEntry[];

@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createConversationStore } from '@agentui/client';
-import { createBrowserConnection } from '@agentui/client/service';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { createConversationStore } from '@openpane/client';
+import { createBrowserConnection } from '@openpane/client/service';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { startBrowserHost } from '../../../host/extensions/fixtures.mjs';
 
 export async function until(predicate, message = 'Condition timed out', ms = 5000) {
@@ -17,12 +17,12 @@ export async function until(predicate, message = 'Condition timed out', ms = 500
 }
 
 /**
- * The real browser host, run in process through the same `startBrowserHost` entry `examples/crew/run.mjs` uses, with
+ * The real browser host, run in process through the same `startBrowserHost` entry `extensions/crew/run.mjs` uses, with
  * transient provider extensions. Clients reach it through the same `createBrowserConnection` and
  * `createConversationStore` the desktop application builds in `apps/desktop/src/application`.
  */
 export async function host(t, extensions, { observability, headers = {} } = {}) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-provider-conformance-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-provider-conformance-'));
   let running, port, closed = false;
   const stores = new Set();
   const client = createBrowserConnection({ fetch: (url, init) => fetch(`${running.origin}${url}`,

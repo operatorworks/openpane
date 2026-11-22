@@ -1,7 +1,7 @@
-import { canonicalJson, copyJson, parseProviderBinding, parseRunAuthority, parseScope, sameScope } from '@agentui/contracts';
-import type { ConversationScope, Json, RunAuthority } from '@agentui/contracts';
-import { identifier, record } from '@agentui/contracts/decode';
-import type { CreationIntent, CredentialHandle, ProviderConversation, ProviderInstance } from '@agentui/sdk';
+import { canonicalJson, copyJson, parseProviderBinding, parseRunAuthority, parseScope, sameScope } from '@openpane/contracts';
+import type { ConversationScope, Json, RunAuthority } from '@openpane/contracts';
+import { identifier, record } from '@openpane/contracts/decode';
+import type { CreationIntent, CredentialHandle, ProviderConversation, ProviderInstance } from '@openpane/sdk';
 import type { Installation } from './durable-model.js';
 import { installation } from './native-execution.js';
 
@@ -42,7 +42,7 @@ export function providerInstallation(value: unknown): ProviderInstallation {
   const input = record(value, ['kind', 'contributionId', 'instance', 'agent', 'presentationVersion', 'expectedAuthority']);
   const agent = record(input.agent, ['opaqueId', 'name']);
   if (input.kind !== 'provider' || input.presentationVersion !== 1 ||
-    (input.expectedAuthority !== 'remote-provider' && input.expectedAuthority !== 'agentui-host')) throw new Error('Invalid provider installation');
+    (input.expectedAuthority !== 'remote-provider' && input.expectedAuthority !== 'openpane-host')) throw new Error('Invalid provider installation');
   return { kind: 'provider', contributionId: identifier(input.contributionId), instance: providerIdentity(input.instance),
     agent: { opaqueId: identifier(agent.opaqueId), name: identifier(agent.name) }, presentationVersion: 1, expectedAuthority: input.expectedAuthority };
 }
@@ -70,11 +70,11 @@ export function creationBinding<I extends string>(value: unknown, creation: Crea
   const carrying = Object.hasOwn(record(value), 'carryingTurn');
   const input = record(value, ['kind', 'creation', 'authority', ...(carrying ? ['carryingTurn'] : [])]);
   const original = creationIntent(input.creation, selected, creation.agent.instance), authority = parseRunAuthority(input.authority);
-  if (input.kind !== 'agentui-created' || canonicalJson(original) !== canonicalJson(creation) || authority.kind !== selected.expectedAuthority ||
+  if (input.kind !== 'openpane-created' || canonicalJson(original) !== canonicalJson(creation) || authority.kind !== selected.expectedAuthority ||
     authority.binding.namespace !== selected.instance.namespace || authority.binding.installationId !== selected.instance.installationId ||
-    (authority.kind === 'agentui-host' && authority.hostId !== creation.scope.hostId) ||
+    (authority.kind === 'openpane-host' && authority.hostId !== creation.scope.hostId) ||
     authority.binding.opaqueSessionId === creation.from?.binding.opaqueSessionId || (carrying && !creation.from)) throw new Error('Foreign creation binding');
-  return { kind: 'agentui-created', creation, authority: { ...authority,
+  return { kind: 'openpane-created', creation, authority: { ...authority,
     binding: { ...authority.binding, installationId: creation.agent.instance.installationId } },
     ...(carrying ? { carryingTurn: identifier(input.carryingTurn) } : {}) };
 }

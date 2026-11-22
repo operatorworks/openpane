@@ -1,15 +1,17 @@
+import { parseCatalogFilter } from '@openpane/contracts/service';
+import type { CatalogFilter } from '@openpane/contracts/service';
 import { randomUUID } from 'node:crypto';
 import { assertFrontendSendActor, FrontendAccessError } from './frontend-sends.js';
 import type { FrontendSendActor } from './frontend-sends.js';
-import type { FrontendBinding, FrontendBindingRequest } from '@agentui/contracts';
+import type { FrontendBinding, FrontendBindingRequest } from '@openpane/contracts';
 import type { FrontendToolProducer } from './frontend-tools/index.js';
-import type { ImageAttachment, ImageId, ImageInputCapability, UploadId } from '@agentui/contracts/image';
+import type { ImageAttachment, ImageId, ImageInputCapability, UploadId } from '@openpane/contracts/image';
 import { observationFailure } from './provider-stream.js';
 import type { ProviderStream } from './provider-stream.js';
-import { canRetryObservation, canonicalJson, CORE_CATALOG_PAGE, parseCommand, parseScope, sameScope } from '@agentui/contracts';
-import { identifier } from '@agentui/contracts/decode';
-import type { OutputId, OutputListing, OutputRead, OutputFailure, ConversationClosure, ConversationPermissions, ConversationPort, ConversationScope, ContinuationRefusal, Projection, Receipt, Snapshot, ProviderObservationStatus } from '@agentui/contracts';
-import type { ContinuationAction, ContinuationView } from '@agentui/contracts/service';
+import { canRetryObservation, canonicalJson, CORE_CATALOG_PAGE, parseCommand, parseScope, sameScope } from '@openpane/contracts';
+import { identifier } from '@openpane/contracts/decode';
+import type { OutputId, OutputListing, OutputRead, OutputFailure, ConversationClosure, ConversationPermissions, ConversationPort, ConversationScope, ContinuationRefusal, Projection, Receipt, Snapshot, ProviderObservationStatus } from '@openpane/contracts';
+import type { ContinuationAction, ContinuationView } from '@openpane/contracts/service';
 import { budgets, commandKey, isOffered, sendBlock } from './durable-model.js';
 import { nonempty } from './codec.js';
 import { installation, dispatchNative, reconcileNative } from './native-execution.js';
@@ -51,7 +53,9 @@ export interface LocalHost<E, P> {
   observeProvider(scope: ConversationScope): Promise<void>;
   observationStatus(scope: ConversationScope): ProviderObservationStatus;
   retryObservation(scope: ConversationScope): Promise<ProviderObservationStatus>;
-  listConversations(hostId: string, after: string | null, limit: number): readonly ConversationScope[];
+  /** Lists each continuation chain once, through its newest segment; `everySegment` also lists the earlier segments.
+   * A catalog filter narrows the same read to one namespace or one provider agent. */
+  listConversations(hostId: string, after: string | null, limit: number, listing?: { readonly everySegment?: boolean } | CatalogFilter | undefined): readonly ConversationScope[];
   installation(scope: ConversationScope): ConversationInstallation | null;
   inspect(scope: ConversationScope): { readonly installation: ConversationInstallation; readonly snapshot: Snapshot<P> };
   append(scope: ConversationScope, output: HostOutput<E>): void;
@@ -401,11 +405,13 @@ export function openLocalHost<E, P>(options: LocalHostOptions<E, P>): LocalHost<
     },
     installation(scope) { return store.findInstallation(authorized(scope)); },
     inspect(scope) { return store.inspect(authorized(scope)); },
-    listConversations(hostId: string, after: string | null, limit: number): readonly ConversationScope[] {
+    listConversations(hostId: string, after: string | null, limit: number, listing?: { readonly everySegment?: boolean } | CatalogFilter | undefined): readonly ConversationScope[] {
       const hostIdValue = identifier(hostId), cursor = after === null ? null : identifier(after);
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > CORE_CATALOG_PAGE) throw new Error('Invalid catalog limit');
       if (closed) throw new Error('Host is closed');
-      return store.listConversations(hostIdValue, cursor, limit).map(scope => {
+      const everySegment = listing !== undefined && 'everySegment' in listing && listing.everySegment === true;
+      const filter = listing !== undefined && 'kind' in listing ? parseCatalogFilter(listing) : undefined;
+      return store.listConversations(hostIdValue, cursor, limit, everySegment, filter).map(scope => {
         if (!options.authorize(scope)) throw new Error('Unauthorized scope');
         return scope;
       });

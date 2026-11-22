@@ -1,8 +1,8 @@
 import { codexSdkInstallation } from './native-installations.js';
-import type { ConversationScope } from '@agentui/contracts';
-import type { TranscriptEvent } from '@agentui/contracts/conversation';
-import { CODEX_SDK_MODEL } from '@agentui/contracts/compatibility';
-import { createCodexRuntime } from '@agentui/switchboard-codex/codex';
+import type { ConversationScope } from '@openpane/contracts';
+import type { TranscriptEvent } from '@openpane/contracts/conversation';
+import { CODEX_SDK_MODEL } from '@openpane/contracts/compatibility';
+import { createCodexRuntime } from '@openpane/switchboard-codex/codex';
 import type { HostOutput } from './durable-model.js';
 import { createSdkChatDriver } from './sdk-chat-driver.js';
 
@@ -23,5 +23,5 @@ export function createCodexSdkDriver(options: CodexSdkDriverOptions) {
   });
   return createSdkChatDriver({ ...options, runtime, installation, source: 'codex-sdk', displayName: 'Codex',
     readinessFailure: 'Codex is unavailable. Check CLI version and ChatGPT login, then restart this host.',
-    warningCode: 'AGENTUI_CODEX_SDK_STORAGE' });
+    warningCode: 'OPENPANE_CODEX_SDK_STORAGE' });
 }

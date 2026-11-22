@@ -1,6 +1,6 @@
-import { CLAUDE_SDK_CHAT_LABELS, CLAUDE_SDK_RUNTIMES, CODEX_SDK_CHAT_LABEL, PI_CHAT_LABEL } from '@agentui/contracts/compatibility';
-import type { AgentDescriptor } from '@agentui/contracts/service';
-import type { NativeRuntimeIdentity } from '@agentui/contracts/compatibility';
+import { CLAUDE_SDK_CHAT_LABELS, CLAUDE_SDK_RUNTIMES, CODEX_SDK_CHAT_LABEL, PI_CHAT_LABEL } from '@openpane/contracts/compatibility';
+import type { AgentDescriptor } from '@openpane/contracts/service';
+import type { NativeRuntimeIdentity } from '@openpane/contracts/compatibility';
 
 const savedConversations = 'The local host manages your saved conversations and approvals.';
 export const AGENT_PRESENTATION = {
@@ -44,6 +44,11 @@ export const AGENT_PRESENTATION = {
 };
 export type Agent = keyof typeof AGENT_PRESENTATION;
 
+/** The presentation one open conversation uses; the composer and the shell footer must agree on it. */
+export function conversationPresentation(agent: AgentDescriptor, fallback: Agent) {
+  return 'kind' in agent ? agentPresentation(agent).presentation : AGENT_PRESENTATION[fallback];
+}
+
 export function agentPresentation(runtime: NativeRuntimeIdentity | Extract<AgentDescriptor, { kind: 'provider' }> | null) {
   if (runtime && 'kind' in runtime) return { agent: 'provider' as const, presentation: {
     ...AGENT_PRESENTATION.provider, assistant: runtime.label, hostLabel: runtime.label,
@@ -61,7 +66,7 @@ export function agentPresentation(runtime: NativeRuntimeIdentity | Extract<Agent
         : runtime.format === CLAUDE_SDK_RUNTIMES.sonnet.format ? 'claude-sdk-sonnet' : 'local';
       break;
     case 'pi': agent = 'pi'; break;
-    case 'agentui-recorded': agent = 'recorded'; break;
+    case 'openpane-recorded': agent = 'recorded'; break;
     default: agent = 'local';
   }
   const presentation = AGENT_PRESENTATION[agent];

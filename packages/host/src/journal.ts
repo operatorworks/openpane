@@ -1,4 +1,4 @@
-import type { ConversationScope, Feed, FeedEnd, FeedItem } from '@agentui/contracts';
+import type { ConversationScope, Feed, FeedEnd, FeedItem } from '@openpane/contracts';
 import type { SqliteStore } from './sqlite-store.js';
 
 export class Journal<E, P> {

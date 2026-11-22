@@ -1,25 +1,25 @@
 # Architecture boundaries
 
-AgentUI owns conversation coordination and customization deployment. It consumes native harness interfaces from Switchboard and keeps its extension SDK separate.
+OpenPane owns conversation coordination and customization deployment. It consumes native harness interfaces from Switchboard and keeps its extension SDK separate.
 
 ## Package ownership
 
 | Package | Responsibility | Type environment |
 | --- | --- | --- |
-| `@agentui/contracts` | Conversation scope, provider identity, run authority | ES2023 only |
-| `@agentui/protocol` | Published AG-UI SDK types, construction enum and availability declarations | ES2023 only |
-| `@agentui/sdk` | Full-trust extension manifests and public backend provider contracts | ES2023 only |
-| `@agentui/sdk/react` | Conversation-scoped React module contracts | React, without DOM |
-| `@agentui/theme` | Semantic tokens and inherited theme resolution | ES2023 only |
-| `@agentui/theme/react` | Shared theme context | React, without DOM |
-| `@agentui/ui-primitives/desktop` | DOM controls and system theme scope | React and DOM |
-| `@agentui/ui-primitives/native` | React Native controls | React Native, without DOM |
-| `@agentui/host` | Public Switchboard consumption boundary | Node |
-| `@agentui/host/frontend-tools` | Durable frontend-call coordination on an existing local host handle | Node, without DOM |
-| `@agentui/host/agui` | Installed Switchboard AG-UI projection consumer | Node |
-| `@agentui/adapter-tests` | Downstream package and boundary checks | Node |
-| `@agentui/desktop` | Tauri client entry contracts | React and DOM |
-| `@agentui/ios` | React Native client entry contracts | React Native, without DOM |
+| `@openpane/contracts` | Conversation scope, provider identity, run authority | ES2023 only |
+| `@openpane/protocol` | Published AG-UI SDK types, construction enum and availability declarations | ES2023 only |
+| `@openpane/sdk` | Full-trust extension manifests and public backend provider contracts | ES2023 only |
+| `@openpane/sdk/react` | Conversation-scoped React module contracts | React, without DOM |
+| `@openpane/theme` | Semantic tokens and inherited theme resolution | ES2023 only |
+| `@openpane/theme/react` | Shared theme context | React, without DOM |
+| `@openpane/ui-primitives/desktop` | DOM controls and system theme scope | React and DOM |
+| `@openpane/ui-primitives/native` | React Native controls | React Native, without DOM |
+| `@openpane/host` | Public Switchboard consumption boundary | Node |
+| `@openpane/host/frontend-tools` | Durable frontend-call coordination on an existing local host handle | Node, without DOM |
+| `@openpane/host/agui` | Installed Switchboard AG-UI projection consumer | Node |
+| `@openpane/adapter-tests` | Downstream package and boundary checks | Node |
+| `@openpane/desktop` | Tauri client entry contracts | React and DOM |
+| `@openpane/ios` | React Native client entry contracts | React Native, without DOM |
 
 The desktop app mounts an app-owned React shell in Tauri. Its public compilation contracts remain in `src/index.ts`. The iOS app entry remains a compilation probe.
 Modules import the platform primitive package directly; the app entries do not re-export it.
@@ -40,7 +40,7 @@ The [versioned conformance matrix](../protocol/README.md) names installed fixtur
 and pending consumers. Transport, replay and product UI consumption remain separate work.
 No adapter implementation or agent loop is copied here.
 
-`@agentui/protocol` exports published SDK types and the SDK's `EventType` construction enum.
+`@openpane/protocol` exports published SDK types and the SDK's `EventType` construction enum.
 Runtime wire validation remains separate from TypeScript assignment checks.
 
 ## Run ownership
@@ -51,20 +51,21 @@ There is no shared global active conversation.
 
 Each run records one authority.
 The authority carries the run's single provider binding, so it cannot disagree with a second session identity.
-An AgentUI-hosted run names the executing host, including hosts reached over SSH.
+An OpenPane-hosted run names the executing host, including hosts reached over SSH.
 That host persists intent, receipts, ordered events, pending decisions, and uncertain outcomes independently of client connections.
 The connecting Mac stores routing references and does not become a second run authority.
 The Mac owns its local conversations and desired customization commit.
 The launcher supervises its Node host for the client session. Closing the app or stopping the launcher ends that session. Durable host data survives relaunch.
 
 For a remote provider run, the remote service owns execution and approvals.
-AgentUI persists local command intent and observations.
+OpenPane persists local command intent and observations.
 A local receipt does not establish exactly-once execution.
 Lost acknowledgement must preserve uncertainty and block automatic retry until reconciliation.
 This foundation models ownership without implementing storage or dispatch.
 
 Provider bindings name a namespace, existing installation, and opaque session.
-Only AgentUI-created conversations are exposed in v1.
+Only OpenPane-created conversations are exposed in v1.
+A continued conversation is one of them: OpenPane creates it through its predecessor's confirmed binding when the user chooses Continue. Its provider may carry earlier turns into it, but OpenPane still lists no conversation it did not create.
 Native discovery does not expand history scope.
 
 ## Extension ownership
@@ -73,8 +74,8 @@ The SDK declares full-trust server, desktop, and iOS entries.
 React module props carry conversation scope, activity snapshots, and model-neutral commands.
 The shell retains recovery and compatibility controls.
 
-Pets, MCP control, and Crew are the three planned example extensions.
-Crew transport, authentication, and cursors belong in `examples/crew` when implemented.
+In-repo extensions live in the top-level `extensions/` directory: [`extensions/crew`](../extensions/crew.md) and [`extensions/coworkers`](../extensions/coworkers.md). Service-specific code (transport, authentication, cursors, operations and workspace views) lives there and nowhere else.
+Core stays generic: `apps`, `packages`, `scripts` and `templates` name no service. The boundary test `tests/extensions/providers/conformance/boundaries.test.mjs` enforces this for Crew and Coworkers (`crew`, `coworker` and `crabber`), and new core code must follow the same rule for every service.
 Core host code uses generic provider identities.
 The SDK exports [backend provider contracts](provider-contracts.md) and [extension authoring contracts](extension-sdk.md).
 Typed frontend-tool registration is a contract only. Provider lifecycle runtime, frontend-tool registration runtime, and frontend-tool delivery remain downstream tasks.
@@ -100,7 +101,7 @@ The host consumes a [verified tarball from an immutable commit](../../vendor/REA
 Neither sibling checkout changes nor upstream main changes affect installation.
 The [host integration](switchboard-integration.md) qualifies package and controlled
 continuation consumption. Native adapters and live providers remain unqualified.
-Available library mappings do not qualify AgentUI transport, replay or UI behavior.
+Available library mappings do not qualify OpenPane transport, replay or UI behavior.
 
 SQLite through Node's builtin module is the first storage candidate.
 It offers local transactions for host coordination.

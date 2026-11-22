@@ -15,9 +15,12 @@ const grep = (...args) => {
 
 // Lexical: a Crew-shaped branch that never names Crew passes. Vendored `.tgz` archives are opaque to git grep and out
 // of scope; their declared dependencies are still covered through package-lock.json.
-test('core apps, packages, scripts and templates carry no Crew reference and the repository carries no OpenBot code or dependency', () => {
-  assert.equal(grep('crew', '--', 'apps', 'packages', 'scripts', 'templates',
-    ':(exclude)packages/adapter-tests/tests/types.test.mjs'), '');
+test('core apps, packages, scripts and templates name no bundled service and the repository carries no OpenBot code or dependency', () => {
+  // Core names no service (docs/architecture/boundaries.md); each bundled extension's service stays under extensions/.
+  for (const service of ['crew', 'coworker', 'crabber']) {
+    assert.equal(grep(service, '--', 'apps', 'packages', 'scripts', 'templates',
+      ':(exclude)packages/adapter-tests/tests/types.test.mjs'), '', service);
+  }
   assert.match(grep('crew', '--', 'packages/adapter-tests/tests/types.test.mjs'), /example\.crew/, 'the search finds the one excluded fixture');
   assert.equal(grep('openbot', '--', '.', ':(exclude)docs/extensions/provider-contract.md',
     ':(exclude)tests/extensions/providers/conformance/boundaries.test.mjs'), '');
@@ -37,7 +40,7 @@ for (const row of providers) test(`${row.name}: provider traffic carries no coll
   const prompt = 'PRIVATE_PROMPT_CANARY_7c1e', reply = 'PRIVATE_REPLY_CANARY_0b9a';
   const f = await host(t, [subject.extension()], {
     observability: { kind: 'otlp', endpoint: `${collector.endpoint}/v1/traces`, headers: { 'x-collector-token': collectorToken },
-      serviceName: 'agentui-provider-conformance', datadogLlmObservability: false },
+      serviceName: 'openpane-provider-conformance', datadogLlmObservability: false },
     headers: { traceparent: `00-${traceId}-${parentId}-01`, tracestate: `vendor=${parentId}`, baggage: `private=${collectorToken}`,
       'x-collector-token': collectorToken },
   });
@@ -54,10 +57,10 @@ for (const row of providers) test(`${row.name}: provider traffic carries no coll
   await until(() => collector.received.length > 0, 'spans exported');
   const spans = collector.received.flatMap(request => request.body.resourceSpans.flatMap(resource => resource.scopeSpans.flatMap(scope => scope.spans)));
   assert.ok(spans.length > 0);
-  assert.deepEqual([...new Set(spans.map(span => span.name))], ['agentui.host.request'], 'no AgentUI agent span is synthesized for a remote run');
+  assert.deepEqual([...new Set(spans.map(span => span.name))], ['openpane.host.request'], 'no OpenPane agent span is synthesized for a remote run');
   assert.ok(spans.every(span => !span.parentSpanId && span.traceId !== traceId), 'incoming trace context is not adopted');
   const exported = collector.received.map(request => request.body);
-  assert.throws(() => assertPrivateValuesAbsent(exported, ['agentui-provider-conformance']), /Private value leaked/,
+  assert.throws(() => assertPrivateValuesAbsent(exported, ['openpane-provider-conformance']), /Private value leaked/,
     'the canary search finds a value that is exported');
   assertPrivateValuesAbsent(exported, [prompt, reply, collectorToken, ...subject.secrets]);
 });
@@ -76,11 +79,11 @@ test('the generic MCP read example inspects both providers through the host cont
   const effects = conversations.map(({ subject }) => subject.effects()), traffic = conversations.map(({ subject }) => subject.traffic.length);
   const mcp = await connect(t, f.running.origin);
   const call = (name, args = {}) => mcp.client.callTool({ name, arguments: args });
-  const agents = data(await call('agentui_agents')).agents.filter(agent => agent.kind === 'provider');
+  const agents = data(await call('openpane_agents')).agents.filter(agent => agent.kind === 'provider');
   assert.deepEqual(agents.map(agent => [agent.namespace, agent.availability.kind, agent.commands]).toSorted(),
     [['crew', 'ready', ['send', 'cancel', 'approve']], ['ledger', 'ready', ['send', 'cancel', 'approve']]]);
   for (const { scope } of conversations) {
-    const inspected = data(await call('agentui_inspect', { conversationId: scope.conversationId }));
+    const inspected = data(await call('openpane_inspect', { conversationId: scope.conversationId }));
     assert.equal(inspected.currentRun.kind, 'ended');
     assert.equal(inspected.currentRun.outcome, 'completed');
     assert.equal(Object.values(inspected.receipts).length, 1);

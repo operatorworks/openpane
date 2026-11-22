@@ -1,8 +1,8 @@
 # Pi text-chat integration
 
-AgentUI uses the public `./pi` entrypoint of the commit-pinned Switchboard
+OpenPane uses the public `./pi` entrypoint of the commit-pinned Switchboard
 package recorded in [the Pi pin](../../../vendor/switchboard-pi.json).
-The host installs it through the local `@agentui/switchboard-pi` alias.
+The host installs it through the local `@openpane/switchboard-pi` alias.
 The historical core and AG-UI dependency pins remain separate.
 
 This bounded route uses Pi SDK 1.5.2, provider `opencode-go`, and full model
@@ -16,9 +16,9 @@ Switchboard owns SDK initialization, credential injection, native journals,
 strict reopening, one-writer reservations within the process, prompt admission,
 stream normalization, cancellation and cleanup. Its native compiler project
 isolates known upstream declaration defects. Public declarations expose no
-native SDK types. AgentUI and Switchboard core keep strict checking.
+native SDK types. OpenPane and Switchboard core keep strict checking.
 
-AgentUI owns authorization, durable command admission, exact-command
+OpenPane owns authorization, durable command admission, exact-command
 retry behavior, transcript persistence, replay and crash recovery. It only
 reopens session references saved for its own conversations. A native reference
 is recorded only after its journal exists. A failure before persistence leaves
@@ -56,6 +56,6 @@ shutdown. `pi-startup.test.mjs` checks browser and native endpoints.
 The broader Pi graph remains open. External-session discovery, native
 extensions, tool approvals, LiteLLM routing, credential renewal, AG-UI native
 qualification and cross-process writer coordination are outside this route.
-The host's private-directory ownership lock prevents two AgentUI host processes
+The host's private-directory ownership lock prevents two OpenPane host processes
 from sharing its journal directory. Switchboard's process-local reservations
 alone do not coordinate independent processes.

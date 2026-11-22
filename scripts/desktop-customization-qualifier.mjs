@@ -39,7 +39,8 @@ export async function qualifyDesktopArtifact({ files, namespaces }) {
       namespace: node.getAttribute('data-customization-namespace'), state: node.getAttribute('data-customization-state'), text: node.textContent,
     })));
     const actual = panels.map(panel => panel.namespace);
-    if (JSON.stringify(actual) !== JSON.stringify(namespaces)) throw new Error(`Customization qualification mismatch: expected ${JSON.stringify(namespaces)}, got ${JSON.stringify(actual)}`);
+    const expected = [...namespaces].sort();
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`Customization qualification mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
     const failed = panels.filter(panel => panel.state !== 'ready');
     if (failed.length) throw new Error(`Desktop customization activation failed: ${failed.map(panel => `${panel.namespace}: ${panel.text}`).join('; ')}`);
     await page.goto(`${base}/index.html`, { waitUntil: 'load', timeout: 5000 });

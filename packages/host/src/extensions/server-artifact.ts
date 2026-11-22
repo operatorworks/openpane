@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { registerHooks } from 'node:module';
-import { checkExtensionEntrypoint } from '@agentui/sdk';
+import { checkExtensionEntrypoint } from '@openpane/sdk';
 import { serverCatalog } from '../customization/server-artifact.js';
 import { classifyHostSpecifier } from '../customization/server-artifact-policy.js';
 import type { VerifiedServerCustomizationArtifact } from '../customization/server-artifact.js';
-import type { ExtensionManifest, ServerExtensionEntry } from '@agentui/sdk';
+import type { ExtensionManifest, ServerExtensionEntry } from '@openpane/sdk';
 import type { LoadedServerEntry } from './loader.js';
 
 function isServerEntry(manifest: ExtensionManifest, entry: unknown): entry is ServerExtensionEntry {
@@ -12,9 +12,9 @@ function isServerEntry(manifest: ExtensionManifest, entry: unknown): entry is Se
 }
 
 export async function loadServerArtifact(verified: VerifiedServerCustomizationArtifact, sdk: string): Promise<readonly LoadedServerEntry[]> {
-  const prefix = `agentui-server://${randomUUID()}/`;
+  const prefix = `openpane-server://${randomUUID()}/`;
   const assets = new Map(verified.manifest.assets.map(asset => [new URL(asset.path, prefix).href, verified.readAsset(asset.path)]));
-  const imports = { '@agentui/sdk': sdk };
+  const imports = { '@openpane/sdk': sdk };
   const unsupported = () => new Error('Unsupported server artifact import');
   const hooks = registerHooks({
     resolve(specifier, context, next) {

@@ -1,10 +1,10 @@
-import { canonicalJson } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { createProviderRegistry } from '@agentui/host';
-import { frontendToolsFor } from '@agentui/host/frontend-tools';
+import { createProviderRegistry } from '@openpane/host';
+import { frontendToolsFor } from '@openpane/host/frontend-tools';
 import { fixture as hostFixture, scope as hostScope } from '../host/fixture.mjs';
 import { fixture, create, send, unavailable, offered, aguiExtension } from './provider-send-fixture.mjs';
 

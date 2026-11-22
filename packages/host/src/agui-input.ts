@@ -1,7 +1,7 @@
 import { RunAgentInputSchema, ToolSchema } from '@ag-ui/core/schemas';
-import { canonicalJson, copyJson } from '@agentui/contracts';
-import type { FrontendOffer, Json } from '@agentui/contracts';
-import { identifier, record } from '@agentui/contracts/decode';
+import { canonicalJson, copyJson } from '@openpane/contracts';
+import type { FrontendOffer, Json } from '@openpane/contracts';
+import { identifier, record } from '@openpane/contracts/decode';
 
 export function aguiInput(value: unknown): ReturnType<typeof RunAgentInputSchema.parse> {
   const parsed = RunAgentInputSchema.parse(value);

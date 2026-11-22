@@ -102,7 +102,7 @@ test('actual SDK stdio exits nonzero within bound after separate-group pipe hold
   adapter.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'cleanup-verdict-proof', version: '1' } } }) + '\n');
   await until(() => stdout.includes('"id":1'));
   adapter.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n'
-    + JSON.stringify({ jsonrpc: '2.0', id: 'original-rpc', method: 'tools/call', params: { name: 'agentui_refresh', arguments: { operation: input } } }) + '\n');
+    + JSON.stringify({ jsonrpc: '2.0', id: 'original-rpc', method: 'tools/call', params: { name: 'openpane_refresh', arguments: { operation: input } } }) + '\n');
   const { original, holder } = await f.observe();
   const started = Date.now();
   process.kill(original.pid, 'SIGKILL');

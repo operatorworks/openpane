@@ -1,15 +1,16 @@
+import type { CatalogFilter } from '@openpane/contracts/service';
 import type { createFrontendCoordinator } from './frontend-tools/coordinator.js';
 import type { FrontendCoordinatorWriter } from './frontend-tools/coordinator.js';
 import type { FrontendObservations, PreparedProviderObservations } from './frontend-observations.js';
 import { migrateFrontendObservations } from './sqlite-frontend-observations.js';
 import { migrateProviderCreations } from './sqlite-provider-creations.js';
 import type { ProviderObservations } from './provider-observations.js';
-import type { AguiOriginalRun } from '@agentui/sdk';
+import type { AguiOriginalRun } from '@openpane/sdk';
 import { FrontendSends, FrontendAccessError } from './frontend-sends.js';
 import type { FrontendSendActor } from './frontend-sends.js';
-import { identifier } from '@agentui/contracts/decode';
-import { parseImageId, parseUploadId } from '@agentui/contracts/image';
-import type { ImageId, ImageInputCapability, UploadId } from '@agentui/contracts/image';
+import { identifier } from '@openpane/contracts/decode';
+import { parseImageId, parseUploadId } from '@openpane/contracts/image';
+import type { ImageId, ImageInputCapability, UploadId } from '@openpane/contracts/image';
 import { verifyImageUpload } from './image-input.js';
 import { hasImage, insertImage, migrateImages, readImage } from './sqlite-images.js';
 import { providerCheckpoint, providerDecision, visibleProviderDecision } from './provider-stream.js';
@@ -19,9 +20,9 @@ import type { MatchedProviderCommand, V1Command, ProviderTarget, ProviderRun, Pr
 import { creationObservation, providerCreation, conversationInstallation } from './provider-creation.js';
 import type { ConversationInstallation, ProviderInstallation, ProviderCreation, StoredCreation, CreationObservation } from './provider-creation.js';
 import { randomUUID } from 'node:crypto';
-import { canonicalJson, CORE_SNAPSHOT_DOCUMENT_JSON_BUDGET, JsonLimitError, foldDocument, parseCommand, parseDecision, parseDocument, parseHostEvent, parseReceipt, parseScope, sameScope } from '@agentui/contracts';
-import type { ClientCommand, ConversationDocument, ConversationScope, Envelope, HostEvent, Projection, Receipt, ReceiptState, Snapshot } from '@agentui/contracts';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { canonicalJson, CORE_SNAPSHOT_DOCUMENT_JSON_BUDGET, JsonLimitError, foldDocument, parseCommand, parseDecision, parseDocument, parseHostEvent, parseReceipt, parseScope, sameScope } from '@openpane/contracts';
+import type { ClientCommand, ConversationDocument, ConversationScope, Envelope, HostEvent, Projection, Receipt, ReceiptState, Snapshot } from '@openpane/contracts';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { migrateTranscriptDatabase } from './transcript-migration.js';
 import { CURRENT_DATABASE_FORMAT, openDatabase, readDatabaseFormat } from './sqlite-schema.js';
 import { migrateFrontendSends, taggedKeySql, taggedHistorySql } from './sqlite-frontend-sends.js';
@@ -293,13 +294,26 @@ export class SqliteStore<E, P> implements ProviderStreamStore {
     this.onProviderCommit?.(original.intent.scope);
     return committed;
   }
-  /** A conversation with a confirmed successor is listed only through its newest segment. */
-  listConversations(hostId: string, after: string | null, limit: number): readonly ConversationScope[] {
-    return this.db.prepare(`SELECT host, conversation FROM conversations WHERE host=? AND conversation>? AND conversation NOT IN (
+  /** A conversation with a confirmed successor is listed only through its newest segment, unless `everySegment` is set.
+   * A filter reads the provider installation stored with each conversation, so it keeps conversations whose agent or
+   * generation has since changed. */
+  listConversations(hostId: string, after: string | null, limit: number, everySegment = false, filter?: CatalogFilter | undefined): readonly ConversationScope[] {
+    // Each predicate carries its own bind values, so the SQL and the values cannot drift apart.
+    const clauses: readonly (readonly [sql: string, values: readonly string[]])[] = !filter ? [] : [
+      [`json_extract(installation,'$.kind')='provider'`, []],
+      [`json_extract(installation,'$.instance.namespace')=?`, [filter.namespace]],
+      ...(filter.kind === 'provider-agent' ? [
+        [`json_extract(installation,'$.instance.installationId')=?`, [filter.installationId]],
+        [`json_extract(installation,'$.agent.opaqueId')=?`, [filter.providerAgentId]],
+      ] as const : []),
+    ];
+    const values = clauses.flatMap(([, bound]) => bound);
+    const successors = everySegment ? '' : `AND conversation NOT IN (
       SELECT json_extract(original,'$.intent.from.scope.conversationId') FROM provider_creations INDEXED BY provider_creations_from
       WHERE host=? AND json_extract(original,'$.intent.from.scope.conversationId') IS NOT NULL AND json_extract(observation,'$.kind')='confirmed')
-      ORDER BY conversation LIMIT ?`)
-      .all(hostId, after ?? '', hostId, limit)
+      `;
+    return this.db.prepare(`SELECT host, conversation FROM conversations WHERE host=? AND conversation>? ${clauses.map(([predicate]) => `AND ${predicate} `).join('')}${successors}ORDER BY conversation LIMIT ?`)
+      .all(hostId, after ?? '', ...values, ...(everySegment ? [] : [hostId]), limit)
       .map(row => parseScope({ hostId: row.host, conversationId: row.conversation }));
   }
   snapshot(scope: ConversationScope): Snapshot<P> {

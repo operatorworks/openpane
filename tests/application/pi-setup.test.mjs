@@ -10,13 +10,13 @@ import test from 'node:test';
 const marker = 'test-only-opencode-go-marker-NEVER-PERSIST';
 const capability = 'ab'.repeat(32);
 async function fixture(t, preferred = 'pi') {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-pi-setup-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-pi-setup-'));
   const children = [];
   const f = { directory, origin: '', stderr: '' };
   f.start = async (environmentKey = '') => {
     const child = spawn(process.execPath, ['apps/host/dist/main.js', 'desktop', '--preferred', preferred,
       '--workspace', directory, '--data-dir', join(directory, 'data'), '--port', '0', ...(preferred === 'codex' ? ['--executable', '/nonexistent/codex'] : [])], {
-      env: { ...process.env, OPENCODE_GO_API_KEY: environmentKey, AGENTUI_SETUP_CAPABILITY: capability }, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, OPENCODE_GO_API_KEY: environmentKey, OPENPANE_SETUP_CAPABILITY: capability }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     child.stderr.on('data', data => { f.stderr += data; });
     const exited = new Promise(resolve => child.once('exit', code => resolve(code)));
@@ -146,11 +146,11 @@ test('environment key replacement explains precedence and recovers after removin
 
 
 test('desktop setup requires startup authority before opening host data', async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-pi-authority-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-pi-authority-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const result = spawnSync(process.execPath, ['apps/host/dist/main.js', 'desktop', '--preferred', 'pi',
     '--workspace', directory, '--data-dir', join(directory, 'data'), '--port', '0'], {
-    env: { ...process.env, AGENTUI_SETUP_CAPABILITY: '' }, encoding: 'utf8', timeout: 5000,
+    env: { ...process.env, OPENPANE_SETUP_CAPABILITY: '' }, encoding: 'utf8', timeout: 5000,
   });
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /Launch desktop setup through/);

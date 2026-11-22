@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createFrontendToolGeneration } from '@agentui/sdk/tools';
-import { ServiceError } from '@agentui/contracts/service';
-import { ServiceConnectionLost } from '@agentui/client/service';
-import { CLAUDE_SDK_RUNTIMES, CODEX_RUNTIME, CODEX_SDK_RUNTIME, PI_RUNTIME, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
+import { createFrontendToolGeneration } from '@openpane/sdk/tools';
+import { ServiceError } from '@openpane/contracts/service';
+import { ServiceConnectionLost } from '@openpane/client/service';
+import { CLAUDE_SDK_RUNTIMES, CODEX_RUNTIME, CODEX_SDK_RUNTIME, PI_RUNTIME, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
 import { applicationEnabled } from '../../apps/desktop/dist/application/application-controller.js';
 import { scope, empty, deferred, fixture } from './controller-fixture.mjs';
 
@@ -463,17 +463,17 @@ for (const outcome of ['admission-rejected', 'rejected', 'uncertain', 'accepted'
 
 test('a lost native connection during a command disables the app until an explicit reconnect', async t => {
   const f = await openCommands(t);
-  const failure = new ServiceConnectionLost('A different AgentUI host is answering on this Mac. Reconnect to switch to it.');
+  const failure = new ServiceConnectionLost('A different OpenPane host is answering on this Mac. Reconnect to switch to it.');
   f.behavior.submit = async () => { f.connectionLost(failure); throw failure; };
   await assert.rejects(f.actions.commands.send('prompt'), error => error === failure);
   const snapshot = f.app.getSnapshot();
   assert.equal(snapshot.host.kind, 'unavailable');
-  assert.match(snapshot.error, /different AgentUI host/);
+  assert.match(snapshot.error, /different OpenPane host/);
   assert.equal(applicationEnabled(snapshot), false);
   assert.equal(f.target.store.getSnapshot().connection.kind, 'disconnected');
   assert.equal(f.target.store.getSnapshot().outbox.length, 1);
   f.connectionLost(new ServiceConnectionLost('The local host connection changed. Reconnect before continuing.'));
-  assert.match(f.app.getSnapshot().error, /different AgentUI host/);
+  assert.match(f.app.getSnapshot().error, /different OpenPane host/);
   await f.app.reconnect();
   assert.equal(f.app.getSnapshot().host.kind, 'ready');
   assert.equal(applicationEnabled(f.app.getSnapshot()), true);
@@ -956,6 +956,25 @@ test('permission freshness follows opening, failed commands, reconnect and newer
   assert.equal(f.app.getSnapshot().permissionState.kind, 'fresh');
   assert.equal(f.submitted.length, 1);
   assert.equal(f.app.getSnapshot().active.store.getSnapshot().outbox.length, 1);
+});
+
+test('a conversation that does not report permissions stays unsupported across reads and reconnects', async t => {
+  const f = fixture(); t.after(() => f.app.dispose());
+  f.views.set('original-view/host', { ...empty(), route: scope });
+  f.behavior.permissions = async () => ({ kind: 'unsupported', reason: 'This conversation does not report permissions.' });
+  await f.app.start(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.app.getSnapshot().permissionState.kind, 'unsupported');
+  const held = deferred(), kinds = [];
+  const stop = f.app.subscribe(() => kinds.push(f.app.getSnapshot().permissionState.kind));
+  f.behavior.permissions = () => held.promise;
+  const pending = f.app.conversationActions(f.app.getSnapshot().active).permissions.read();
+  held.resolve({ kind: 'unsupported', reason: 'This conversation does not report permissions.' }); await pending;
+  const active = f.app.getSnapshot().active;
+  await active.store.setDraft('A command marks permissions for refresh');
+  await f.app.conversationActions(active).submit(() => active.store.send()).catch(() => {});
+  await f.app.reconnect(); await new Promise(resolve => setImmediate(resolve));
+  stop();
+  assert.deepEqual([...new Set(kinds)], ['unsupported']);
 });
 
 test('permission reads from a disposed session cannot populate its replacement', async t => {
@@ -1507,4 +1526,78 @@ test('image previews and uploads share one host transfer slot, reusing concurren
   await assert.rejects(actions.readImage('d'), { kind: 'image-scope' });
   assert.equal(refusals, 4);
   assert.equal(f.app.getSnapshot().error, '');
+});
+
+test('a workspace reload during an in-flight page load re-reads the first page and discards the superseded page', async t => {
+  const f = fixture(); t.after(() => f.app.dispose());
+  await f.app.start();
+  const entry = n => ({ scope: { hostId: 'host', conversationId: `w-${String(n).padStart(3, '0')}` }, preview: null,
+    provider: { namespace: 'ledger', installationId: 'books', providerAgentId: 'desk' } });
+  f.behavior.workspaceCatalog = async () => Array.from({ length: 100 }, (_, n) => entry(n));
+  await f.app.loadWorkspace('ledger');
+  const gate = Promise.withResolvers();
+  f.behavior.workspaceCatalog = async after => { if (after !== null) { await gate.promise; return [entry(100)]; } return [entry(500)]; };
+  const more = f.app.moreWorkspace('ledger');
+  assert.equal(f.app.getSnapshot().workspaces.ledger.loading, true);
+  await f.app.loadWorkspace('ledger');
+  assert.deepEqual(f.filters.slice(-2).map(item => item.after), ['w-099', null], 'the reload sent its own first-page request');
+  gate.resolve();
+  await more;
+  const workspace = f.app.getSnapshot().workspaces.ledger;
+  assert.deepEqual(workspace.entries.map(item => item.scope.conversationId), ['w-500']);
+  assert.deepEqual([workspace.hasMore, workspace.loading], [false, false]);
+  assert.equal(f.app.getSnapshot().error, '');
+});
+
+test('workspace lists page by namespace filter, refresh replaces metadata and extension calls forward once', async t => {
+  const f = fixture(); t.after(() => f.app.dispose());
+  await f.app.start();
+  const entry = n => ({ scope: { hostId: 'host', conversationId: `w-${String(n).padStart(3, '0')}` }, preview: null,
+    provider: { namespace: 'ledger', installationId: 'books', providerAgentId: 'desk' } });
+  f.behavior.workspaceCatalog = async after => after === null ? Array.from({ length: 100 }, (_, n) => entry(n)) : [entry(100)];
+  await f.app.loadWorkspace('ledger');
+  let workspace = f.app.getSnapshot().workspaces.ledger;
+  assert.deepEqual([workspace.entries.length, workspace.hasMore, workspace.loading], [100, true, false]);
+  assert.deepEqual(f.filters.at(-1), { after: null, filter: { kind: 'namespace', namespace: 'ledger' } });
+  await f.app.moreWorkspace('ledger');
+  workspace = f.app.getSnapshot().workspaces.ledger;
+  assert.deepEqual([workspace.entries.length, workspace.hasMore], [101, false]);
+  assert.equal(f.filters.at(-1).after, 'w-099');
+  await f.app.moreWorkspace('ledger');
+  assert.equal(f.filters.length, 2, 'no request after the last page');
+  f.behavior.workspaceCatalog = async () => [{ ...entry(1), provider: { ...entry(1).provider, namespace: 'other' } }];
+  await f.app.loadWorkspace('ledger');
+  assert.match(f.app.getSnapshot().error, /another namespace/);
+  const before = f.metadataCalls();
+  f.behavior.extensions = [{ namespace: 'ledger', state: 'active', operations: ['echo'], installations: [] }];
+  await f.app.refreshMetadata();
+  assert.equal(f.metadataCalls(), before + 1);
+  assert.deepEqual(f.app.getSnapshot().host.metadata.extensions, f.behavior.extensions);
+  assert.deepEqual(await f.app.extensionCall({ namespace: 'ledger', installationId: 'books', operation: 'echo', input: { a: 1 } }), { kind: 'ok', output: { a: 1 } });
+  assert.equal(f.calls.length, 1);
+});
+
+test('a refreshMetadata reply superseded by a reconnect publishes nothing, and an incompatible reply runs the full handshake', async t => {
+  const f = fixture(); t.after(() => f.app.dispose());
+  await f.app.start();
+  const older = [{ namespace: 'ledger', state: 'active', operations: [], installations: [] }];
+  const newer = [{ namespace: 'ledger', state: 'active', operations: ['echo'], installations: [{ installationId: 'books', status: 'available' }] }];
+  const gate = deferred();
+  f.behavior.metadata = () => gate.promise;
+  const stale = f.app.refreshMetadata();
+  f.behavior.metadata = async () => {};
+  f.behavior.extensions = newer;
+  await f.app.reconnect();
+  assert.deepEqual(f.app.getSnapshot().host.metadata.extensions, newer);
+  // The superseded read now answers with what it saw before the reconnect.
+  f.behavior.extensions = older;
+  gate.resolve();
+  await stale;
+  assert.equal(f.app.getSnapshot().host.kind, 'ready');
+  assert.deepEqual(f.app.getSnapshot().host.metadata.extensions, newer, 'the stale reply did not overwrite the reconnect');
+  assert.equal(f.app.getSnapshot().error, '');
+
+  f.behavior.wireVersion = 'other-wire';
+  await f.app.refreshMetadata();
+  assert.equal(f.app.getSnapshot().host.kind, 'incompatible', 'an incompatible host blocks commands instead of staying ready');
 });

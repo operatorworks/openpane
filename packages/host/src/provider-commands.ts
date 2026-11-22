@@ -1,8 +1,8 @@
 import { aguiInput, assertOfferSuffix } from './agui-input.js';
-import { canonicalJson, copyJson, parseRunIdentity, parsePermissionScope } from '@agentui/contracts';
-import type { ClientCommand, ConversationScope, Json, RunIdentity, PermissionScope, FrontendOffer, OfferedCommand } from '@agentui/contracts';
-import { identifier, record } from '@agentui/contracts/decode';
-import type { ConversationRef, ConversationRefKind, ProviderConversation, ProviderInstance } from '@agentui/sdk';
+import { canonicalJson, copyJson, parseRunIdentity, parsePermissionScope } from '@openpane/contracts';
+import type { ClientCommand, ConversationScope, Json, RunIdentity, PermissionScope, FrontendOffer, OfferedCommand } from '@openpane/contracts';
+import { identifier, record } from '@openpane/contracts/decode';
+import type { ConversationRef, ConversationRefKind, ProviderConversation, ProviderInstance } from '@openpane/sdk';
 import { creationBinding, providerCreation, providerIdentity } from './provider-creation.js';
 import type { ProviderCreation, ProviderInstallation } from './provider-creation.js';
 import type { SettlementObservation } from './settlement.js';

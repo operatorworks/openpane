@@ -13,7 +13,7 @@ for (const [label, invalid] of [
   config: new URL('../../packages/host/tsconfig.json', import.meta.url).pathname,
   prefix: `import type { StoredCommand, CapturedTarget } from '${new URL('../../packages/host/dist/durable-model.js', import.meta.url).pathname}';
     import type { ProviderTarget, AguiRunKey } from '${new URL('../../packages/host/dist/provider-commands.js', import.meta.url).pathname}';
-    import type { Receipt, OfferedCommand } from '@agentui/contracts';
+    import type { Receipt, OfferedCommand } from '@openpane/contracts';
     export declare const target: CapturedTarget;
     export declare const provider: ProviderTarget;
     export declare const receipt: Receipt;
@@ -59,7 +59,7 @@ test('native drivers reject offered commands and the registry requires a matched
   prefix: `import type { ProviderDriver, CapturedTarget } from '${new URL('../../packages/host/dist/durable-model.js', import.meta.url).pathname}';
     import type { ProviderConversationOperations } from '${new URL('../../packages/host/dist/providers.js', import.meta.url).pathname}';
     import type { ProviderCapture, MatchedProviderCommand, V1Command } from '${new URL('../../packages/host/dist/provider-commands.js', import.meta.url).pathname}';
-    import type { OfferedCommand } from '@agentui/contracts';
+    import type { OfferedCommand } from '@openpane/contracts';
     export declare const driver: ProviderDriver<unknown>;
     export declare const target: CapturedTarget;
     export declare const offered: OfferedCommand;

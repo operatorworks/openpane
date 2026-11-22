@@ -1,17 +1,17 @@
 import type { V1Command } from './provider-commands.js';
-import { canonicalJson } from '@agentui/contracts';
-import { utf8Bytes } from '@agentui/contracts/decode';
-import { RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
-import type { Envelope } from '@agentui/contracts';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import type { Transcript, TranscriptEvent } from '@agentui/contracts/conversation';
+import { canonicalJson } from '@openpane/contracts';
+import { utf8Bytes } from '@openpane/contracts/decode';
+import { RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
+import type { Envelope } from '@openpane/contracts';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import type { Transcript, TranscriptEvent } from '@openpane/contracts/conversation';
 import { budgets } from './durable-model.js';
 import type { CapturedTarget, CommandResult, HostOutput, Installation, NativeRun, ProviderDriver } from './durable-model.js';
 import { openLocalHost } from './local-host.js';
 import type { LocalHost, LocalHostOptions } from './local-host.js';
 import { createRecordedDriver } from './recorded-driver.js';
 
-export const recordedInstallation: Installation = Object.freeze({ installationId: 'agentui-recorded-v1',
+export const recordedInstallation: Installation = Object.freeze({ installationId: 'openpane-recorded-v1',
   binding: Object.freeze({ engine: RECORDED_RUNTIME.engine, nativeVersion: RECORDED_RUNTIME.version, account: 'local',
     authorizedScope: 'recorded-conversations', nativeFormat: RECORDED_RUNTIME.format }) });
 const UUID_OPERATION_ID = '00000000-0000-0000-0000-000000000000';
@@ -40,8 +40,8 @@ function finalResult(command: V1Command, target: CapturedTarget): CommandResult<
     case 'send': {
       const runId = `${operation}:run`, opaque = `${operation}:session`;
       const run: NativeRun = {
-        identity: { conversation: command.scope, runId, authority: { kind: 'agentui-host', hostId: command.scope.hostId,
-          binding: { namespace: 'agentui-recorded', installationId: recordedInstallation.installationId, opaqueSessionId: opaque } } },
+        identity: { conversation: command.scope, runId, authority: { kind: 'openpane-host', hostId: command.scope.hostId,
+          binding: { namespace: 'openpane-recorded', installationId: recordedInstallation.installationId, opaqueSessionId: opaque } } },
         reference: { kind: 'session', formatVersion: 1, binding: recordedInstallation.binding, opaque },
       };
       return { kind: 'completed', output: {
@@ -72,7 +72,7 @@ export function openRecordedHost(options: RecordedHostOptions): LocalHost<Transc
     if (closing) return;
     try { host.append(command.scope, output(events)); }
     catch (error) {
-      process.emitWarning('Recorded progress could not be stored', { code: 'AGENTUI_RECORDED_PROGRESS',
+      process.emitWarning('Recorded progress could not be stored', { code: 'OPENPANE_RECORDED_PROGRESS',
         detail: error instanceof Error ? error.message : 'Unknown progress failure' });
     }
   };

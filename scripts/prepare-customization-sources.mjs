@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { CustomizationError, assertSupportedNode, supportedNpmVersion, resolveCustomizationSources } from '@agentui/host/customization';
+import { CustomizationError, assertSupportedNode, supportedNpmVersion, resolveCustomizationSources } from '@openpane/host/customization';
 
 const execute = promisify(execFile);
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -72,11 +72,11 @@ async function validateInstalledPackages(directory, packages, check) {
   }
 }
 
-/** @typedef {import('@agentui/host/customization').ResolvedCustomizationPackage} ResolvedCustomizationPackage */
+/** @typedef {import('@openpane/host/customization').ResolvedCustomizationPackage} ResolvedCustomizationPackage */
 /** @typedef {{readonly root: ResolvedCustomizationPackage, dispose(): Promise<void>}} PreparedCustomizationSources */
 
 /**
- * @param {{reference: import('@agentui/host/customization').GitExtensionReference, scratchParent: string}} input
+ * @param {{reference: import('@openpane/host/customization').GitExtensionReference, scratchParent: string}} input
  * @returns {Promise<PreparedCustomizationSources>}
  */
 export async function prepareCustomizationSources(input) {
@@ -89,7 +89,7 @@ export async function prepareCustomizationSources(input) {
   try {
     const scratchParent = resolve(input.scratchParent);
     await mkdir(scratchParent, { recursive: true, mode: 0o700 });
-    owner = await mkdtemp(join(scratchParent, 'agentui-prepared-'));
+    owner = await mkdtemp(join(scratchParent, 'openpane-prepared-'));
     await chmod(owner, 0o700);
     sources = await resolveCustomizationSources({ reference: input.reference, scratchParent: owner });
     const repositories = new Map();

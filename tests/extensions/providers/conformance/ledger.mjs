@@ -1,11 +1,11 @@
 import { createServer } from 'node:http';
-import { canonicalJson } from '@agentui/contracts';
-import { parseTranscript, transcriptProjection } from '@agentui/contracts/conversation';
-import { EXTENSION_SDK_VERSION, backendProviderContractVersion } from '@agentui/sdk';
+import { canonicalJson } from '@openpane/contracts';
+import { parseTranscript, transcriptProjection } from '@openpane/contracts/conversation';
+import { EXTENSION_SDK_VERSION, backendProviderContractVersion } from '@openpane/sdk';
 
 /**
  * A second provider service that shares nothing with Crew. The service assigns its own room and ticket numbers
- * instead of reusing AgentUI operation ids, authenticates with `x-ledger-key`, resumes from an `[epoch, offset]`
+ * instead of reusing OpenPane operation ids, authenticates with `x-ledger-key`, resumes from an `[epoch, offset]`
  * cursor, and streams NDJSON log entries that the presentation folds event by event.
  */
 export async function ledgerService(t, { key = 'ledger-private-key-5e1a' } = {}) {
@@ -163,7 +163,8 @@ export const ledgerPresentation = {
 };
 
 /** The ledger extension through the public entry contract. `supports` says which of cancel and decide it offers. */
-export function ledgerExtension({ service, key, supports }) {
+export function ledgerExtension({ service, key, supports, namespace = 'ledger' }) {
+  const instance = { ...ledgerPresentation.instance, namespace };
   const entry = { kind: 'server', sdkVersion: EXTENSION_SDK_VERSION, activate(context) {
     context.providers.add('books', { apiVersion: backendProviderContractVersion, async connect(request) {
       const credential = request.credential, feeds = new Set();
@@ -187,7 +188,7 @@ export function ledgerExtension({ service, key, supports }) {
             run: ref(binding, 'run', card.ticket), prompt: card.prompt,
             choices: card.options.map(option => ({ ref: ref(binding, 'choice', `${card.id}/${option}`), label: option === 'approve' ? 'Approve' : 'Deny' })) })) } };
       };
-      const binding = (operation, id) => ({ kind: 'agentui-created', creation: operation,
+      const binding = (operation, id) => ({ kind: 'openpane-created', creation: operation,
         authority: { kind: 'remote-provider', binding: { namespace: instance.namespace, installationId: instance.installationId, opaqueSessionId: id } } });
       const creation = async (operation, path) => {
         try {
@@ -266,7 +267,7 @@ export function ledgerExtension({ service, key, supports }) {
         },
         async close() { const active = [...feeds]; active.forEach(feed => feed.close()); await Promise.all(active.map(feed => feed.ended)); },
       } };
-    } }, ledgerPresentation);
+    } }, { ...ledgerPresentation, instance });
     return { dispose() {} };
   } };
   return { value: {

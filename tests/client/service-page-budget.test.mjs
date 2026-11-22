@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canonicalJson } from '@agentui/contracts';
-import { parseServicePull, SERVICE_EVENT_PAGE } from '@agentui/contracts/service';
+import { canonicalJson } from '@openpane/contracts';
+import { parseServicePull, SERVICE_EVENT_PAGE } from '@openpane/contracts/service';
 
 const scope = { hostId: 'host', conversationId: 'conversation' };
 const page = events => ({ kind: 'page', page: 1, item: { kind: 'events', events } });

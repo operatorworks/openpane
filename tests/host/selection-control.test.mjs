@@ -38,7 +38,7 @@ for (const [name, change] of [
   ['wrong full receipt hash', chunk => chunk],
   ['oversize receipt', chunk => ({ ...chunk, total: RECEIPT_LIMIT + 1 })],
 ]) test(`packaged CLI refuses ${name} before exporting a receipt`, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-control-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-control-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const server = createServer(socket => {
     let text = '';
@@ -72,7 +72,7 @@ for (const command of ['extensions-apply', 'extensions-retry']) test(`${command}
 });
 
 for (const kind of ['apply', 'retry']) for (const reply of ['lost', 'refused']) test(`packaged ${kind} emits one live envelope and preserves ${reply} reply guidance`, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-live-control-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-live-control-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const requests = [];
   const server = createServer(socket => {
@@ -98,7 +98,7 @@ for (const kind of ['apply', 'retry']) for (const reply of ['lost', 'refused']) 
 });
 
 test('select waits for its completed-frame reply beyond the framing deadline', { timeout: 15000 }, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-select-wait-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-select-wait-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, 'control.sock');
   let selections = 0;
@@ -114,7 +114,7 @@ test('select waits for its completed-frame reply beyond the framing deadline', {
 });
 
 test('nonmutation replies retain the idle deadline', { timeout: 15000 }, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-control-idle-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-control-idle-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, 'control.sock');
   const server = createServer(socket => socket.resume());
@@ -124,7 +124,7 @@ test('nonmutation replies retain the idle deadline', { timeout: 15000 }, async t
 });
 
 test('server rejects oversized and malformed frames and expires partial frames before dispatch', { timeout: 15000 }, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-control-framing-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-control-framing-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, 'control.sock');
   let selections = 0;

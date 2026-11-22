@@ -1,3 +1,4 @@
+import { saveUiEnable } from './retirement-support.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, rmSync, mkdtempSync } from 'node:fs';
@@ -7,10 +8,10 @@ import { createServer } from 'node:http';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
 import { chromium } from 'playwright';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { crew, crewBackend, crewPresentation } from '../extensions/providers/contracts/crew.ts';
 import { repository, buildCustom, root } from '../customization/build/support.mjs';
-import { connected, draft, wait } from './browser-support.mjs';
+import { connected, draft, wait, tools, chats } from './browser-support.mjs';
 
 const artifact = new URL('../../apps/host/build/tsc/artifact.js', import.meta.url).href;
 registerHooks({ resolve(specifier, context, next) {
@@ -21,14 +22,14 @@ registerHooks({ resolve(specifier, context, next) {
 const { startBrowserHost } = await import('../../apps/host/build/tsc/server.js');
 async function records(page) {
   return page.evaluate(async () => {
-    const opening = indexedDB.open('agentui-browser-views', 1);
+    const opening = indexedDB.open('openpane-browser-views', 1);
     const db = await new Promise((resolve, reject) => { opening.onsuccess = () => resolve(opening.result); opening.onerror = () => reject(opening.error); });
     try { const request = db.transaction('records').objectStore('records').getAll(); return await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
     finally { db.close(); }
   });
 }
 async function setup(t) {
-  const custom = repository(), directory = mkdtempSync(join(tmpdir(), 'agentui-captured-browser-'));
+  const custom = repository(), directory = mkdtempSync(join(tmpdir(), 'openpane-captured-browser-'));
   t.after(() => { rmSync(custom.directory, { recursive: true, force: true }); rmSync(directory, { recursive: true, force: true }); });
   custom.write('desktop/index.tsx', readFileSync(join(root, 'tests/application/fixtures/frontend-capture.tsx'), 'utf8'));
   const commit = custom.commit(); buildCustom(custom, commit);
@@ -60,16 +61,18 @@ async function setup(t) {
   await wait(() => page.getByRole('button', { name: 'New recorded conversation', exact: true }).isEnabled(), 'connected host');
   const inspect = action => { const db = new DatabaseSync(join(directory, 'host.sqlite')); try { return action(db); } finally { db.close(); } };
   const create = async (target = page) => {
-    const previous = (await records(target)).find(row => row.route)?.route.conversationId;
     await target.getByRole('button', { name: 'Chats', exact: true }).click();
+    const displayed = target.locator('.chat-view .scope-label');
+    const previous = await displayed.count() ? await displayed.textContent() : null;
     if (await target.getByRole('button', { name: 'New conversation', exact: true }).count()) await target.getByRole('button', { name: 'New conversation', exact: true }).click();
     else {
       await target.getByRole('button', { name: 'Harness, Recorded', exact: true }).click();
       await target.getByRole('button', { name: 'Provider', exact: true }).click();
       await target.getByRole('button', { name: 'Start new chat with Crew researcher', exact: true }).click();
     }
-    await wait(async () => (await records(target)).some(row => row.route && row.route.conversationId !== previous), 'new conversation route');
+    await wait(async () => await displayed.count() === 1 && await displayed.textContent() !== previous, 'new displayed conversation');
     await connected(target);
+    return displayed.textContent();
   };
   return { page, context, browser, host, inputs, operations, confirmed, inspect, create, translations: () => translations };
 }
@@ -87,7 +90,9 @@ test('committed production browser captures both actual send paths and retains o
       else await route.fulfill({ response });
     } else await route.continue();
   });
-  await page.getByText('Capture activation 1', { exact: true }).waitFor();
+  // The capture fixture's module renders in the Extensions view's conversation tools.
+  await (await tools(page)).getByText('Capture activation 1', { exact: true }).waitFor();
+  await chats(page);
   await draft(page, 'Composer capture'); await page.getByRole('button', { name: 'Send', exact: true }).click();
   await wait(() => f.inputs.length === 1, 'actual composer HTTP input');
   const original = (await records(page)).find(row => row.frontendSends?.length).frontendSends[0];
@@ -95,49 +100,68 @@ test('committed production browser captures both actual send paths and retains o
   assert.deepEqual(f.inputs[0].tools.slice(1), original.command.body.frontend.tools.map(tool => tool.definition));
   assert.deepEqual(f.inspect(db => JSON.parse(db.prepare('SELECT target FROM commands WHERE id=?').get(original.command.clientCommandId).target).operation.request), f.inputs[0]);
   await page.getByRole('status').filter({ hasText: 'Waiting for confirmed run' }).waitFor();
-  const originalView = await page.evaluate(() => sessionStorage.getItem('agentui.viewId'));
+  const originalView = await page.evaluate(() => sessionStorage.getItem('openpane.viewId'));
   const other = await f.context.newPage(); await other.goto(`${f.host.origin}/browser.html`);
   await other.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(other);
-  const otherView = await other.evaluate(() => sessionStorage.getItem('agentui.viewId'));
+  const otherView = await other.evaluate(() => sessionStorage.getItem('openpane.viewId'));
   await other.getByRole('button', { name: `Reopen saved view ${originalView}`, exact: true }).click();
   await other.getByRole('alert').filter({ hasText: 'already open in another tab' }).waitFor();
   await other.close();
   await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
   await page.getByRole('button', { name: 'Chats', exact: true }).click();
   await page.getByRole('button', { name: `Reopen saved view ${otherView}`, exact: true }).click(); await connected(page);
-  assert.ok((await page.evaluate(() => navigator.locks.query())).held.some(lock => lock.name === `agentui-view:${originalView}`));
+  assert.ok((await page.evaluate(() => navigator.locks.query())).held.some(lock => lock.name === `openpane-view:${originalView}`));
   await page.getByRole('button', { name: `Reopen saved view ${originalView}`, exact: true }).click(); await connected(page);
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('agentui.viewId')), originalView);
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('openpane.viewId')), originalView);
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Composer capture');
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByLabel('Enable customizations', { exact: true }).uncheck();
+  await page.getByLabel('Enable executable UI customizations', { exact: true }).uncheck();
   assert.deepEqual(await page.evaluate(() => window.captureFixture.disposed), []);
-  await page.getByLabel('Enable customizations', { exact: true }).check();
-  await page.getByRole('button', { name: 'Chats', exact: true }).click(); await page.getByText('Capture activation 2', { exact: true }).waitFor();
+  await saveUiEnable(page);
+  await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Extensions', exact: true }).click();
+  await page.locator('[data-extension="personal"]').getByText('Loading', { exact: true }).waitFor();
+  // A is retired for new admission, but its retained original send keeps the namespace's barrier closed.
+  assert.equal(await page.evaluate(() => window.captureFixture.activations), 1);
+  await tools(page);
+  assert.equal(await page.getByText('Capture activation 2', { exact: true }).count(), 0);
+  await chats(page);
   await page.getByRole('button', { name: 'Retry original command', exact: true }).click();
   await wait(() => page.getByRole('button', { name: 'New conversation', exact: true }).isEnabled(), 'original retry settled');
-  await f.create(); await page.getByRole('button', { name: 'Send captured extension message', exact: true }).click();
-  await wait(() => f.inputs.length === 2, 'actual extension HTTP input');
-  const extension = (await records(page)).flatMap(row => row.frontendSends ?? []).find(entry => entry.command.body.text === 'Extension capture');
-  assert.notEqual(extension.command.body.frontend.tools[0].activationId, original.command.body.frontend.tools[0].activationId);
-  f.confirmed.add(f.inputs[0].runId); f.confirmed.add(f.inputs[1].runId);
-  await wait(async () => await page.getByRole('status').filter({ hasText: 'Bound to confirmed run' }).count() === 2, 'original actual run bindings');
+  assert.equal(f.inputs.length, 1, 'retry recovers the original command without another dispatch');
+  f.confirmed.add(f.inputs[0].runId);
+  await page.getByRole('status').filter({ hasText: 'Bound to confirmed run' }).waitFor();
   await page.getByText(`Run ${f.inputs[0].runId}`, { exact: true }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.captureFixture.disposed), []);
-  assert.equal(f.translations(), 2); assert.equal(f.operations.length, 2); assert.equal(lostSubmission, true); assert.equal(lostBinding, true);
-  await page.getByRole('button', { name: 'Reconcile command', exact: true }).click();
-  await wait(async () => (await records(page)).some(row => row.scope?.conversationId === extension.command.scope.conversationId && row.outbox.length === 0), 'completed extension outbox settlement');
-  await page.getByRole('button', { name: new RegExp(`Open conversation ${original.command.scope.conversationId}$`) }).click(); await connected(page);
+  assert.equal(f.translations(), 1); assert.equal(f.operations.length, 1); assert.equal(lostSubmission, true); assert.equal(lostBinding, true);
   await page.getByRole('button', { name: 'Reconcile command', exact: true }).click();
   await wait(async () => (await records(page)).some(row => row.scope?.conversationId === original.command.scope.conversationId && row.outbox.length === 0), 'completed original outbox settlement');
-  assert.deepEqual(await page.evaluate(() => window.captureFixture.disposed), []);
+  assert.equal(await page.evaluate(() => window.captureFixture.activations), 1);
 
   const row = page.locator(`[data-captured-command="${original.command.clientCommandId}"]`);
   await row.getByRole('button', { name: 'Release captured tools', exact: true }).click();
   await row.getByRole('status').filter({ hasText: 'Captured tools unavailable' }).waitFor();
   await wait(() => page.evaluate(() => window.captureFixture.disposed.includes(1)), 'original A disposal');
   await wait(async () => (await records(page)).flatMap(row => row.frontendSends ?? []).find(entry => entry.command.clientCommandId === original.command.clientCommandId)?.state === 'unavailable-confirmed', 'durable release acknowledgment');
+  await (await tools(page)).getByText('Capture activation 2', { exact: true }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.captureFixture.disposed), [1]);
+  await chats(page);
+  const nextConversation = await f.create();
+  assert.notEqual(nextConversation, original.command.scope.conversationId);
+  await (await tools(page)).getByRole('button', { name: 'Send captured extension message', exact: true }).click(); await chats(page);
+  await wait(() => f.inputs.length === 2, 'actual extension HTTP input');
+  const extension = (await records(page)).flatMap(row => row.frontendSends ?? []).find(entry => entry.command.body.text === 'Extension capture');
+  assert.equal(extension.command.scope.conversationId, nextConversation);
+  assert.notEqual(extension.command.body.frontend.tools[0].activationId, original.command.body.frontend.tools[0].activationId);
+  assert.deepEqual(f.inputs[1].tools.slice(1), extension.command.body.frontend.tools.map(tool => tool.definition));
+  assert.deepEqual(f.inspect(db => JSON.parse(db.prepare('SELECT target FROM commands WHERE id=?').get(extension.command.clientCommandId).target).operation.request), f.inputs[1]);
+  f.confirmed.add(f.inputs[1].runId);
+  await page.getByRole('status').filter({ hasText: 'Bound to confirmed run' }).waitFor();
+  await page.getByText(`Run ${f.inputs[1].runId}`, { exact: true }).waitFor();
+  assert.equal(f.translations(), 2); assert.equal(f.operations.length, 2);
+  await page.getByRole('button', { name: 'Reconcile command', exact: true }).click();
+  await wait(async () => (await records(page)).some(row => row.scope?.conversationId === extension.command.scope.conversationId && row.outbox.length === 0), 'completed extension outbox settlement');
+  assert.deepEqual(await page.evaluate(() => window.captureFixture.disposed), [1]);
   assert.equal(await page.evaluate(() => window.captureFixture.executions), 0);
   for (const table of ['frontend_events', 'frontend_receipts']) assert.equal(f.inspect(db => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n), 0);
   await page.getByRole('button', { name: new RegExp(`Open conversation ${extension.command.scope.conversationId}$`) }).click(); await connected(page);
@@ -182,7 +206,7 @@ for (const phase of ['admission', 'release']) test(`production browser ${phase} 
   if (phase === 'admission') await page.getByRole('button', { name: 'Send', exact: true }).click();
   else await page.getByRole('button', { name: 'Release captured tools', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'Local storage unavailable. Commands are blocked.' }).waitFor();
-  await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.getByLabel('Enable customizations', { exact: true }).uncheck();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.getByLabel('Enable executable UI customizations', { exact: true }).uncheck();
   await wait(() => page.evaluate(() => window.captureFixture.disposed.length === 1), 'failed storage releases closure');
   assert.equal(f.operations.length, phase === 'release' ? 1 : 0); assert.equal(await page.evaluate(() => window.captureFixture.executions), 0);
 });
@@ -218,12 +242,12 @@ test('production browser switches recovery views and releases the old lock befor
   const f = await setup(t), { page } = f, requests = [];
   await f.create(); await draft(page, 'Original physical view'); await page.getByRole('button', { name: 'Send', exact: true }).click();
   await wait(() => f.inputs.length === 1, 'original view dispatch');
-  const oldView = await page.evaluate(() => sessionStorage.getItem('agentui.viewId'));
+  const oldView = await page.evaluate(() => sessionStorage.getItem('openpane.viewId'));
   const original = (await records(page)).flatMap(row => row.frontendSends ?? [])[0];
   const other = await f.context.newPage(); await other.goto(`${f.host.origin}/browser.html`);
   await f.create(other); await draft(other, 'Next physical view'); await other.getByRole('button', { name: 'Send', exact: true }).click();
   await wait(() => f.inputs.length === 2, 'next view dispatch');
-  const nextView = await other.evaluate(() => sessionStorage.getItem('agentui.viewId'));
+  const nextView = await other.evaluate(() => sessionStorage.getItem('openpane.viewId'));
   const successor = (await records(page)).flatMap(row => row.frontendSends ?? []).find(row => row.command.clientCommandId !== original.command.clientCommandId);
   await other.route('**/api/v1', async route => {
     const request = route.request().postDataJSON();
@@ -253,8 +277,8 @@ test('production browser switches recovery views and releases the old lock befor
   const nextRequest = page.waitForRequest(request => request.postDataJSON()?.op === 'frontend-binding' && request.postDataJSON()?.id === successor.command.clientCommandId, { timeout: 5_000 });
   await page.getByRole('button', { name: `Reopen saved view ${nextView}`, exact: true }).click();
   await nextRequest; await connected(page);
-  await page.waitForFunction(async id => !(await navigator.locks.query()).held.some(lock => lock.name === `agentui-view:${id}`), oldView, { timeout: 5_000 });
-  assert.equal(await page.evaluate(id => navigator.locks.request(`agentui-view:${id}`, { ifAvailable: true }, lock => Boolean(lock)), oldView), true);
+  await page.waitForFunction(async id => !(await navigator.locks.query()).held.some(lock => lock.name === `openpane-view:${id}`), oldView, { timeout: 5_000 });
+  assert.equal(await page.evaluate(id => navigator.locks.request(`openpane-view:${id}`, { ifAvailable: true }, lock => Boolean(lock)), oldView), true);
   const before = (await records(page)).flatMap(row => row.frontendSends ?? []);
   releaseOld();
   await wait(() => f.inspect(db => db.prepare('SELECT state FROM frontend_send_owners WHERE command_id=?').get(original.command.clientCommandId).state) === 'unavailable', 'late original host response');

@@ -1,5 +1,5 @@
 {
-  "name": "@agentui/example-mcp-refresh",
+  "name": "@openpane/example-mcp-refresh",
   "version": "0.0.0",
   "private": true,
   "type": "module",

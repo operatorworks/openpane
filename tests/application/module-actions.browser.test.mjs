@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fixture, connected, draft, revealRecovery, customRuntime, wait } from './browser-support.mjs';
+import { fixture, connected, tools, chats, draft, revealRecovery, customRuntime, wait } from './browser-support.mjs';
 
-const entry = body => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.11.0', activate() { ${body} } } })`;
+const entry = body => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { ${body} } } })`;
 const outcome = kind => ({ kind: 'receipt', receipt: { scope: { hostId: 'test', conversationId: 'test' }, clientCommandId: 'test', hostOperationId: 'test', sequence: 1,
   state: ['rejected', 'not-dispatched', 'uncertain'].includes(kind) ? { kind, reason: 'Exact receipt reason' } : { kind } } });
 const status = (page, label) => page.getByRole('status', { name: `${label} status`, exact: true });
@@ -24,9 +24,15 @@ test('nested action identity includes each parent and namespace, with one pendin
     return { modules: ['Left','Right'].map(label => ({ id: label, label, component() { return null; },
       children: [label === 'Left' ? ${module('Left child')} : ${module('Right child')}] })), dispose() {} };`), false,
   `, { manifest: { ...manifest, namespace: 'sibling' }, ${entry(`return { modules: [${module('Sibling')}], dispose() {} };`)} }`);
-  const panel = page.getByRole('complementary', { name: 'Customization fixture' });
+  const region = await tools(page), panel = region.getByRole('complementary', { name: 'Customization fixture' });
   await panel.getByRole('region', { name: 'Left', exact: true }).getByRole('region', { name: 'Left child', exact: true }).waitFor();
+  assert.match(await region.getByRole('paragraph').first().textContent(), /^Runs in .+\.$/);
+  await chats(page);
+  // Tools left the conversation column: no tool fieldset or visible customization panel there.
+  assert.equal(await page.locator('.chat-view').getByRole('group', { name: 'Custom tools' }).count(), 0);
+  assert.equal(await page.locator('.chat-view').getByRole('complementary', { name: /^Customization / }).count(), 0);
   await draft(page, 'Keep the nested action draft');
+  await tools(page);
   await page.getByRole('button', { name: 'Run Left child', exact: true }).evaluate(button => { button.click(); button.click(); });
   assert.deepEqual(await page.evaluate(() => window.calls), { 'Left child': 1 });
   assert.equal(await page.getByRole('button', { name: 'Run Left child', exact: true }).isEnabled(), false);
@@ -40,6 +46,7 @@ test('nested action identity includes each parent and namespace, with one pendin
   await page.evaluate(result => window.finish.Sibling(result), outcome('completed'));
   await status(page, 'Run Left child').filter({ hasText: 'Submitted.' }).waitFor();
   await status(page, 'Run Sibling').filter({ hasText: 'Command completed.' }).waitFor();
+  await chats(page);
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Keep the nested action draft');
   assert.deepEqual(await host.entries(), []);
 });
@@ -50,7 +57,9 @@ test('module actions report admission, receipt and thrown outcomes without autom
   await connected(page);
   await customRuntime(page, host, entry(`window.calls = 0; return { modules: [{ id: 'outcomes', label: 'Outcomes', component() { return null; },
     actions: [{ id: 'run', label: 'Try action', async run() { window.calls++; if (window.throwAction) throw new Error('Exact thrown reason'); return window.result; } }] }], dispose() {} };`));
+  await chats(page);
   await draft(page, 'Outcome draft');
+  await tools(page);
   const variants = [
     [{ kind: 'rejected', reason: 'Exact admission reason' }, 'Submission rejected. Exact admission reason'],
     [{ kind: 'rejected', reason: 'conversation-closed' }, 'Submission rejected. This conversation ended. Start a new chat to keep going.'],
@@ -70,6 +79,7 @@ test('module actions report admission, receipt and thrown outcomes without autom
   await page.getByRole('button', { name: 'Try action', exact: true }).click();
   await status(page, 'Try action').filter({ hasText: 'Action failed. Exact thrown reason' }).waitFor();
   assert.equal(await page.evaluate(() => window.calls), variants.length + 1);
+  await chats(page);
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Outcome draft');
   assert.deepEqual(await host.entries(), []);
 });
@@ -83,13 +93,16 @@ test('navigation captures new action context and ignores old completion while ol
       if (window.sendNow) return context.commands.send('New conversation action');
       return new Promise(resolve => { window.finishOld = resolve; }); } }] }], dispose() {} };`));
   const first = await page.locator('.scope-label').textContent();
+  await tools(page);
   await page.getByRole('button', { name: 'Context action', exact: true }).click();
   await status(page, 'Context action').filter({ hasText: 'Submitting…' }).waitFor();
+  await chats(page);
   await page.getByRole('button', { name: 'New recorded conversation' }).click();
   await wait(async () => await page.locator('.scope-label').textContent() !== first, 'next action context');
   await connected(page);
   const second = await page.locator('.scope-label').textContent();
   await draft(page, 'New conversation draft');
+  await tools(page);
   await page.evaluate(() => window.finishOld({ kind: 'rejected', reason: 'OLD CONVERSATION RESULT' }));
   const refused = await page.evaluate(async () => {
     try { await window.contexts[0].commands.send('Old captured action'); return ''; } catch (error) { return error.message; }
@@ -99,6 +112,7 @@ test('navigation captures new action context and ignores old completion while ol
   await page.evaluate(() => { window.sendNow = true; });
   await page.getByRole('button', { name: 'Context action', exact: true }).click();
   await status(page, 'Context action').filter({ hasText: /^(Submitted|Submission pending|Command completed)\./ }).waitFor();
+  await chats(page);
   await page.locator('.message-user p').filter({ hasText: 'New conversation action' }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.contexts.map(context => context.conversation.conversationId)), [first, second]);
   assert.equal((await host.entries()).length, 1);
@@ -119,6 +133,7 @@ test('unavailable and disconnected conversations disable module actions and guar
     await customRuntime(page, host, entry(`window.calls = 0; return { modules: [{ id: 'gated', label: 'Gated', component({ commands }) { window.captured = commands; return null; },
       actions: [{ id: 'run', label: 'Gated action', run({ commands }) { window.calls++; return commands.send('Gated command'); } }] }], dispose() {} };`));
     if (!unavailable) await host.stop();
+    await tools(page);
     await wait(async () => !await page.getByRole('button', { name: 'Gated action', exact: true }).isEnabled(), 'gated custom action');
     await page.getByRole('button', { name: 'Gated action', exact: true }).evaluate(button => button.click());
     assert.equal(await page.evaluate(() => window.calls), 0);
@@ -137,8 +152,11 @@ test('a descendant render failure isolates its extension and restore disposes on
   await customRuntime(page, host, entry(`return { modules: [{ id: 'same', label: 'Parent', component() { return <p>Parent</p>; },
     children: [{ id: 'same', label: 'Broken child', component() { throw new Error('Nested render failed'); } }] }],
     dispose() { window.disposals = (window.disposals || 0) + 1; } };`), false, sibling);
+  // The failed namespace's alert stays in the conversation column; its healthy sibling's module is in Extensions.
   await page.getByRole('alert').filter({ hasText: 'Nested render failed' }).waitFor();
+  await tools(page);
   await page.getByText('Healthy sibling remains', { exact: true }).waitFor();
+  await chats(page);
   await draft(page, 'Descendant failure draft');
   const editor = await page.getByRole('textbox', { name: 'Message', exact: true }).elementHandle();
   assert.equal(await page.evaluate(() => window.disposals), 1);
@@ -150,4 +168,40 @@ test('a descendant render failure isolates its extension and restore disposes on
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Descendant failure draft');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await page.getByRole('heading', { name: 'Approval required', exact: true }).waitFor();
+});
+
+test('choosing another namespace layout preserves an unresolved module action across placement changes', { timeout: 45_000 }, async t => {
+  const host = await fixture(t), page = await host.page();
+  await page.getByRole('button', { name: 'New recorded conversation' }).click(); await connected(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByLabel('Content layout owner', { exact: true }).selectOption({ label: 'Builtin' }); await chats(page);
+  await customRuntime(page, host, `load: async () => { await new Promise(resolve => setTimeout(resolve, 25)); return { default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+    window.calls ??= 0; window.activations ??= {}; window.activations.module = (window.activations.module ?? 0) + 1; window.disposals ??= 0;
+    return { modules: [{ id: 'parent', label: 'Parent', component() { return null; }, children: [{ id: 'child', label: 'Child', component() { return null; },
+      actions: [{ id: 'run', label: 'Deferred module action', run() { window.calls++; return new Promise(resolve => { window.finishAction = resolve; }); } }] }] }],
+      dispose() { window.disposals++; } };
+  } } }; }`, false,
+    `, { manifest: { ...manifest, namespace: 'layout' }, ${entry(`window.activations ??= {}; window.disposals ??= 0; window.activations.layout = (window.activations.layout ?? 0) + 1;
+      return { modules: [], contentLayout: ({ transcript, modules }) => <section aria-label="Chosen layout">{transcript}{modules}</section>, dispose() { window.disposals++; } };`)} }`);
+  await tools(page); await page.getByRole('button', { name: 'Deferred module action', exact: true }).click();
+  await status(page, 'Deferred module action').filter({ hasText: 'Submitting…' }).waitFor();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByLabel('Content layout owner', { exact: true }).selectOption({ label: 'layout' }); await chats(page);
+  const action = page.getByRole('region', { name: 'Chosen layout' }).getByRole('button', { name: 'Deferred module action', exact: true });
+  await action.waitFor();
+  await action.evaluate(button => button.click()); assert.equal(await page.evaluate(() => window.calls), 1, 'moving the same action cannot invoke it twice');
+  assert.equal(await action.isDisabled(), true, 'moving the same action cannot reopen its pending guard');
+  await status(page, 'Deferred module action').filter({ hasText: 'Submitting…' }).waitFor();
+  await page.evaluate(() => window.finishAction({ kind: 'rejected', reason: 'First action settled' }));
+  await status(page, 'Deferred module action').filter({ hasText: 'First action settled' }).waitFor();
+  await action.click(); assert.equal(await page.evaluate(() => window.calls), 2);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByLabel('Content layout owner', { exact: true }).selectOption({ label: 'Builtin' });
+  await tools(page);
+  assert.equal(await page.getByRole('button', { name: 'Deferred module action', exact: true }).isDisabled(), true);
+  await status(page, 'Deferred module action').filter({ hasText: 'Submitting…' }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.activations), { module: 1, layout: 1 });
+  assert.equal(await page.evaluate(() => window.disposals), 0);
+  await page.evaluate(() => window.finishAction({ kind: 'rejected', reason: 'Second action settled' }));
+  await status(page, 'Deferred module action').filter({ hasText: 'Second action settled' }).waitFor();
 });

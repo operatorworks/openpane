@@ -36,7 +36,7 @@ export function assertPrivateValuesAbsent(payload, canaries) {
 }
 
 export function assertRequestSpan(span, expected) {
-  assert.equal(span.name, 'agentui.host.request');
+  assert.equal(span.name, 'openpane.host.request');
   assert.equal(span.kind, 2);
   assert.ok(BigInt(span.endTimeUnixNano) > BigInt(span.startTimeUnixNano),
     `span duration includes request handling ${span.startTimeUnixNano} -> ${span.endTimeUnixNano}`);
@@ -44,7 +44,7 @@ export function assertRequestSpan(span, expected) {
   assert.deepEqual(span.events ?? [], []);
   assert.deepEqual(span.links ?? [], []);
   assert.deepEqual(attributes(span.attributes), expected);
-  assert.equal(span.status?.code ?? 0, expected['agentui.outcome'] === 'ok' ? 0 : 2);
+  assert.equal(span.status?.code ?? 0, expected['openpane.outcome'] === 'ok' ? 0 : 2);
   assert.ok(!span.status?.message);
 }
 
@@ -63,7 +63,7 @@ export function assertBoundedRequestSpans(received, { serviceName, collectorHead
   assert.equal(spans.length, expected.length, 'only the expected requests export spans, once each');
   for (const span of spans) {
     const values = attributes(span.attributes);
-    assert.deepEqual(Object.keys(values).sort(), ['agentui.credential_class', 'agentui.operation', 'agentui.outcome', 'http.response.status_code']);
+    assert.deepEqual(Object.keys(values).sort(), ['http.response.status_code', 'openpane.credential_class', 'openpane.operation', 'openpane.outcome']);
     assertRequestSpan(span, values);
   }
   const byValue = values => values.map(value => JSON.stringify(value, Object.keys(value).sort())).sort();

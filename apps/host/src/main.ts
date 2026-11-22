@@ -12,7 +12,7 @@ import { parseControlRequest, formatControlResponse, requestControl } from './co
 import type { ControlRequest } from './control.js';
 import { readObservabilityConfiguration } from './observability.js';
 
-const COMMANDS: Readonly<Record<string, readonly string[]>> = { desktop: ['port', 'workspace', 'assets', 'executable', 'preferred'], serve: ['port', 'assets', 'config', 'extensions', 'refresh-builder'], 'browser-dev': ['port', 'assets'], codex: ['port', 'workspace', 'assets', 'executable'], 'codex-sdk': ['port', 'workspace', 'assets', 'executable'], 'claude-sdk': ['port', 'workspace', 'assets', 'model', 'executable'], pi: ['port', 'workspace', 'assets'], 'providers-refresh': [], 'extensions-refresh-request': ['request', 'source', 'expected-revision'], 'extensions-refresh-status': ['request'], 'extensions-refresh-promote': ['request'], 'extensions-select': ['operation', 'expected-revision', 'selection'], 'extensions-apply': ['operation', 'expected-revision', 'request'], 'extensions-retry': ['operation', 'expected-revision', 'request', 'after-attempt'], 'extensions-status': ['operation', 'attempt', 'receipt'] };
+const COMMANDS: Readonly<Record<string, readonly string[]>> = { desktop: ['port', 'workspace', 'assets', 'executable', 'preferred', 'extensions'], serve: ['port', 'assets', 'config', 'extensions', 'refresh-builder'], 'browser-dev': ['port', 'assets'], codex: ['port', 'workspace', 'assets', 'executable'], 'codex-sdk': ['port', 'workspace', 'assets', 'executable'], 'claude-sdk': ['port', 'workspace', 'assets', 'model', 'executable'], pi: ['port', 'workspace', 'assets'], 'providers-refresh': [], 'extensions-refresh-request': ['request', 'source', 'expected-revision'], 'extensions-refresh-status': ['request'], 'extensions-refresh-promote': ['request'], 'extensions-select': ['operation', 'expected-revision', 'selection'], 'extensions-apply': ['operation', 'expected-revision', 'request'], 'extensions-retry': ['operation', 'expected-revision', 'request', 'after-attempt'], 'extensions-status': ['operation', 'attempt', 'receipt'] };
 function selectionFile(path: string | undefined, description = 'artifact selection'): unknown {
   try { return JSON.parse(readFileSync(path ?? '', 'utf8')); }
   catch { throw new Error(`Invalid ${description} file`); }
@@ -56,8 +56,8 @@ async function main(): Promise<void> {
       ...(values.preferred === 'codex' ? [{ name: 'codex', kind: 'codex', cwd: resolve(values.workspace ?? '.'), ...executable } satisfies AgentConfiguration['agents'][number]] : []),
       { name: 'pi', kind: 'pi', cwd: resolve(values.workspace ?? '.') },
     ];
-    const setupCapability = process.env.AGENTUI_SETUP_CAPABILITY ?? '';
-    delete process.env.AGENTUI_SETUP_CAPABILITY;
+    const setupCapability = process.env.OPENPANE_SETUP_CAPABILITY ?? '';
+    delete process.env.OPENPANE_SETUP_CAPABILITY;
     const host = await startBrowserHost({ directory, port, observability: readObservabilityConfiguration(process.env), assetsDirectory: values.assets ? resolve(values.assets) : fileURLToPath(new URL('../../desktop/web-dist-browser/', import.meta.url)),
       ...(extensions === undefined ? {} : { extensions }),
       ...(values['refresh-builder'] === undefined ? {} : { refreshBuilder: values['refresh-builder'] }),

@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import type { HostCompatibility } from '@agentui/contracts/compatibility';
-import { parseArtifactManifest, artifactIdentityText, assertArtifactId } from '@agentui/contracts/artifact';
-import type { ArtifactManifest } from '@agentui/contracts/artifact';
-import { nonempty } from '@agentui/contracts/decode';
+import type { HostCompatibility } from '@openpane/contracts/compatibility';
+import { parseArtifactManifest, artifactIdentityText, assertArtifactId } from '@openpane/contracts/artifact';
+import type { ArtifactManifest } from '@openpane/contracts/artifact';
+import { nonempty } from '@openpane/contracts/decode';
 
-export type { ArtifactManifest } from '@agentui/contracts/artifact';
+export type { ArtifactManifest } from '@openpane/contracts/artifact';
 function digest(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }

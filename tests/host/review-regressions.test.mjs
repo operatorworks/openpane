@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { appendFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { foldDocument } from '@agentui/contracts';
+import { foldDocument } from '@openpane/contracts';
 import { SqliteStore } from '../../packages/host/dist/sqlite-store.js';
 import { budgets } from '../../packages/host/dist/durable-model.js';
 import { fixture, scope, installed, command, empty, completed, snapshot, deferred, note, run, question, projection } from './fixture.mjs';

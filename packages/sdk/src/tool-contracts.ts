@@ -1,5 +1,5 @@
-import type { ConversationScope, RunIdentity } from '@agentui/contracts';
-import type { AgentCapabilities, RunAgentInput } from '@agentui/protocol';
+import type { ConversationScope, RunIdentity } from '@openpane/contracts';
+import type { AgentCapabilities, RunAgentInput } from '@openpane/protocol';
 import type { FrontendPlatform } from './extensions.js';
 
 export type { FrontendPlatform } from './extensions.js';

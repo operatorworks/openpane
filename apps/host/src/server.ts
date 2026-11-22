@@ -6,17 +6,17 @@ import { stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import type { ConversationScope } from '@agentui/contracts';
-import { canonicalJson } from '@agentui/contracts';
-import { CODEX_RUNTIME } from '@agentui/contracts/compatibility';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import type { Transcript, TranscriptEvent } from '@agentui/contracts/conversation';
-import { createCodexDriver, openLocalHost } from '@agentui/host';
-import type { CodexModelDriver, LocalHost, ProviderDriver } from '@agentui/host';
-import type { createPiDriver } from '@agentui/host/pi';
-import type { createClaudeSdkDriver } from '@agentui/host/claude-sdk';
-import type { createCodexSdkDriver } from '@agentui/host/codex-sdk';
-import { openRecordedHost, recordedInstallation } from '@agentui/host/recorded';
+import type { ConversationScope } from '@openpane/contracts';
+import { canonicalJson } from '@openpane/contracts';
+import { CODEX_RUNTIME } from '@openpane/contracts/compatibility';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import type { Transcript, TranscriptEvent } from '@openpane/contracts/conversation';
+import { createCodexDriver, openLocalHost } from '@openpane/host';
+import type { CodexModelDriver, LocalHost, ProviderDriver } from '@openpane/host';
+import type { createPiDriver } from '@openpane/host/pi';
+import type { createClaudeSdkDriver } from '@openpane/host/claude-sdk';
+import type { createCodexSdkDriver } from '@openpane/host/codex-sdk';
+import { openRecordedHost, recordedInstallation } from '@openpane/host/recorded';
 import { openAccessDatabase } from './access-database.js';
 import type { AccessDatabase } from './access-database.js';
 import { ownDirectory } from './ownership.js';
@@ -39,8 +39,8 @@ import { serverArtifactExpectation } from './server-artifact-runtime.js';
 import { createRefreshController } from './refresh-jobs.js';
 import type { RefreshBuilder, RefreshController } from './refresh-jobs.js';
 import type { ExtensionStartup } from './server-selection.js';
-import { createServerExtensions } from '@agentui/host/extensions';
-import type { ServerExtensionReplacement } from '@agentui/host/extensions';
+import { createServerExtensions } from '@openpane/host/extensions';
+import type { ServerExtensionReplacement } from '@openpane/host/extensions';
 import type { SelectionControl } from './selection-protocol.js';
 import { providerExtensionSource } from './provider-extensions.js';
 import type { BrowserProviderExtension, ProviderExtensionSelection } from './provider-extensions.js';
@@ -57,6 +57,8 @@ export interface BrowserHostOptions {
   readonly extensions?: ExtensionStartup;
   readonly refreshBuilder?: string;
   readonly setupCapability?: string;
+  /** Test-only override of the 15-second extension operation deadline. */
+  readonly operationDeadlineMs?: number;
 }
 function piApiKey(): string {
   const apiKey = process.env.OPENCODE_GO_API_KEY;
@@ -66,8 +68,8 @@ function piApiKey(): string {
   return apiKey.trim();
 }
 function claudeApiKey(): string {
-  const apiKey = process.env.AGENTUI_ANTHROPIC_API_KEY;
-  if (!apiKey?.trim()) throw new Error('Set AGENTUI_ANTHROPIC_API_KEY in the host environment before starting Claude.');
+  const apiKey = process.env.OPENPANE_ANTHROPIC_API_KEY;
+  if (!apiKey?.trim()) throw new Error('Set OPENPANE_ANTHROPIC_API_KEY in the host environment before starting Claude.');
   return apiKey.trim();
 }
 export type HostAgentStartup =
@@ -82,7 +84,7 @@ export async function startBrowserHost(options: BrowserHostOptions) {
     ? { default: 'default', agents: [{ ...startup.provider, name: 'default' }] } : null;
   if (startup.kind === 'provider' && startup.provider.kind === 'pi') piApiKey();
   if (startup.kind === 'provider' && startup.provider.kind === 'claude-sdk') claudeApiKey();
-  if (startup.kind === 'desktop' && !/^[a-f0-9]{64}$/.test(options.setupCapability ?? '')) throw new Error('Launch desktop setup through ./agentui.');
+  if (startup.kind === 'desktop' && !/^[a-f0-9]{64}$/.test(options.setupCapability ?? '')) throw new Error('Launch desktop setup through ./openpane.');
   const observability = createHostObservability(options.observability ?? { kind: 'disabled' });
   let owner: ReturnType<typeof ownDirectory>;
   try { owner = ownDirectory(options.directory); }
@@ -98,7 +100,7 @@ export async function startBrowserHost(options: BrowserHostOptions) {
   const agents: InstalledAgent[] = [];
   let defaultInstallation = recordedInstallation;
   let feeds: FeedRegistry | undefined;
-  const providers = createServerExtensions();
+  const providers = createServerExtensions(options.operationDeadlineMs === undefined ? {} : { operationDeadlineMs: options.operationDeadlineMs });
   let control: Awaited<ReturnType<typeof startControl>> | undefined;
   let refresh: RefreshController | undefined;
   let resolveFatal!: () => void;
@@ -235,16 +237,16 @@ export async function startBrowserHost(options: BrowserHostOptions) {
                 if (process.env.OPENCODE_GO_API_KEY?.trim()) await setup.configure(process.env.OPENCODE_GO_API_KEY, 'environment').catch(() => {});
                 break;
               }
-              driver = await (await import('@agentui/host/pi')).createPiDriver({ cwd: provider.cwd,
+              driver = await (await import('@openpane/host/pi')).createPiDriver({ cwd: provider.cwd,
                 sessionDirectory: join(owner.directory, 'pi-sessions'), apiKey: piApiKey(), append, currentRunId });
               break;
             case 'claude-sdk':
-              driver = (await import('@agentui/host/claude-sdk')).createClaudeSdkDriver({ cwd: provider.cwd,
+              driver = (await import('@openpane/host/claude-sdk')).createClaudeSdkDriver({ cwd: provider.cwd,
                 sessionDirectory: join(owner.directory, 'claude-sessions', provider.model), apiKey: claudeApiKey(),
                 model: provider.model, ...(provider.executable ? { claudePathOverride: provider.executable } : {}), append, currentRunId });
               break;
             case 'codex-sdk':
-              driver = (await import('@agentui/host/codex-sdk')).createCodexSdkDriver({ cwd: provider.cwd,
+              driver = (await import('@openpane/host/codex-sdk')).createCodexSdkDriver({ cwd: provider.cwd,
                 ...(provider.executable ? { codexPathOverride: provider.executable } : {}), append, currentRunId });
               break;
             case 'codex': {
@@ -277,7 +279,7 @@ export async function startBrowserHost(options: BrowserHostOptions) {
         } catch (error) {
           if (startup.kind !== 'configured' && startup.kind !== 'desktop') throw error;
           if (driver) { await driver.close(); const index = drivers.indexOf(driver); if (index !== -1) drivers.splice(index, 1); }
-          agents.push({ installation, ...(startup.kind === 'configured' ? { name: provider.name } : {}), availability: { kind: 'unavailable', reason: provider.kind === 'codex' ? `Codex is unavailable. Run codex login on this host, then restart AgentUI. This app requires Codex ${CODEX_RUNTIME.version}.` : 'Agent unavailable. Check its installed runtime and host credentials, then restart the host.' } });
+          agents.push({ installation, ...(startup.kind === 'configured' ? { name: provider.name } : {}), availability: { kind: 'unavailable', reason: provider.kind === 'codex' ? `Codex is unavailable. Run codex login on this host, then restart OpenPane. This app requires Codex ${CODEX_RUNTIME.version}.` : 'Agent unavailable. Check its installed runtime and host credentials, then restart the host.' } });
         }
       }
     }
@@ -314,7 +316,8 @@ export async function startBrowserHost(options: BrowserHostOptions) {
       ? { kind: 'extensions' }
       : { kind: 'native', defaultInstallation, agents: configured ? agents : [{ installation: recordedInstallation, availability: { kind: 'ready' } }] };
     const isClosing = () => closing;
-    const api = createApi({ host, compatibility, feeds: registry, providers, agentSelection, isClosing });
+    const api = createApi({ host, compatibility, feeds: registry, providers, agentSelection, isClosing,
+      extensions: { describe: providers.extensions, call: providers.callOperation } });
     const handler = serviceEndpoint({ client: 'browser-development', hostId, api, files: browser.files, isClosing, observability });
     const native = serviceEndpoint({ client: 'native', hostId, api, isClosing, observability });
     const setupHandler = piSetup && options.setupCapability ? piSetupEndpoint(piSetup, options.setupCapability, () => closing) : null;
@@ -339,7 +342,7 @@ export async function startBrowserHost(options: BrowserHostOptions) {
     const origin = `http://127.0.0.1:${address.port}`;
     control = await startControl(join(owner.directory, 'control.sock'), isClosing, selectionControl, providers.discover, refresh);
     return { origin, hostId, close, fatal, discoverProviders: providers.discover,
-      extensionStatus: providers.status,
+      extensionStatus: providers.status, callOperation: providers.callOperation,
       async replaceProviderExtensions(selected: readonly BrowserProviderExtension[]) {
         return directReplace(readyHost, selected);
       },

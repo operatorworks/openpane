@@ -14,7 +14,7 @@ const entry = fileURLToPath(new URL('../../scripts/build-server-customization.mj
 test('canonical qualification is source independent and two source commits build through the durable owner', async t => {
   const qualified = await qualifyServerCustomizationToolchain();
   assert.equal(qualified.entry, entry);
-  globalThis.AGENTUI_SERVER_CUSTOMIZATION_ABI = qualified.compatibility.abiIdentity;
+  globalThis.OPENPANE_SERVER_CUSTOMIZATION_ABI = qualified.compatibility.abiIdentity;
   const builder = await createInstalledRefreshBuilder({entry,expected:qualified.compatibility});
   assert.equal(builder.kind,'ready');
   assert.deepEqual(builder.identity, qualified.identity);
@@ -31,7 +31,7 @@ test('canonical qualification is source independent and two source commits build
   assert.notEqual(receipt.job.build.pin.artifactId,next.job.build.pin.artifactId);
   assert.notEqual(receipt.job.build.command.id,next.job.build.command.id);
   assert.equal(rows(f.database).length,2);
-  assert.deepEqual((await readdir(f.artifactRoot)).filter(name=>name.startsWith('.agentui-server-')),[]);
+  assert.deepEqual((await readdir(f.artifactRoot)).filter(name=>name.startsWith('.openpane-server-')),[]);
   const closed = owner.close(); assert.equal(owner.close(),closed); await closed;
 });
 
@@ -40,10 +40,10 @@ test('captured invocation directory preserves relative descendants and canonical
   await mkdir(invocation);
   assert.notEqual(invocation, dirname(entry));
   const child = await source.repository('invocation with spaces/relative child');
-  await write(child.directory, 'package.json', { type: 'module', agentui: extension('relative-child') });
+  await write(child.directory, 'package.json', { type: 'module', openpane: extension('relative-child') });
   await write(child.directory, 'index.ts', validSource);
   const childCommit = child.commit();
-  await write(source.repo.directory, 'package.json', { type: 'module', agentui: extension('fixture', {
+  await write(source.repo.directory, 'package.json', { type: 'module', openpane: extension('fixture', {
     extensions: [{ repository: './relative child', commit: childCommit }],
   }) });
   const reference = source.repo.reference(source.repo.commit()), manualDirectory = join(source.root, 'manual artifact');
@@ -54,7 +54,7 @@ test('captured invocation directory preserves relative descendants and canonical
   assert.equal(manual.packages.find(pkg => pkg.identity === manual.root).extensions[0].commit, childCommit);
   t.diagnostic('Canonical manual artifact ' + manualPin.artifactId + ' includes relative child ' + childCommit);
   const qualified = await qualifyServerCustomizationToolchain();
-  globalThis.AGENTUI_SERVER_CUSTOMIZATION_ABI = qualified.compatibility.abiIdentity;
+  globalThis.OPENPANE_SERVER_CUSTOMIZATION_ABI = qualified.compatibility.abiIdentity;
   const original = process.cwd();
   t.after(() => process.chdir(original));
   let pending;
@@ -77,7 +77,7 @@ test('captured invocation directory preserves relative descendants and canonical
   assert.equal(f.stops(), 0);
   assert.equal(rows(f.database).length, 1);
   assert.deepEqual(await owner.inspect('relative-descendant'), receipt);
-  assert.deepEqual((await readdir(f.artifactRoot)).filter(name => name.startsWith('.agentui-server-')), []);
+  assert.deepEqual((await readdir(f.artifactRoot)).filter(name => name.startsWith('.openpane-server-')), []);
   await owner.close();
   t.diagnostic(JSON.stringify({ proof: 'relative-descendant-parity', sourceRoot: source.root, artifactRoot: f.artifactRoot,
     invocation, currentDirectory: process.cwd(), artifactId: manualPin.artifactId, staged: true, liveReplacements: f.replacements() }));
@@ -123,7 +123,7 @@ test('durable command mismatch does not launch a child',async t=>{
 test('explicit transport environment preserves fake Git credentials and drops provider and loader sentinels',async t=>{
   const f=await fixture(t);
   const preserved={GH_TOKEN:'FAKE_GIT_SENTINEL',GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'credential.helper',GIT_CONFIG_VALUE_0:'FAKE_HELPER_SENTINEL',SSH_AUTH_SOCK:'/fake/ssh',HTTPS_PROXY:'http://fake.invalid',SSL_CERT_FILE:'/fake/cert'};
-  const excluded={AGENTUI_SETUP_CAPABILITY:'FAKE_SETUP',OPENAI_API_KEY:'FAKE_PROVIDER',OPENCODE_GO_API_KEY:'FAKE_PROVIDER',OTEL_EXPORTER_OTLP_HEADERS:'FAKE_TELEMETRY',NODE_OPTIONS:'--require=/NEVER_LOAD_SENTINEL',NODE_PATH:'/fake/node',npm_config_userconfig:'/fake/npm'};
+  const excluded={OPENPANE_SETUP_CAPABILITY:'FAKE_SETUP',OPENAI_API_KEY:'FAKE_PROVIDER',OPENCODE_GO_API_KEY:'FAKE_PROVIDER',OTEL_EXPORTER_OTLP_HEADERS:'FAKE_TELEMETRY',NODE_OPTIONS:'--require=/NEVER_LOAD_SENTINEL',NODE_PATH:'/fake/node',npm_config_userconfig:'/fake/npm'};
   for(const [key,value] of Object.entries({...preserved,...excluded})) {
     const original=process.env[key]; process.env[key]=value;
     t.after(()=>{if(original===undefined) delete process.env[key];else process.env[key]=original;});
@@ -161,11 +161,11 @@ for(const kind of ['probe-timeout','timeout']) test(`${kind} obeys its finite de
 
 test('attempt scratch cleanup preserves a sibling and rejects existing ownership',async t=>{
   const f=await fixture(t),builder=await f.open();
-  const sibling=join(f.root,'.agentui-server-sibling'); await mkdir(sibling);await writeFile(join(sibling,'keep'),'unchanged');
-  await mkdir(join(f.root,'.agentui-server-attempt'));
+  const sibling=join(f.root,'.openpane-server-sibling'); await mkdir(sibling);await writeFile(join(sibling,'keep'),'unchanged');
+  await mkdir(join(f.root,'.openpane-server-attempt'));
   assert.deepEqual(await builder.run(f.command(builder)),{kind:'failed',failure:'publication'});
   assert.equal(await readFile(join(sibling,'keep'),'utf8'),'unchanged');
-  await access(join(f.root,'.agentui-server-attempt'));
+  await access(join(f.root,'.openpane-server-attempt'));
 });
 
 for(const name of ['entry','lock']) test(`missing ${name} after qualification rejects before source`,async t=>{

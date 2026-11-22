@@ -1,4 +1,4 @@
-@import '@agentui/ui-primitives/styles.css';
+@import '@openpane/ui-primitives/styles.css';
 
 html, body, #root { margin: 0; min-width: 320px; min-height: 100%; }
 body { margin: 0; }

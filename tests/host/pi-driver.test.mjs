@@ -3,9 +3,9 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { openLocalHost } from '@agentui/host';
-import { createPiDriver } from '@agentui/host/pi';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { openLocalHost } from '@openpane/host';
+import { createPiDriver } from '@openpane/host/pi';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { command, scope, until } from './fixture.mjs';
 
 const frame = (content, finish_reason = null) => `data: ${JSON.stringify({
@@ -14,7 +14,7 @@ const frame = (content, finish_reason = null) => `data: ${JSON.stringify({
 })}\n\n`;
 const key = 'fixture-provider-key-never-persist';
 async function fixture(t, budgets = {}) {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-pi-driver-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-pi-driver-'));
   const requests = [];
   let release;
   let emitText;
@@ -272,10 +272,10 @@ test('the host core imports without evaluating the Pi SDK', async () => {
     import { registerHooks } from 'node:module';
     registerHooks({ resolve(specifier, context, next) {
       assert(!specifier.startsWith('@earendil-works/'), 'Core must not load native Pi dependencies');
-      assert(!specifier.startsWith('@agentui/switchboard-pi'), 'Core must not load Pi adapter');
+      assert(!specifier.startsWith('@openpane/switchboard-pi'), 'Core must not load Pi adapter');
       return next(specifier, context);
     } });
-    const core = await import('@agentui/host');
+    const core = await import('@openpane/host');
     assert.equal(typeof core.openLocalHost, 'function');
   `], { cwd: new URL('../../', import.meta.url), encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);

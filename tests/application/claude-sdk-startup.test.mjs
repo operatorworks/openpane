@@ -5,16 +5,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
-import { CLAUDE_SDK_RUNTIMES } from '@agentui/contracts/compatibility';
+import { CLAUDE_SDK_RUNTIMES } from '@openpane/contracts/compatibility';
 import { DatabaseSync } from 'node:sqlite';
 
 const root = new URL('../../', import.meta.url);
 async function fixture(t, model = 'sonnet') {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-sdk-startup-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-sdk-startup-'));
   const children = [];
   const launch = (args, key = 'unused-claude-startup-key') => {
     const child = spawn(process.execPath, ['apps/host/dist/main.js', ...args, '--data-dir', join(directory, 'data')], {
-      cwd: root, env: { ...process.env, AGENTUI_ANTHROPIC_API_KEY: key === null ? undefined : key, ANTHROPIC_API_KEY: 'ambient-key-is-not-accepted' },
+      cwd: root, env: { ...process.env, OPENPANE_ANTHROPIC_API_KEY: key === null ? undefined : key, ANTHROPIC_API_KEY: 'ambient-key-is-not-accepted' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';
@@ -46,7 +46,7 @@ test('Claude rejects missing or blank API keys before creating state or publishi
     const child = f.launch(['claude-sdk', '--model', 'sonnet', '--workspace', f.directory, '--port', '0'], key);
     assert.equal(await child.exited, 1);
     assert.equal(child.stdout, '');
-    assert.match(child.stderr, /Set AGENTUI_ANTHROPIC_API_KEY in the host environment/);
+    assert.match(child.stderr, /Set OPENPANE_ANTHROPIC_API_KEY in the host environment/);
     await assert.rejects(access(join(f.directory, 'data')), { code: 'ENOENT' });
   }
 });

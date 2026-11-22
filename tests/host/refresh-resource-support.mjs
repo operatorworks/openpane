@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { join } from 'node:path';
-import { canonicalJson, JSON_MAX_NODES, JsonLimitError } from '@agentui/contracts';
-import { parseServerCustomizationArtifact, readServerCustomizationArtifact, serverCustomizationArtifactId } from '@agentui/host/customization';
+import { canonicalJson, JSON_MAX_NODES, JsonLimitError } from '@openpane/contracts';
+import { parseServerCustomizationArtifact, readServerCustomizationArtifact, serverCustomizationArtifactId } from '@openpane/host/customization';
 import { treeIdentity } from '../../packages/host/dist/customization/repository.js';
 import { packageIdentity } from '../../packages/host/dist/customization/sources.js';
 import { REFRESH_SELECTION_PREFIX, RECEIPT_LIMIT } from '../../apps/host/build/tsc/selection-protocol.js';

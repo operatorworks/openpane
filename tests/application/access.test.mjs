@@ -11,7 +11,7 @@ import { ownerPrincipal } from '../../apps/host/build/tsc/principal.js';
 import { ownDirectory } from '../../apps/host/build/tsc/ownership.js';
 
 function directory(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-service-access-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-service-access-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   return directory;
 }

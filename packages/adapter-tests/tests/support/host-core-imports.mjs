@@ -9,12 +9,12 @@ const hook = registerHooks({ resolve(specifier, context, next) {
   if (context.parentURL === schemas && value.url.startsWith(new URL('./', schemas).href) && /\/version-[A-Za-z0-9_-]+\.mjs$/u.test(value.url)) schemaModules.add(value.url);
   urls.push(value.url); return value;
 } });
-const core = await import('@agentui/host');
+const core = await import('@openpane/host');
 hook.deregister();
 assert.equal(core.hostRuntime, 'node');
-assert.ok(urls.includes(resolveHostDependency('@mattsp1290/switchboard')), 'hook observed Switchboard core');
+assert.ok(urls.includes(resolveHostDependency('@operatorworks/switchboard')), 'hook observed Switchboard core');
 assert.ok(urls.includes(schemas), 'host validates offered input with the pinned AG-UI schemas');
-const forbidden = ['@mattsp1290/switchboard/agui', '@agentui/host/agui'].map(specifier => resolveHostDependency(specifier));
+const forbidden = ['@operatorworks/switchboard/agui', '@openpane/host/agui'].map(specifier => resolveHostDependency(specifier));
 assert.ok(urls.every(url => !forbidden.includes(url) && (!url.includes('/@ag-ui/') || schemaModules.has(url))), urls.join('\n'));
 
 assert.ok(urls.every(url => !url.includes('/host/dist/frontend-tools/')), urls.join('\n'));

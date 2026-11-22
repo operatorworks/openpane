@@ -66,7 +66,7 @@ for (const mode of ['disconnect', 'timeout', 'cancel']) test(`actual host work s
   t.after(() => release.resolve());
   const abort = new AbortController();
   const intent = request(`lost-${mode}`, f.first, 0);
-  const running = f.client.callTool({ name: 'agentui_refresh', arguments: { operation: intent } }, undefined, { signal: abort.signal }).catch(error => error);
+  const running = f.client.callTool({ name: 'openpane_refresh', arguments: { operation: intent } }, undefined, { signal: abort.signal }).catch(error => error);
   await Promise.race([entered.promise, running.then(result => { throw new Error('Request finished before build admission: '+JSON.stringify(result)); })]);
   if (mode === 'disconnect') await f.client.close();
   if (mode === 'cancel') abort.abort();

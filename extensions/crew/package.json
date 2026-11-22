@@ -1,0 +1,65 @@
+{
+  "name": "openpane-extension-crew",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": "./dist/index.js",
+    "./file-intents": "./dist/file-intents.js",
+    "./provider": "./dist/provider.js",
+    "./server": "./dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.desktop.json"
+  },
+  "dependencies": {
+    "@openpane/contracts": "0.0.0",
+    "@birbcrew/client": "file:../../vendor/crew-client/dfe1c288bc4f0e338011389e10ad35656d6e4154/birbcrew-client-0.1.0.tgz",
+    "zod": "4.6.6",
+    "@openpane/sdk": "0.0.0",
+    "@ag-ui/client": "file:../../vendor/ag-ui/ed2c1d5b63299d3f08676a1418cc2640bbe55fd1/ag-ui-client-1.0.4.tgz",
+    "@ag-ui/core": "file:../../vendor/ag-ui/ed2c1d5b63299d3f08676a1418cc2640bbe55fd1/ag-ui-core-1.0.4.tgz",
+    "@ag-ui/encoder": "file:../../vendor/ag-ui/ed2c1d5b63299d3f08676a1418cc2640bbe55fd1/ag-ui-encoder-1.0.4.tgz",
+    "@ag-ui/proto": "file:../../vendor/ag-ui/ed2c1d5b63299d3f08676a1418cc2640bbe55fd1/ag-ui-proto-1.0.4.tgz"
+  },
+  "peerDependencies": {
+    "react": "^19.3.0",
+    "@openpane/theme": "0.0.0",
+    "@openpane/ui-primitives": "0.0.0"
+  },
+  "openpane": {
+    "extension": {
+      "namespace": "crew",
+      "trust": "full",
+      "sdkVersion": "0.13.0",
+      "entries": [
+        {
+          "kind": "server",
+          "module": "./dist/server.js"
+        },
+        {
+          "kind": "desktop",
+          "module": "./dist/desktop.js"
+        }
+      ]
+    },
+    "sources": {
+      "./dist/desktop.js": "./src/desktop/index.tsx"
+    }
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "@openpane/theme": {
+      "optional": true
+    },
+    "@openpane/ui-primitives": {
+      "optional": true
+    }
+  }
+}

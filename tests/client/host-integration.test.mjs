@@ -3,9 +3,9 @@ import test from 'node:test';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { canonicalJson } from '@agentui/contracts';
-import { createConversationStore } from '@agentui/client';
-import { openLocalHost, createRecordedDriver } from '@agentui/host';
+import { canonicalJson } from '@openpane/contracts';
+import { createConversationStore } from '@openpane/client';
+import { openLocalHost, createRecordedDriver } from '@openpane/host';
 import { scope, other, installed, projection, deferred } from '../host/fixture.mjs';
 
 const recording = JSON.parse(readFileSync(new URL('./recordings/approval-v1.json', import.meta.url), 'utf8'));
@@ -23,9 +23,9 @@ function observe(store, predicate) {
 }
 function harness(t, afterAcceptance) {
   assert.equal(recording.recordingVersion, 1);
-  assert.equal(recording.provider, 'agentui-recorded');
+  assert.equal(recording.provider, 'openpane-recorded');
   assert.equal(recording.projectionVersion, projection.version);
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-public-integration-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-public-integration-'));
   const backendPath = join(directory, 'external-acceptances.jsonl');
   const hosts = [], clients = [];
   t.after(() => {

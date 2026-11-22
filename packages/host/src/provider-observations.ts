@@ -1,7 +1,7 @@
 import { EventSchema } from '@ag-ui/core/schemas';
-import { canonicalJson, copyJson } from '@agentui/contracts';
-import { count, identifier, record } from '@agentui/contracts/decode';
-import type { AguiOriginalRun, AguiRunBatch, AguiRunSnapshot, ProviderConversation, ProviderModel } from '@agentui/sdk';
+import { canonicalJson, copyJson } from '@openpane/contracts';
+import { count, identifier, record } from '@openpane/contracts/decode';
+import type { AguiOriginalRun, AguiRunBatch, AguiRunSnapshot, ProviderConversation, ProviderModel } from '@openpane/sdk';
 import { providerRun } from './provider-commands.js';
 import type { ProviderRun } from './provider-commands.js';
 import type { ProviderInstallation } from './provider-creation.js';

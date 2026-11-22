@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import { openLocalHost, createCodexDriver } from '@agentui/host';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import { openLocalHost, createCodexDriver } from '@openpane/host';
 import { budgets as defaultHostBudgets } from '../../packages/host/dist/durable-model.js';
 import { command, scope, other, until } from './fixture.mjs';
 
 const longText = '🙂汉"\\\n\u0000'.repeat(8_000);
 function fixture(t, mode, rejectAppend = () => false) {
-  const dir = mkdtempSync(join(tmpdir(), 'agentui-codex-streaming-'));
+  const dir = mkdtempSync(join(tmpdir(), 'openpane-codex-streaming-'));
   const logPath = join(dir, 'rpc.jsonl');
   const outputs = [];
   let host;
@@ -283,7 +283,7 @@ test('a failed rejection-notice append preserves the conclusive native rejection
   assert.equal(f.log().filter(message => message.method === 'turn/start').length, 1);
   assert.equal(f.log().filter(message => message.method === 'turn/interrupt').length, 0);
   assert.deepEqual(f.messages().map(message => message.text),
-    ['This response stopped because AgentUI could not store more output. Try a new conversation.']);
+    ['This response stopped because OpenPane could not store more output. Try a new conversation.']);
 });
 
 for (const mode of ['reject-initialize', 'reject-thread/start', 'lost-start']) {

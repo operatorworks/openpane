@@ -1,8 +1,8 @@
 # Native connection
 
-The stock Mac app reaches a host on the same machine through Rust-owned transport. The standard `./agentui` launcher instead opens the host-served client over loopback or an SSH tunnel; see [launcher setup](../development/launcher.md). This document describes the native entry only.
+The stock Mac app reaches a host on the same machine through Rust-owned transport. The standard `./openpane` launcher instead opens the host-served client over loopback or an SSH tunnel; see [launcher setup](../development/launcher.md). This document describes the native entry only.
 
-AgentUI serves one owner on a private network, so the native client holds no credential. The host admits every request on its native loopback endpoint as the fixed owner principal. The only protected secrets in the app are provider keys, covered at the end.
+OpenPane serves one owner on a private network, so the native client holds no credential. The host admits every request on its native loopback endpoint as the fixed owner principal. The only protected secrets in the app are provider keys, covered at the end.
 
 ## Transport
 
@@ -29,7 +29,7 @@ After upgrading the app, restart the host. A host from before this change still 
 
 Rust detects a host replaced mid-session, for example one restarted with another data directory on the same port, in two ways. A metadata reply that reports a different host ID than the bound one is the first. The second is a scoped request refused with 403 `forbidden`: the new host refuses scopes that belong to the old one, so Rust then sends a metadata request and compares its host ID. In either case, when the host IDs differ, Rust drops the binding and fails with `host-changed`. The app reports this as a lost connection: it disables its controls and keeps local work until the user selects **Reconnect**. The app never rebinds on its own.
 
-Errors are `profile-in-use`, `profile-unavailable`, `network-failed`, `stale`, `host-changed`, `invalid-input`, and `forbidden`. A per-profile lock file in the app data directory excludes a second AgentUI copy using the same profile, which reports `profile-in-use`.
+Errors are `profile-in-use`, `profile-unavailable`, `network-failed`, `stale`, `host-changed`, `invalid-input`, and `forbidden`. A per-profile lock file in the app data directory excludes a second OpenPane copy using the same profile, which reports `profile-in-use`.
 
 ## Interface
 

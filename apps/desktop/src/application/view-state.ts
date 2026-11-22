@@ -1,5 +1,5 @@
-import type { DraftStoragePort } from '@agentui/client';
-import type { ConversationScope } from '@agentui/contracts';
+import type { DraftStoragePort } from '@openpane/client';
+import type { ConversationScope } from '@openpane/contracts';
 
 export interface SavedView {
   readonly version: 2;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { chromium } from 'playwright';
 import { SqliteStore } from '../../packages/host/dist/sqlite-store.js';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { join } from 'node:path';
 import { providerService, fixture, saved, send } from './provider-stream-fixture.mjs';
 import { until } from '../host/fixture.mjs';
@@ -32,7 +32,7 @@ for (const native of [false, true]) test(`actual ${native ? 'host' : 'remote'} a
   assert.equal(document.domain.currentRun.outcome, 'completed');
   assert.equal(document.receipts.send.state.kind, 'accepted');
   assert.equal(final.runs.length, 1);
-  assert.equal(JSON.parse(final.runs[0].data).identity.authority.kind, native ? 'agentui-host' : 'remote-provider');
+  assert.equal(JSON.parse(final.runs[0].data).identity.authority.kind, native ? 'openpane-host' : 'remote-provider');
   feed.close();
   const b = remote.extension(); await f.restart([b]); await until(() => b.calls.ready === 1);
   assert.deepEqual(saved(f), final);
@@ -148,7 +148,7 @@ test('real browser selection and send render a growing reply, completion, and pe
   await page.getByRole('button', { name: 'Provider', exact: true }).click();
   await page.getByRole('button', { name: 'Start new chat with Streaming provider', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'Conversation connected' }).first().waitFor();
-  assert.doesNotMatch(await page.locator('.composer-footer').textContent(), /not available|later update/);
+  assert.doesNotMatch(await page.locator('.shell-footer').textContent(), /not available|later update/);
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).getAttribute('placeholder'), 'Write to your provider…');
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('A real provider reply');
   await page.getByRole('button', { name: 'Send', exact: true }).click();

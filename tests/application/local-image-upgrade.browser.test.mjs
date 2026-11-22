@@ -18,8 +18,8 @@ for (const expected of provenance.fixtureCases) test(`released ${expected.kind} 
   const captured = JSON.parse(source);
   const bundle = await build({ stdin: { contents: `
     import { BrowserViewStorage } from './apps/desktop/src/application/browser-storage.ts';
-    import { createConversationStore } from '@agentui/client';
-    import { transcriptProjection } from '@agentui/contracts/conversation';
+    import { createConversationStore } from '@openpane/client';
+    import { transcriptProjection } from '@openpane/contracts/conversation';
     Object.assign(globalThis, { BrowserViewStorage, createConversationStore, transcriptProjection });
   `, resolveDir: root }, bundle: true, write: false, format: 'iife' });
   const browser = await chromium.launch(); t.after(() => browser.close());

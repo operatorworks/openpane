@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { invoke } from '@tauri-apps/api/core';
-import { record } from '@agentui/contracts/decode';
+import { record } from '@openpane/contracts/decode';
 import './setup.css';
 
 type Storage = 'absent' | 'saved' | 'locked' | 'denied' | 'unavailable';
@@ -28,13 +28,13 @@ const hostDescriptions: Record<Host, string> = {
 };
 const errors: Readonly<Record<string, string>> = {
   'keychain-locked': 'Keychain is locked. Unlock your login Keychain and try again.',
-  'keychain-denied': 'macOS denied Keychain access. Try again and allow AgentUI access when asked.',
-  'keychain-unavailable': 'AgentUI could not save or read the key in Keychain. Check Keychain access and try again. No plaintext fallback is used.',
+  'keychain-denied': 'macOS denied Keychain access. Try again and allow OpenPane access when asked.',
+  'keychain-unavailable': 'OpenPane could not save or read the key in Keychain. Check Keychain access and try again. No plaintext fallback is used.',
   'key-absent': 'No saved key exists for this workspace and target. Enter your OpenCode Go API key.',
   'invalid-key': 'Enter a nonempty API key without line breaks, up to 4096 bytes.',
-  'restart-required': 'Your new key is saved in Keychain. Pi is already connected with a different key. If OPENCODE_GO_API_KEY is set in the launcher terminal or on the SSH host, remove or update it first. Close AgentUI, launch it again, then select Connect saved key to use the new key.',
-  'host-unavailable': 'AgentUI could not connect Pi to the host. Keep the launcher running, check its connection, then try again. A key already saved in Keychain is retained.',
-  'setup-unavailable': 'This window has no active launcher session. Close it and start AgentUI with ./agentui.',
+  'restart-required': 'Your new key is saved in Keychain. Pi is already connected with a different key. If OPENCODE_GO_API_KEY is set in the launcher terminal or on the SSH host, remove or update it first. Close OpenPane, launch it again, then select Connect saved key to use the new key.',
+  'host-unavailable': 'OpenPane could not connect Pi to the host. Keep the launcher running, check its connection, then try again. A key already saved in Keychain is retained.',
+  'setup-unavailable': 'This window has no active launcher session. Close it and start OpenPane with ./openpane.',
 };
 
 function status(value: unknown): SetupStatus {
@@ -73,10 +73,10 @@ function ProviderSetup() {
     return () => { alive.current = false; };
   }, []);
   return <main>
-    <p className="eyebrow">AGENTUI · PROTECTED SETUP</p>
+    <p className="eyebrow">OPENPANE · PROTECTED SETUP</p>
     <h1>Set up Pi</h1>
     <p>Use your OpenCode Go subscription with GLM 5.3.</p>
-    <p>AgentUI includes the compatible Pi SDK. Your installed Pi command is not used for this chat integration.</p>
+    <p>OpenPane includes the compatible Pi SDK. Your installed Pi command is not used for this chat integration.</p>
     {current && <section aria-label="Pi setup status">
       <h2>Target · {current.target}</h2>
       <p role="status">{hostDescriptions[current.host]}</p>

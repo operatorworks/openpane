@@ -41,7 +41,7 @@ function frames(bytes) {
 }
 const wire = values => values.map(value => JSON.stringify(value) + '\n').join('');
 async function directory(t) {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-refresh-control-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-refresh-control-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }

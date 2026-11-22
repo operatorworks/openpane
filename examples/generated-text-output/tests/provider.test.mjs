@@ -5,19 +5,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { canonicalJson, OUTPUT_MAX_BYTES, OUTPUT_MAX_COUNT, OUTPUT_MAX_LIST_BYTES } from '@agentui/contracts';
+import { canonicalJson, OUTPUT_MAX_BYTES, OUTPUT_MAX_COUNT, OUTPUT_MAX_LIST_BYTES } from '@openpane/contracts';
 import { reportProvider } from '../dist/provider.js';
 import { openReportExample } from '../dist/consumer.js';
 
 const instance = { namespace: 'reports', installationId: 'reports', generation: '1', protocolVersion: '1' };
 const intent = (conversationId = randomUUID()) => ({ kind: 'create', operationId: randomUUID(), scope: { hostId: 'host', conversationId }, agent: { instance, kind: 'agent', opaqueId: 'writer' } });
 const send = (binding, text = 'A report. é🐦\n') => ({ kind: 'send', operationId: randomUUID(), binding, request: { text } });
-const createReceipt = value => ({ kind: 'confirmed', evidence: null, value: { kind: 'agentui-created', creation: value,
+const createReceipt = value => ({ kind: 'confirmed', evidence: null, value: { kind: 'openpane-created', creation: value,
   authority: { kind: 'remote-provider', binding: { namespace: 'reports', installationId: 'reports', opaqueSessionId: value.operationId } } } });
 const sendReceipt = value => ({ kind: 'confirmed', evidence: null, value: { kind: 'send', state: 'completed', run: {
   binding: value.binding, ref: { instance, kind: 'run', opaqueId: value.operationId } } } });
 function directory(t) {
-  const path = mkdtempSync(join(tmpdir(), 'agentui-report-'));
+  const path = mkdtempSync(join(tmpdir(), 'openpane-report-'));
   t.after(() => rmSync(path, { recursive: true, force: true }));
   return path;
 }
@@ -75,18 +75,18 @@ test('creation refuses one byte beyond complete-list capacity without encoding, 
 });
 
 test('exact listing-capable context retains 32 maximum-byte payloads through public listing and evicts only result 1 at 33', async t => {
-  const previous = process.env.AGENTUI_REPORT_DATABASE;
-  t.after(() => { if (previous === undefined) delete process.env.AGENTUI_REPORT_DATABASE; else process.env.AGENTUI_REPORT_DATABASE = previous; });
+  const previous = process.env.OPENPANE_REPORT_DATABASE;
+  t.after(() => { if (previous === undefined) delete process.env.OPENPANE_REPORT_DATABASE; else process.env.OPENPANE_REPORT_DATABASE = previous; });
   for (const prefix of ['c', 'é🐦"\\\n']) {
     const dir = directory(t), { accepted, refused } = listingBoundary(prefix), scope = accepted.scope;
     assert.equal(Buffer.byteLength(canonicalJson(worstListing(createReceipt(refused).value))) -
       Buffer.byteLength(canonicalJson(worstListing(createReceipt(accepted).value))), OUTPUT_MAX_COUNT);
     if (prefix !== 'c') assert.ok(Buffer.byteLength(canonicalJson(scope)) > JSON.stringify(scope).length);
-    process.env.AGENTUI_REPORT_DATABASE = join(dir, 'reports.sqlite');
+    process.env.OPENPANE_REPORT_DATABASE = join(dir, 'reports.sqlite');
     let example = await openReportExample({ hostPath: join(dir, 'host.sqlite'), scope });
     const binding = example.host.creation(scope).observation.binding;
     await example.close();
-    const { provider, connected } = await connect(process.env.AGENTUI_REPORT_DATABASE);
+    const { provider, connected } = await connect(process.env.OPENPANE_REPORT_DATABASE);
     try {
       for (let i = 0; i < OUTPUT_MAX_COUNT; i++) assert.equal((await connected.submit(send(binding, 'é'.repeat(32768)))).kind, 'confirmed');
       const listing = await connected.outputs.list(binding);
@@ -133,9 +133,9 @@ test('startup rejects a previously confirmed oversized listing context without r
 
 test('normal installed-entry loader and public LocalHost preserve creation, completed command and output on restart', async t => {
   const dir = directory(t), scope = { hostId: 'host', conversationId: 'consumer' }, hostPath = join(dir, 'host.sqlite');
-  const previous = process.env.AGENTUI_REPORT_DATABASE;
-  process.env.AGENTUI_REPORT_DATABASE = join(dir, 'reports.sqlite');
-  t.after(() => { if (previous === undefined) delete process.env.AGENTUI_REPORT_DATABASE; else process.env.AGENTUI_REPORT_DATABASE = previous; });
+  const previous = process.env.OPENPANE_REPORT_DATABASE;
+  process.env.OPENPANE_REPORT_DATABASE = join(dir, 'reports.sqlite');
+  t.after(() => { if (previous === undefined) delete process.env.OPENPANE_REPORT_DATABASE; else process.env.OPENPANE_REPORT_DATABASE = previous; });
   let example = await openReportExample({ hostPath, scope });
   t.after(async () => example.close());
   const count = encodings(t), id = randomUUID(), text = 'Exact report é🐦\n';
@@ -283,7 +283,7 @@ test('logical identities, UTF-8 validation, exclusive ownership, once-only dispo
     b => { b.creation.scope.hostId += 'other'; }, b => { b.creation.scope.conversationId += 'other'; },
     b => { b.creation.operationId = randomUUID(); }, b => { b.creation.agent.opaqueId = 'other'; },
     ...['namespace', 'installationId', 'generation', 'protocolVersion'].map(key => b => { b.creation.agent.instance[key] += 'other'; }),
-    b => { b.authority.kind = 'agentui-host'; b.authority.hostId = 'host'; },
+    b => { b.authority.kind = 'openpane-host'; b.authority.hostId = 'host'; },
     ...['namespace', 'installationId', 'opaqueSessionId'].map(key => b => { b.authority.binding[key] += 'other'; }),
   ];
   for (const mutate of mutations) {

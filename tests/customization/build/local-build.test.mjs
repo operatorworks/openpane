@@ -13,7 +13,7 @@ function fixture(t) {
 }
 test('catalog sources have locale-independent code-unit order', () => {
   const node = { identity: 'root', commit: 'commit', subdirectory: '', inputs: [], npm: {}, repositoryDirectory: '/tmp/root', directory: '/tmp/root', extensions: [],
-    customization: { local: { manifest: { sdkVersion: '0.11.0', namespace: 'example', entries: [] }, sources: new Map([['./z.js', 'z'], ['./t.js', 't'], ['./s.js', 's'], ['./B.js', 'B']]) } } };
+    customization: { local: { manifest: { sdkVersion: '0.13.0', namespace: 'example', entries: [] }, sources: new Map([['./z.js', 'z'], ['./t.js', 't'], ['./s.js', 's'], ['./B.js', 'B']]) } } };
   assert.deepEqual(desktopPlan(node).identity.packages[0].local.sources.map(source => source.module), ['./B.js', './s.js', './t.js', './z.js']);
 });
 
@@ -62,9 +62,9 @@ test('symlinked output parent builds committed JSX with the installed ABI and ig
   const f = fixture(t), linked = join(f.directory, 'linked');
   symlinkSync(f.directory, linked, 'dir');
   f.write('desktop/index.tsx', `import { useState } from 'react';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { UiExtensionEntry } from '@agentui/sdk/react';
-import { Surface } from '@agentui/ui-primitives/desktop';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { UiExtensionEntry } from '@openpane/sdk/react';
+import { Surface } from '@openpane/ui-primitives/desktop';
 import { reviewPrompt } from '../shared/prompts.js';
 function Plan() { const [prompt] = useState(reviewPrompt); return <Surface>Committed JSX {prompt}</Surface>; }
 export default { kind: 'desktop', sdkVersion: EXTENSION_SDK_VERSION,
@@ -99,10 +99,10 @@ const cases = [
   ['parent escape', "import '../../escape.js';", /Unsupported customization import/],
   ['absolute import', "import '/etc/passwd';", /Unsupported customization import/],
   ['bare import', "import 'other-package';", /Unsupported customization import/],
-  ['native UI package', "import '@agentui/ui-primitives/native';", /Unsupported customization import/],
-  ['UI stylesheet entry', "import '@agentui/ui-primitives/styles.css';", /Unsupported customization import/],
+  ['native UI package', "import '@openpane/ui-primitives/native';", /Unsupported customization import/],
+  ['UI stylesheet entry', "import '@openpane/ui-primitives/styles.css';", /Unsupported customization import/],
   ['require member', "require.resolve('./value.js');", /requireMember/],
-  ['unlisted AgentUI package', "import '@agentui/host';", /Unsupported customization import/],
+  ['unlisted OpenPane package', "import '@openpane/host';", /Unsupported customization import/],
   ['missing source', "import './missing.js';", /Unsupported customization import/],
   ['computed import', 'import(globalThis.moduleName);', /computed or ambient/],
   ['import meta', 'console.log(import.meta.glob("./*.tsx"));', /computed or ambient/],
@@ -130,7 +130,7 @@ test('author scripts and compiler configuration do not execute', { timeout: 60_0
 test('no desktop entry uses the ordinary app and an existing nonempty directory stays untouched', { timeout: 30_000 }, t => {
   const f = fixture(t);
   const input = JSON.parse(readFileSync(join(f.repo, 'package.json')));
-  input.agentui.extension.entries[0].kind = 'ios';
+  input.openpane.extension.entries[0].kind = 'ios';
   f.write('package.json', JSON.stringify(input));
   const commit = f.commit();
   buildCustom(f, commit);
@@ -160,20 +160,20 @@ test('empty and unrelated repositories build the default app', { timeout: 30_000
 test('builds every committed desktop entry in graph order and changes identity with a descendant', { timeout: 60_000 }, t => {
   const f = fixture(t), child = fixture(t);
   const childPackage = JSON.parse(readFileSync(join(child.repo, 'package.json')));
-  childPackage.agentui.extension.namespace = 'child';
+  childPackage.openpane.extension.namespace = 'child';
   child.write('package.json', JSON.stringify(childPackage));
   const first = child.commit();
   const rootPackage = JSON.parse(readFileSync(join(f.repo, 'package.json')));
-  rootPackage.agentui.extensions = [{ repository: child.repo, commit: first }];
+  rootPackage.openpane.extensions = [{ repository: child.repo, commit: first }];
   f.write('package.json', JSON.stringify(rootPackage));
   buildCustom(f);
   const artifact = readArtifactBytes(join(f.directory, 'browser'), 'browser-development');
   const identity = JSON.parse(artifact.files.get('customization-identity.json'));
-  assert.deepEqual(identity.entries.map(entry => identity.packages.find(pkg => pkg.identity === entry.packageIdentity).local.manifest.namespace), [rootPackage.agentui.extension.namespace, 'child']);
+  assert.deepEqual(identity.entries.map(entry => identity.packages.find(pkg => pkg.identity === entry.packageIdentity).local.manifest.namespace), [rootPackage.openpane.extension.namespace, 'child']);
   assert.deepEqual(identity.packages.map(pkg => pkg.commit), [identity.packages[0].commit, first]);
   assert.ok(!JSON.stringify(identity).includes(child.repo));
   child.write('shared/prompts.ts', "export const reviewPrompt = 'Child updated';");
-  rootPackage.agentui.extensions[0].commit = child.commit();
+  rootPackage.openpane.extensions[0].commit = child.commit();
   f.write('package.json', JSON.stringify(rootPackage));
   buildCustom(f, f.commit(), join(f.directory, 'updated'));
   const updated = readArtifactBytes(join(f.directory, 'updated'), 'browser-development');
@@ -183,7 +183,7 @@ test('builds every committed desktop entry in graph order and changes identity w
 
 for (const [name, source] of [
   ['missing default', 'export const value = 1;'],
-  ['wrong kind', "export default { kind: 'server', sdkVersion: '0.11.0', activate() {} };"],
+  ['wrong kind', "export default { kind: 'server', sdkVersion: '0.13.0', activate() {} };"],
   ['wrong SDK', "export default { kind: 'desktop', sdkVersion: 'wrong', activate() {} };"],
   ['import exception', "throw new Error('entry failed'); export default {};"],
 ]) test(`browser qualification rejects ${name} without publishing`, { timeout: 30_000 }, t => {
@@ -197,7 +197,7 @@ for (const [name, source] of [
 test('normal Vite raw assets remain available to prepared modules', { timeout: 30_000 }, t => {
   const f = fixture(t);
   f.write('desktop/index.tsx', `import prompt from '../shared/prompts.ts?raw';
-    export default { kind: 'desktop', sdkVersion: '0.11.0', activate() { return { modules: [], dispose() {}, prompt }; } };`);
+    export default { kind: 'desktop', sdkVersion: '0.13.0', activate() { return { modules: [], dispose() {}, prompt }; } };`);
   buildCustom(f);
   const artifact = readArtifactBytes(join(f.directory, 'browser'), 'browser-development');
   assert.match([...artifact.files.values()].map(bytes => bytes.toString()).join('\n'), /Review our current plan/);
@@ -210,7 +210,7 @@ test('literal dynamic imports and CSS URLs build from contained sources', { time
   f.write('desktop/index.tsx', `import style from './style.css?url';
     const lazy = () => import('./lazy.js');
     if (new URL(style).pathname.endsWith('.css') === false) throw new Error('asset failed');
-    export default { kind: 'desktop', sdkVersion: '0.11.0', async activate() {
+    export default { kind: 'desktop', sdkVersion: '0.13.0', async activate() {
       const loaded = await lazy();
       const response = await fetch(style);
       if (loaded.default !== 'lazy loaded marker' || !response.ok || !(await response.text()).includes('#010203')) throw new Error('asset loading failed');
@@ -225,11 +225,11 @@ test('literal dynamic imports and CSS URLs build from contained sources', { time
 test('equal child trees compile once while each pinned commit remains in provenance', { timeout: 30_000 }, t => {
   const f = fixture(t), child = fixture(t);
   const childPackage = JSON.parse(readFileSync(join(child.repo, 'package.json')));
-  childPackage.agentui.extension.namespace = 'child';
+  childPackage.openpane.extension.namespace = 'child';
   child.write('package.json', JSON.stringify(childPackage));
   const first = child.commit(), second = child.commit();
   const rootPackage = JSON.parse(readFileSync(join(f.repo, 'package.json')));
-  rootPackage.agentui.extensions = [first, second].map(commit => ({ repository: child.repo, commit }));
+  rootPackage.openpane.extensions = [first, second].map(commit => ({ repository: child.repo, commit }));
   f.write('package.json', JSON.stringify(rootPackage));
   buildCustom(f);
   const artifact = readArtifactBytes(join(f.directory, 'browser'), 'browser-development');

@@ -1,7 +1,7 @@
-import { canonicalJson, parseCommand, parseScope, sameScope } from '@agentui/contracts';
-import type { ConversationScope } from '@agentui/contracts';
-import { exact, identifier, record } from '@agentui/contracts/decode';
-import { IMAGE_MAX_BYTES, parseImageAttachment, parseImageName, parseUploadId } from '@agentui/contracts/image';
+import { canonicalJson, parseCommand, parseScope, sameScope } from '@openpane/contracts';
+import type { ConversationScope } from '@openpane/contracts';
+import { exact, identifier, record } from '@openpane/contracts/decode';
+import { IMAGE_MAX_BYTES, parseImageAttachment, parseImageName, parseUploadId } from '@openpane/contracts/image';
 import type { FrontendRecoveryReference, ComposerImageRecord, LocalRecords, OutboxEntry } from './types.js';
 
 export function immutable<T>(value: T, visited = new WeakSet<object>()): T {

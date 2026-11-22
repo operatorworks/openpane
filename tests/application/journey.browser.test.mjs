@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { preview } from 'vite';
 import { repository, buildCustom } from '../customization/build/support.mjs';
-import { root, wait, fixture, connected, draft, revealRecovery, customRuntime } from './browser-support.mjs';
+import { root, wait, fixture, connected, draft, revealRecovery, customRuntime, tools, chats } from './browser-support.mjs';
 
 test('desktop connection action opens the host app directly and keeps conversations on return', { timeout: 45_000 }, async t => {
   const host = await fixture(t);
@@ -170,7 +170,7 @@ test('built browser app opens two views, streams, races approval and recovers or
   await bob.reload();
   await connected(bob);
   assert.equal(await bob.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Bob keeps this draft');
-  if (process.env.AGENTUI_SCREENSHOT) await alice.screenshot({ path: process.env.AGENTUI_SCREENSHOT, fullPage: true });
+  if (process.env.OPENPANE_SCREENSHOT) await alice.screenshot({ path: process.env.OPENPANE_SCREENSHOT, fullPage: true });
 });
 
 test('duplicate tabs acquire separate writable views and uncertain creation is explicit', { timeout: 60_000 }, async t => {
@@ -192,12 +192,12 @@ test('duplicate tabs acquire separate writable views and uncertain creation is e
   await connected(page);
   assert.equal(await page.locator('.scope-label').textContent(), originalScope.conversationId);
   await draft(page, 'Original tab draft');
-  const viewId = await page.evaluate(() => sessionStorage.getItem('agentui.viewId'));
+  const viewId = await page.evaluate(() => sessionStorage.getItem('openpane.viewId'));
   const popupPromise = page.waitForEvent('popup');
   await page.evaluate(() => window.open('/browser.html', '_blank'));
   const duplicate = await popupPromise;
   await duplicate.getByRole('button', { name: 'New recorded conversation' }).waitFor();
-  await wait(async () => await duplicate.evaluate(() => sessionStorage.getItem('agentui.viewId')) !== viewId, 'exclusive duplicate view');
+  await wait(async () => await duplicate.evaluate(() => sessionStorage.getItem('openpane.viewId')) !== viewId, 'exclusive duplicate view');
   await duplicate.getByRole('button', { name: new RegExp(`Open conversation ${originalScope.conversationId}$`) }).click();
   await connected(duplicate);
   assert.equal(await duplicate.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), '');
@@ -213,7 +213,7 @@ test('duplicate tabs acquire separate writable views and uncertain creation is e
   await reopened.getByRole('button', { name: `Reopen saved view ${viewId}`, exact: true }).click();
   await connected(reopened);
   assert.equal(await reopened.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Original tab draft');
-  assert.equal(await reopened.evaluate(() => sessionStorage.getItem('agentui.viewId')), viewId);
+  assert.equal(await reopened.evaluate(() => sessionStorage.getItem('openpane.viewId')), viewId);
 });
 
 test('custom content failure keeps host controls and restores the same connected store', { timeout: 45_000 }, async t => {
@@ -288,7 +288,7 @@ test('incompatible metadata and unsupported draft storage block commands without
   await connected(page);
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Do not discard this draft');
   await page.evaluate(async () => {
-    const open = indexedDB.open('agentui-browser-views', 1);
+    const open = indexedDB.open('openpane-browser-views', 1);
     const db = await new Promise((resolve, reject) => { open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error); });
     const transaction = db.transaction('records', 'readwrite'), store = transaction.objectStore('records');
     const cursor = store.openCursor();
@@ -499,7 +499,7 @@ test('an unreadable foreign saved view leaves the current conversation and draft
   const conversation = await page.locator('.scope-label').textContent();
   await draft(page, 'My own draft survives another view’s bad record');
   await page.evaluate(async hostId => {
-    const request = indexedDB.open('agentui-browser-views', 1);
+    const request = indexedDB.open('openpane-browser-views', 1);
     const db = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
     const transaction = db.transaction('records', 'readwrite');
     transaction.objectStore('records').put({ version: 3, route: null, pendingCreation: null }, ['view', 'unreadable-other-view', hostId]);
@@ -518,6 +518,7 @@ test('an unreadable foreign saved view leaves the current conversation and draft
 
 test('committed custom artifact sends one exact prompt, retains drafts and restores the healthy composer', { timeout: 90_000 }, async t => {
   const custom = repository();
+  custom.write('desktop/index.tsx', await readFile(join(root, 'tests/application/fixtures/global-layout.tsx'), 'utf8'));
   t.after(() => rm(custom.directory, { recursive: true, force: true }));
   const commit = custom.commit();
   custom.write('shared/prompts.ts', "export const reviewPrompt = 'DIRTY PROMPT';");
@@ -582,7 +583,7 @@ test('committed custom artifact sends one exact prompt, retains drafts and resto
   assert.equal(await page.getByRole('button', { name: 'approve', exact: true }).isEnabled(), true);
   await page.getByRole('button', { name: 'Send', exact: true }).scrollIntoViewIfNeeded();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no horizontal overflow at minimum size');
-  if (process.env.AGENTUI_CUSTOM_SCREENSHOT) await page.screenshot({ path: process.env.AGENTUI_CUSTOM_SCREENSHOT, fullPage: true });
+  if (process.env.OPENPANE_CUSTOM_SCREENSHOT) await page.screenshot({ path: process.env.OPENPANE_CUSTOM_SCREENSHOT, fullPage: true });
   const editor = await page.getByRole('textbox', { name: 'Message', exact: true }).elementHandle();
   await revealRecovery(page);
   await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
@@ -599,31 +600,34 @@ test('a prepared graph renders both hook modules and shares SDK generation state
   const first = repository(), second = repository();
   t.after(() => Promise.all([rm(first.directory, { recursive: true, force: true }), rm(second.directory, { recursive: true, force: true })]));
   const child = JSON.parse(await readFile(join(second.repo, 'package.json'), 'utf8'));
-  child.agentui.extension.namespace = 'second';
+  child.openpane.extension.namespace = 'second';
   second.write('package.json', JSON.stringify(child));
-  second.write('desktop/index.tsx', `import React from 'react'; import {pinFrontendTools} from '@agentui/sdk/tools';
+  second.write('desktop/index.tsx', `import React from 'react'; import {pinFrontendTools} from '@openpane/sdk/tools';
     function View(){const [value] = React.useState('Second graph hook'); return <p>{value}</p>}
-    export default {kind:'desktop',sdkVersion:'0.11.0',async activate(){
+    export default {kind:'desktop',sdkVersion:'0.13.0',async activate(){
       while (!window.graphGeneration) await new Promise(resolve => setTimeout(resolve, 0));
       const generation = await window.graphGeneration;
-      const run = {conversation:{hostId:'host',conversationId:'conversation'},runId:'run',authority:{kind:'agentui-host',hostId:'host',binding:{namespace:'fixture',installationId:'i',opaqueSessionId:'s'}}};
+      const run = {conversation:{hostId:'host',conversationId:'conversation'},runId:'run',authority:{kind:'openpane-host',hostId:'host',binding:{namespace:'fixture',installationId:'i',opaqueSessionId:'s'}}};
       const pin = pinFrontendTools({generations:[generation],platform:'desktop',run,capabilities:undefined}); pin.release();
       return {modules:[{id:'module',label:'Second',component:View}],dispose(){window.secondDisposed = true}};
     }};`);
   const childCommit = second.commit();
   const parent = JSON.parse(await readFile(join(first.repo, 'package.json'), 'utf8'));
-  parent.agentui.extensions = [{ repository: second.repo, commit: childCommit }];
+  parent.openpane.extensions = [{ repository: second.repo, commit: childCommit }];
   first.write('package.json', JSON.stringify(parent));
-  first.write('desktop/index.tsx', `import React from 'react'; import {createFrontendToolGeneration} from '@agentui/sdk/tools';
+  first.write('desktop/index.tsx', `import React from 'react'; import {createFrontendToolGeneration} from '@openpane/sdk/tools';
     function View(){const [value] = React.useState('First graph hook'); return <p>{value}</p>}
     window.graphGeneration = createFrontendToolGeneration({namespace:'fixture',generation:'one',platform:'desktop',activate(){return {dispose(){}}},capture(){return undefined}}).then(value=>value.generation);
-    export default {kind:'desktop',sdkVersion:'0.11.0',activate(){return {modules:[{id:'module',label:'First',component:View}],dispose(){window.firstDisposed = true}}}};`);
+    export default {kind:'desktop',sdkVersion:'0.13.0',activate(){return {modules:[{id:'module',label:'First',component:View}],dispose(){window.firstDisposed = true}}}};`);
   buildCustom(first);
   const host = await fixture(t, join(first.directory, 'browser')), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation' }).click();
   await connected(page);
-  await page.getByText('First graph hook').waitFor();
-  await page.getByText('Second graph hook').waitFor();
+  // Module content runs from the Extensions view's conversation tools.
+  const region = await tools(page);
+  await region.getByText('First graph hook').waitFor();
+  await region.getByText('Second graph hook').waitFor();
+  await chats(page);
   await revealRecovery(page);
   await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   await wait(() => page.evaluate(() => window.firstDisposed && window.secondDisposed), 'both graph disposals');
@@ -635,12 +639,13 @@ test('a failed customization leaves its hook-using sibling active and restore di
   await connected(page);
   const failure = "load: async () => { throw new Error('First failed'); }";
   const sibling = `, { manifest: { ...manifest, namespace: 'sibling' }, load: async () => ({ default: {
-    kind: 'desktop', sdkVersion: '0.11.0', activate() { return { modules: [{ id: 'same', label: 'Sibling',
+    kind: 'desktop', sdkVersion: '0.13.0', activate() { return { modules: [{ id: 'same', label: 'Sibling',
       component() { const [value] = React.useState('Sibling hook works'); return <p>{value}</p>; } }],
       dispose() { window.siblingDisposals = (window.siblingDisposals || 0) + 1; } }; } } }) }`;
   await customRuntime(page, host, failure, false, sibling);
   await page.getByRole('alert').filter({ hasText: 'Custom tools could not load.' }).waitFor();
-  await page.getByText('Sibling hook works').waitFor();
+  await (await tools(page)).getByText('Sibling hook works').waitFor();
+  await chats(page);
   await revealRecovery(page);
   await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   await wait(() => page.evaluate(() => window.siblingDisposals === 1), 'sibling disposal');
@@ -648,11 +653,11 @@ test('a failed customization leaves its hook-using sibling active and restore di
 
 for (const [label, body, disposed] of [
   ['import', "load: async () => { throw new Error('Import failed'); }", 0],
-  ['activation', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.11.0', activate() { throw new Error('Activation failed'); } } })", 0],
+  ['activation', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { throw new Error('Activation failed'); } } })", 0],
   ['compatibility', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.2.0', activate() {} } })", 0],
-  ['invalid contributions', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.11.0', activate() { return { dispose() { window.disposals = (window.disposals || 0) + 1; }, modules: null }; } } })", 1],
-  ['invalid actions', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.11.0', activate() { return { dispose() { window.disposals = (window.disposals || 0) + 1; }, modules: [{ id: 'x', label: 'X', component() { return null; }, actions: [{ id: 'bad', label: 'Bad', run: null }] }] }; } } })", 1],
-  ['render', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.11.0', activate() { return { dispose() { window.disposals = (window.disposals || 0) + 1; }, modules: [{ id: 'x', label: 'X', component() { throw new Error('Render failed'); } }] }; } } })", 1],
+  ['invalid contributions', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { return { dispose() { window.disposals = (window.disposals || 0) + 1; }, modules: null }; } } })", 1],
+  ['invalid actions', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { return { dispose() { window.disposals = (window.disposals || 0) + 1; }, modules: [{ id: 'x', label: 'X', component() { return null; }, actions: [{ id: 'bad', label: 'Bad', run: null }] }] }; } } })", 1],
+  ['render', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { return { dispose() { window.disposals = (window.disposals || 0) + 1; }, modules: [{ id: 'x', label: 'X', component() { throw new Error('Render failed'); } }] }; } } })", 1],
 ]) test(`custom ${label} failure stays local and disposes its lifetime`, { timeout: 45_000 }, async t => {
   const host = await fixture(t), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation' }).click();
@@ -673,7 +678,7 @@ test('restoring during activation disposes a late lifetime once and catches clea
   const host = await fixture(t), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation' }).click();
   await connected(page);
-  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.11.0', activate() {
+  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
     return new Promise(resolve => { window.finishActivation = () => resolve({ modules: [], dispose() { window.disposals = (window.disposals || 0) + 1; return Promise.reject(new Error('Cleanup rejected')); } }); });
   } } })`);
   await wait(() => page.evaluate(() => typeof window.finishActivation === 'function'), 'pending activation');
@@ -694,23 +699,29 @@ test('activation survives navigation and healthy restore disposes once while kee
   await page.getByRole('button', { name: 'New recorded conversation' }).click();
   await connected(page);
   const first = await page.locator('.scope-label').textContent();
-  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.11.0', activate() {
+  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
     window.activations = (window.activations || 0) + 1;
     return { modules: [{ id: 'working', label: 'Working', component({ conversation }) {
       const [count, setCount] = React.useState(0);
       return React.createElement('button', { onClick: () => setCount(count + 1) }, 'Custom count ' + count + ' ' + conversation.conversationId);
     } }], dispose() { window.disposals = (window.disposals || 0) + 1; } };
   } } })`);
+  // Module state lives in the Extensions view's conversation tools and survives switching views.
+  await tools(page);
   await page.getByRole('button', { name: `Custom count 0 ${first}`, exact: true }).click();
   await page.getByRole('button', { name: `Custom count 1 ${first}`, exact: true }).waitFor();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Chats', exact: true }).click();
+  await tools(page);
   await page.getByRole('button', { name: `Custom count 1 ${first}`, exact: true }).waitFor();
+  await chats(page);
   await page.getByRole('button', { name: 'New recorded conversation' }).click();
   await wait(async () => await page.locator('.scope-label').textContent() !== first, 'next conversation selected');
   const second = await page.locator('.scope-label').textContent();
+  await tools(page);
   await page.getByRole('button', { name: `Custom count 0 ${second}`, exact: true }).waitFor();
   assert.equal(await page.evaluate(() => window.activations), 1);
+  await chats(page);
   await draft(page, 'Healthy lifetime draft');
   await revealRecovery(page);
   await page.getByRole('button', { name: 'Restore default view', exact: true }).click();

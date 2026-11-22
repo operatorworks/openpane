@@ -6,7 +6,7 @@ import { Worker } from 'node:worker_threads';
 import { DatabaseSync } from 'node:sqlite';
 import { SqliteStore } from '../../packages/host/dist/sqlite-store.js';
 import { budgets } from '../../packages/host/dist/durable-model.js';
-import { IMAGE_HOST_MAX_BYTES, IMAGE_HOST_MAX_COUNT, IMAGE_MAX_BYTES } from '@agentui/contracts/image';
+import { IMAGE_HOST_MAX_BYTES, IMAGE_HOST_MAX_COUNT, IMAGE_MAX_BYTES } from '@openpane/contracts/image';
 import { openAccessDatabase } from '../../apps/host/build/tsc/access-database.js';
 import { fixture, projection, scope, other, installed, command } from './fixture.mjs';
 import { chunk, png, screenshotPng } from './image-fixtures.mjs';

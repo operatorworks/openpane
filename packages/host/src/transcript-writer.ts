@@ -1,4 +1,4 @@
-import type { TranscriptEvent } from '@agentui/contracts/conversation';
+import type { TranscriptEvent } from '@openpane/contracts/conversation';
 import { messageParts } from './transcript-parts.js';
 
 export function createTranscriptWriter(options: {

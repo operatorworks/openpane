@@ -4,7 +4,7 @@ import { access, readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { resolveCustomizationSources } from '@agentui/host/customization';
+import { resolveCustomizationSources } from '@openpane/host/customization';
 import { prepareCustomizationSources } from '../../../scripts/prepare-customization-sources.mjs';
 import { execute, files, fixture, locked, tarball, write } from './preparation-support.mjs';
 
@@ -14,7 +14,7 @@ const absent = async path => assert.rejects(access(path), { code: 'ENOENT' });
 test('preparation owns committed copies, preserves graph provenance and executable modes, and disposes independently', async t => {
   const f = await fixture(t);
   const repo = await f.repository('plain');
-  await write(repo.directory, 'package.json', { agentui: { shared: './index.mjs' } });
+  await write(repo.directory, 'package.json', { openpane: { shared: './index.mjs' } });
   await write(repo.directory, 'index.mjs', 'export default 42;\n', true);
   const reference = repo.reference(repo.commit());
   await write(repo.directory, 'index.mjs', 'dirty');
@@ -250,7 +250,7 @@ test('external and repeated references preserve shared nodes and conflicting ins
   const childReference = child.reference(child.commit());
   const root = await f.repository('root');
   const { pkg } = await locked(f, root);
-  await write(root.directory, 'package.json', { ...pkg, agentui: { ...pkg.agentui, extensions: [childReference, childReference] } });
+  await write(root.directory, 'package.json', { ...pkg, openpane: { ...pkg.openpane, extensions: [childReference, childReference] } });
   const reference = root.reference(root.commit());
   const resolved = await resolveCustomizationSources({ reference, scratchParent: f.scratchParent });
   const prepared = await f.prepare(reference);
@@ -268,19 +268,19 @@ test('external and repeated references preserve shared nodes and conflicting ins
 test('real npm prepares distinct owners in one acquisition with repeated selections and a shared diamond', async t => {
   const f = await fixture(t);
   const leaf = await f.repository('shared-leaf');
-  await write(leaf.directory, 'package.json', { agentui: { shared: './index.mjs' } });
+  await write(leaf.directory, 'package.json', { openpane: { shared: './index.mjs' } });
   await write(leaf.directory, 'index.mjs', 'export default 73;\n');
   const leafReference = leaf.reference(leaf.commit());
   const repo = await f.repository('standalone-owners');
   for (const [name, version] of [['left', '1.0.0'], ['right', '2.0.0']]) {
     const directory = join(repo.directory, name);
     const { pkg } = await locked(f, { directory }, version);
-    await write(directory, 'package.json', { ...pkg, agentui: { ...pkg.agentui, extensions: [leafReference] } });
+    await write(directory, 'package.json', { ...pkg, openpane: { ...pkg.openpane, extensions: [leafReference] } });
   }
   const commit = repo.commit();
   const references = ['left', 'right', 'left'].map(name => repo.reference(commit, name));
   const aggregate = await f.repository('aggregate');
-  await write(aggregate.directory, 'package.json', { agentui: { extensions: references } });
+  await write(aggregate.directory, 'package.json', { openpane: { extensions: references } });
   const prepared = await f.prepare(aggregate.reference(aggregate.commit()));
   t.after(() => prepared.dispose());
   const [left, right, repeated] = prepared.root.extensions;
@@ -337,10 +337,10 @@ test('workspace packages share one npm owner, preserve versionless links and nes
   for (const name of ['one', 'two', 'sibling']) {
     const pkg = { name, type: 'module', exports: './index.mjs', scripts: { install: script },
       ...(name === 'sibling' ? { dependencies: { '@fixture/child': 'file:../../vendor/@fixture/child-1.0.0.tgz' } } :
-        { version: '1.0.0', dependencies: { sibling: '*' }, agentui: { shared: './index.mjs' } }) };
+        { version: '1.0.0', dependencies: { sibling: '*' }, openpane: { shared: './index.mjs' } }) };
     await write(repo.directory, `packages/${name}/package.json`, pkg);
     await write(repo.directory, `packages/${name}/index.mjs`, name === 'sibling' ? 'export default 73;\n' : "import value from 'sibling'; export default value;\n");
-    const { type: _type, exports: _exports, scripts: _scripts, agentui: _agentui, ...entry } = pkg;
+    const { type: _type, exports: _exports, scripts: _scripts, openpane: _openpane, ...entry } = pkg;
     members[`packages/${name}`] = entry;
     members[`node_modules/${name}`] = { resolved: `packages/${name}`, link: true };
   }
@@ -349,7 +349,7 @@ test('workspace packages share one npm owner, preserve versionless links and nes
   await write(repo.directory, 'package-lock.json', { name: root.name, version: root.version, lockfileVersion: 3, packages: { '': root, ...members } });
   const memberCommit = repo.commit();
   const aggregate = await f.repository('aggregate');
-  await write(aggregate.directory, 'package.json', { agentui: { extensions: [repo.reference(memberCommit, 'packages/one'), repo.reference(memberCommit, 'packages/two')] } });
+  await write(aggregate.directory, 'package.json', { openpane: { extensions: [repo.reference(memberCommit, 'packages/one'), repo.reference(memberCommit, 'packages/two')] } });
   const reference = aggregate.reference(aggregate.commit());
   const [one, two] = await Promise.all([f.prepare(reference), f.prepare(reference)]);
   t.after(() => Promise.all([one.dispose(), two.dispose()]));
@@ -380,7 +380,7 @@ test('integrity failures remove their complete graph owner while preserving prev
   const broken = await locked(f, child, '2.0.0');
   broken.lock.packages['node_modules/value'].integrity = 'sha512-' + Buffer.alloc(64, 42).toString('base64');
   await write(child.directory, 'package-lock.json', broken.lock);
-  await write(repo.directory, 'package.json', { ...pkg, agentui: { ...pkg.agentui, extensions: [child.reference(child.commit())] } });
+  await write(repo.directory, 'package.json', { ...pkg, openpane: { ...pkg.openpane, extensions: [child.reference(child.commit())] } });
   const reference = repo.reference(repo.commit());
   await assert.rejects(f.prepare(reference), { code: 'install-failed', message: 'Could not install committed customization dependencies.' });
   assert.deepEqual(await readdir(f.scratchParent), before);
@@ -393,7 +393,7 @@ for (const name of ['node_modules', 'NODE_MODULES', 'NoDe_MoDuLeS']) {
   test(`committed ${name} installations are refused outside selected packages without npm dependencies`, async t => {
     const f = await fixture(t);
     const repo = await f.repository('committed-install');
-    await write(repo.directory, 'selected/package.json', { agentui: { shared: './index.mjs' } });
+    await write(repo.directory, 'selected/package.json', { openpane: { shared: './index.mjs' } });
     await write(repo.directory, 'selected/index.mjs', 'export default 1;\n');
     await write(repo.directory, `unrelated/${name}/value/index.js`, 'committed installed bytes');
     await assert.rejects(f.prepare(repo.reference(repo.commit(), 'selected')), { code: 'invalid-package' });

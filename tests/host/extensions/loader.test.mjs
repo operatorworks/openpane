@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { loadServerExtension } from '@agentui/host/extensions';
+import { loadServerExtension } from '@openpane/host/extensions';
 import { entry } from './fixtures.mjs';
 
 for (const [name, mutate] of [
@@ -32,7 +32,7 @@ test('loader requires a regular file within the real installation directory', as
   assert.equal(fixture.calls.activate, 0);
 });
 
-for (const exported of ['{}', "{ kind: 'desktop', sdkVersion: '0.11.0', activate() {} }", "{ kind: 'server', sdkVersion: 'old', activate() {} }"]) {
+for (const exported of ['{}', "{ kind: 'desktop', sdkVersion: '0.13.0', activate() {} }", "{ kind: 'server', sdkVersion: 'old', activate() {} }"]) {
   test(`loader rejects an incompatible imported export ${exported}`, async t => {
     const fixture = entry(t); fixture.write(`export default ${exported};`);
     await assert.rejects(loadServerExtension(fixture.value), /^Error: Server extension loading failed$/);

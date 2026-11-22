@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { transcriptProjection, parseFileChangeActivity, fileChangeDetailBytes, escapedBytes } from '@agentui/contracts/conversation';
+import { transcriptProjection, parseFileChangeActivity, fileChangeDetailBytes, escapedBytes } from '@openpane/contracts/conversation';
 import { createFileActivity } from '../../packages/host/dist/codex-file-activity.js';
 import { fixture, installed, scope, empty } from './fixture.mjs';
 

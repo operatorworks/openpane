@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { hex, identifier, record } from '@agentui/contracts/decode';
-import { providerIdentity } from '@agentui/host';
-import { EXTENSION_SDK_VERSION, parseExtensionManifest } from '@agentui/sdk';
+import { hex, identifier, record } from '@openpane/contracts/decode';
+import { providerIdentity } from '@openpane/host';
+import { EXTENSION_SDK_VERSION, parseExtensionManifest } from '@openpane/sdk';
 import { normalizeGrantPool, normalizeProviderInstallations } from './provider-credentials.js';
 import type { ProviderInstallation } from './provider-credentials.js';
 import type { BrowserProviderExtension } from './provider-extensions.js';
@@ -16,7 +16,7 @@ function authentication(value: unknown, environment: Readonly<Record<string, str
   }
   record(value, ['kind', 'variable', 'revision']);
   const variable = identifier(input.variable);
-  if (input.kind !== 'environment' || !/^AGENTUI_EXTENSION_[A-Za-z0-9_]+$/u.test(variable)) throw new Error('Invalid authentication');
+  if (input.kind !== 'environment' || !/^OPENPANE_EXTENSION_[A-Za-z0-9_]+$/u.test(variable)) throw new Error('Invalid authentication');
   const secret = Object.hasOwn(environment, variable) ? environment[variable] : undefined;
   if (typeof secret !== 'string' || !secret.trim()) throw new Error('Missing authentication');
   const revision = identifier(input.revision);
@@ -26,7 +26,7 @@ function authentication(value: unknown, environment: Readonly<Record<string, str
 
 function installation(value: unknown, environment: Readonly<Record<string, string | undefined>>, variables: Set<string>): ProviderInstallation {
   const grant = record(value, ['id', 'instance', 'service', 'expectedAuthority', 'authentication']);
-  if (grant.expectedAuthority !== 'agentui-host' && grant.expectedAuthority !== 'remote-provider') throw new Error('Invalid authority');
+  if (grant.expectedAuthority !== 'openpane-host' && grant.expectedAuthority !== 'remote-provider') throw new Error('Invalid authority');
   return { id: identifier(grant.id), instance: providerIdentity(grant.instance), service: identifier(grant.service),
     expectedAuthority: grant.expectedAuthority, authentication: authentication(grant.authentication, environment, variables) };
 }
@@ -53,7 +53,7 @@ export function takeServerExtensionConfiguration(path: string, environment: Reco
       }
       if (input.ownership === 'durable-artifacts') throw new Error('Invalid durable selection');
       const metadata = record(JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')));
-      const manifest = parseExtensionManifest(record(metadata.agentui).extension);
+      const manifest = parseExtensionManifest(record(metadata.openpane).extension);
       if (manifest.sdkVersion !== EXTENSION_SDK_VERSION || !manifest.entries.some(entry => entry.kind === 'server') ||
         namespaces.has(manifest.namespace)) throw new Error('Invalid manifest selection');
       namespaces.add(manifest.namespace);

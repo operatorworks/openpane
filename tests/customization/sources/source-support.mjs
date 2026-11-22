@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { resolveCustomizationSources } from '@agentui/host/customization';
+import { resolveCustomizationSources } from '@openpane/host/customization';
 
 export const manager = 'npm@11.19.1';
 export const digest = value => createHash('sha256').update(value).digest('hex');
@@ -18,7 +18,7 @@ export async function write(directory, path, value) {
   await writeFile(join(directory, path), typeof value === 'string' ? value : JSON.stringify(value));
 }
 export async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'agentui-sources-test-'));
+  const root = await mkdtemp(join(tmpdir(), 'openpane-sources-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const scratchParent = join(root, 'scratch');
   const repository = async name => {
@@ -35,11 +35,11 @@ export async function fixture(t) {
 }
 export async function shared(repo, path = '', extra = {}) {
   await write(repo.directory, join(path, 'source.ts'), 'export const value = 1;\n');
-  await write(repo.directory, join(path, 'package.json'), { ...extra, agentui: { shared: './source.ts', ...extra.agentui } });
+  await write(repo.directory, join(path, 'package.json'), { ...extra, openpane: { shared: './source.ts', ...extra.openpane } });
 }
 export const reference = (repo, commit, subdirectory) => ({ repository: repo.directory, commit, ...(subdirectory === undefined ? {} : { subdirectory }) });
 export function lockFor(pkg, entries = {}) {
-  const { agentui: _agentui, packageManager: _packageManager, ...root } = pkg;
+  const { openpane: _openpane, packageManager: _packageManager, ...root } = pkg;
   return { name: pkg.name, version: pkg.version, lockfileVersion: 3, packages: { '': root, ...entries } };
 }
 export const registry = { version: '1.0.0', resolved: 'https://registry.npmjs.org/value/-/value-1.0.0.tgz', integrity };

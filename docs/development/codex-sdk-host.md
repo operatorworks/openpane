@@ -23,7 +23,7 @@ If you are signed out, run `codex login` and complete the browser login. Start
 the host with a private data directory and an existing workspace:
 
 ```sh
-node apps/host/dist/main.js codex-sdk --data-dir "$HOME/.local/share/agentui-sol" --workspace "$PWD" --port 7140
+node apps/host/dist/main.js codex-sdk --data-dir "$HOME/.local/share/openpane-sol" --workspace "$PWD" --port 7140
 ```
 
 Open the printed loopback origin with `/browser.html` appended. The browser
@@ -41,6 +41,6 @@ For the ownership boundaries and verification limits, read the
 [SDK integration record](../integration/switchboard/codex-sdk.md).
 
 If Codex can no longer reopen a saved native thread, choose **New conversation**.
-AgentUI preserves the old transcript and never silently replaces its native
+OpenPane preserves the old transcript and never silently replaces its native
 thread. If the account or CLI changes while the host is running, check
 `codex --version` and `codex login status`, then restart the host.

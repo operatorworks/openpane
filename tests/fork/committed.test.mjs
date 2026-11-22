@@ -39,7 +39,7 @@ test('offline verification checks immutable fork inputs and reports one structur
 });
 
 test('full qualification writes consumer scripts from the measured buffers', async (context) => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-consumer-scripts-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-consumer-scripts-'));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   const bytes = new Map(consumerScripts.map((file) => [file, Buffer.from(`measured ${file}\n`)]));
   await writeConsumerScripts(directory, { bytes });

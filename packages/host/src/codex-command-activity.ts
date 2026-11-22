@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { canonicalJson } from '@agentui/contracts';
-import { COMMAND_OUTPUT_BYTES, COMMAND_TEXT_BYTES, COMMAND_CWD_BYTES, escapedBytes, retainText } from '@agentui/contracts/conversation';
-import type { CommandActivity, CommandObservation, TranscriptEvent } from '@agentui/contracts/conversation';
+import { canonicalJson } from '@openpane/contracts';
+import { COMMAND_OUTPUT_BYTES, COMMAND_TEXT_BYTES, COMMAND_CWD_BYTES, escapedBytes, retainText } from '@openpane/contracts/conversation';
+import type { CommandActivity, CommandObservation, TranscriptEvent } from '@openpane/contracts/conversation';
 import { object, nonempty } from './codec.js';
 
 type Entry = { activity: CommandActivity; authoritative: boolean; published: CommandActivity | null };

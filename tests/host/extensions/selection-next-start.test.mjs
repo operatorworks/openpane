@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { createBrowserConnection } from '@agentui/client/service';
+import { createBrowserConnection } from '@openpane/client/service';
 import { setup, extension, write } from '../../customization/build/server-support.mjs';
 import { packagedHost } from './artifact-support.mjs';
 import { requestControl } from '../../../apps/host/build/tsc/control.js';
@@ -19,12 +19,12 @@ const main = join(root, 'apps/host/dist/main.js');
 const secret = 'PRIVATE_SELECTION_NEXT_START_SECRET';
 const instance = { namespace: 'example-crew', installationId: 'personal', generation: 'stable', protocolVersion: 'crew-v2' };
 const grant = { id: 'service', instance, service: 'http://127.0.0.1:12345', expectedAuthority: 'remote-provider',
-  authentication: { kind: 'environment', variable: 'AGENTUI_EXTENSION_SELECTION_TOKEN', revision: 'first' } };
+  authentication: { kind: 'environment', variable: 'OPENPANE_EXTENSION_SELECTION_TOKEN', revision: 'first' } };
 const execute = promisify(execFile);
 async function fixture(t) {
   const f = await setup(t);
   const marker = join(f.root, 'imports'), pause = join(f.root, 'pause'), cleanup = join(f.root, 'cleanup-failure'), importPause = join(f.root, 'import-pause'), observationPause = join(f.root, 'observation-pause'), observed = join(f.root, 'observed');
-  const source = label => `import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+  const source = label => `import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
     import { appendFileSync, existsSync, readFileSync } from 'node:fs';
     import { createCrewFixture } from './crew.ts';
     const instance=${JSON.stringify(instance)}, fixture=createCrewFixture(instance);
@@ -46,7 +46,7 @@ async function fixture(t) {
       }},fixture.crewPresentation);
       return {dispose(){if(existsSync(${JSON.stringify(cleanup)}) && (readFileSync(${JSON.stringify(cleanup)},'utf8')!=='B' || ${JSON.stringify(label)}==='B')) throw new Error('PRIVATE_CLEANUP');}};
     }};`;
-  await write(f.repo.directory, 'package.json', { type: 'module', agentui: extension('example-crew') });
+  await write(f.repo.directory, 'package.json', { type: 'module', openpane: extension('example-crew') });
   await write(f.repo.directory, 'crew.ts', await readFile(new URL('../../extensions/providers/contracts/crew.ts', import.meta.url), 'utf8'));
   await Promise.all(Array.from({ length: 180 }, (_, i) => write(f.repo.directory, `inventory/file-${i}.ts`, `export const value=${i};`)));
   await write(f.repo.directory, 'index.ts', source('A'));
@@ -58,7 +58,7 @@ async function fixture(t) {
   const pin = value => ({ directory: value.directory, artifactId: value.manifest.artifactId });
   const configuration = { version: 2, ownership: 'durable-artifacts', extensions: [{ kind: 'artifact', ...pin(a), installations: [structuredClone(grant)] }] };
   await writeFile(config, JSON.stringify(configuration));
-  const environment = { ...process.env, AGENTUI_EXTENSION_SELECTION_TOKEN: secret };
+  const environment = { ...process.env, OPENPANE_EXTENSION_SELECTION_TOKEN: secret };
   const args = ['serve', '--data-dir', directory, '--extensions', config, '--assets', join(root, 'apps/desktop/web-dist-browser'), '--port', '0'];
   const children = new Set();
   t.after(async () => { for (const child of children) { child.kill('SIGKILL'); await once(child, 'exit').catch(() => {}); } });
@@ -212,7 +212,7 @@ test('uncertain boot never imports automatically and requires a new explicit sel
   assert.equal((await f.cli('extensions-status')).desired.outcome.kind, 'grant-mismatch');
   assert.equal(await readFile(f.marker, 'utf8'), imports);
   await host.stop();
-  const environment = { ...f.environment }; delete environment.AGENTUI_EXTENSION_SELECTION_TOKEN;
+  const environment = { ...f.environment }; delete environment.OPENPANE_EXTENSION_SELECTION_TOKEN;
   host = f.launch(environment);
   assert.equal((await host.exited).stderr.trim(), 'Invalid server extension configuration');
   f.database(db => db.prepare('UPDATE service_extension_selections SET receipt=? WHERE revision=2').run('{}'));
@@ -331,7 +331,7 @@ test('original fixed grants are required for explicit retry of a grant mismatch'
   await host.stop();
 });
 
-test('an actual archived v1 bundled reader refuses database format 7 before importing', { timeout: 120000, skip: !process.env.AGENTUI_OLD_SELECTION_CLI }, async t => {
+test('an actual archived v1 bundled reader refuses database format 7 before importing', { timeout: 120000, skip: !process.env.OPENPANE_OLD_SELECTION_CLI }, async t => {
   const f = await fixture(t);
   let host = f.launch(); await host.ready; await f.select('build-b', 0); await host.stop();
   const imported = await readFile(f.marker, 'utf8');
@@ -344,7 +344,7 @@ test('an actual archived v1 bundled reader refuses database format 7 before impo
       credential_class TEXT NOT NULL CHECK(credential_class IN ('browser-development','native')), expires INTEGER NOT NULL,
       policy TEXT NOT NULL CHECK(policy='owner'), revoked INTEGER NOT NULL CHECK(revoked IN (0,1)));`));
   const database = join(f.directory, 'host.sqlite'), before = await readFile(database);
-  host = f.launch(f.environment, process.env.AGENTUI_OLD_SELECTION_CLI, process.env.AGENTUI_OLD_SELECTION_ASSETS);
+  host = f.launch(f.environment, process.env.OPENPANE_OLD_SELECTION_CLI, process.env.OPENPANE_OLD_SELECTION_ASSETS);
   const refused = await host.exited;
   assert.equal(refused.code, 1); assert.match(refused.stderr, /Unsupported database version/);
   assert.equal(refused.stdout, '');

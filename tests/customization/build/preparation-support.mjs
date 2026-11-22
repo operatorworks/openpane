@@ -15,7 +15,7 @@ export async function write(directory, file, value, executable = false) {
   if (executable) await chmod(destination, 0o700);
 }
 export async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'agentui-preparation-test-'));
+  const root = await mkdtemp(join(tmpdir(), 'openpane-prep-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const scratchParent = join(root, 'scratch');
   const repository = async name => {
@@ -46,14 +46,14 @@ export async function tarball(f, repository, name, version, manifest = {}, conte
 export async function locked(f, repo, version = '1.0.0') {
   const entries = {};
   const script = "node -e \"require('fs').writeFileSync('root-script-ran', 'unsafe')\"";
-  const pkg = { name: 'fixture', version: '1.0.0', type: 'module', packageManager: 'npm@11.19.1', agentui: { shared: './index.mjs' },
+  const pkg = { name: 'fixture', version: '1.0.0', type: 'module', packageManager: 'npm@11.19.1', openpane: { shared: './index.mjs' },
     scripts: { preinstall: script, install: script, postinstall: script, prepare: script } };
   for (const [name, group, flag] of [['value', 'dependencies'], ['development', 'devDependencies', 'dev'], ['optional', 'optionalDependencies', 'optional'], ['peer', 'peerDependencies', 'peer']]) {
     const entry = await tarball(f, repo, name, version);
     pkg[group] = { [name]: entry.resolved };
     entries[`node_modules/${name}`] = { ...entry, ...(flag ? { [flag]: true } : {}) };
   }
-  const { agentui: _agentui, packageManager: _manager, type: _type, scripts: _scripts, ...root } = pkg;
+  const { openpane: _openpane, packageManager: _manager, type: _type, scripts: _scripts, ...root } = pkg;
   const lock = { name: pkg.name, version: pkg.version, lockfileVersion: 3, requires: true, packages: { '': root, ...entries } };
   await write(repo.directory, 'package.json', pkg);
   await write(repo.directory, 'package-lock.json', lock);

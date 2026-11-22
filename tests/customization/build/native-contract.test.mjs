@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import {
   assertIosArtifactId, assertIosRuntime, canonicalJson, iosArtifactIdentityText, parseOptionalIosArtifact,
-} from '@agentui/contracts';
-import { EXTENSION_SDK_VERSION } from '@agentui/contracts/compatibility';
+} from '@openpane/contracts';
+import { EXTENSION_SDK_VERSION } from '@openpane/contracts/compatibility';
 
 const digest = text => createHash('sha256').update(text).digest('hex');
 function fixture() {

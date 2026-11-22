@@ -83,13 +83,13 @@ mod tests {
     #[test]
     fn all_keychain_operations_wait_for_the_process_interaction_lock() {
         let directory =
-            std::env::temp_dir().join(format!("agentui-keychain-test-{}", Uuid::new_v4()));
+            std::env::temp_dir().join(format!("openpane-keychain-test-{}", Uuid::new_v4()));
         std::fs::create_dir(&directory).unwrap();
         let handle = CreateOptions::new()
             .password(&Uuid::new_v4().to_string())
             .create(directory.join("test.keychain"))
             .unwrap();
-        let service = format!("agentui-test-{}", Uuid::new_v4());
+        let service = format!("openpane-test-{}", Uuid::new_v4());
         let bytes = Some(b"value".to_vec());
         Keychain {
             handle: handle.clone(),

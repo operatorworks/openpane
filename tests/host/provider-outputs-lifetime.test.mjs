@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canonicalJson } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
 import { fixture, providerFixture, turn, invalid, unavailable, unsupported } from './provider-outputs-fixture.mjs';
 
 test('four total registry output operations admit before work without a queue; other registries remain independent', async t => {

@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { canonicalJson } from '@agentui/contracts';
-import { CODEX_RUNTIME } from '@agentui/contracts/compatibility';
+import { canonicalJson } from '@openpane/contracts';
+import { CODEX_RUNTIME } from '@openpane/contracts/compatibility';
 import { takeServerExtensionConfiguration } from '../../../apps/host/build/tsc/server-extension-config.js';
 import { requestControl } from '../../../apps/host/build/tsc/control.js';
 import { normalizeGrantPool, publicGrantBinding } from '../../../apps/host/build/tsc/provider-credentials.js';
@@ -19,7 +19,7 @@ const root = fileURLToPath(new URL('../../../', import.meta.url));
 test('pre-correction version 1 journal restarts with the exact original grant digest and receipts', async t => {
   const runtime = await packagedHost(t);
   const golden = JSON.parse(await fs.readFile(new URL('./fixtures/selection-journal-v1.json', import.meta.url), 'utf8'));
-  const directory = await fs.mkdtemp(join(tmpdir(), 'agentui-old-selection-'));
+  const directory = await fs.mkdtemp(join(tmpdir(), 'openpane-old-selection-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const database = new DatabaseSync(join(directory, 'host.sqlite'));
   database.exec('CREATE TABLE service_identity(singleton INTEGER PRIMARY KEY, host TEXT NOT NULL)');
@@ -39,8 +39,8 @@ test('pre-correction version 1 journal restarts with the exact original grant di
   const config = join(directory, 'extensions.json');
   await fs.writeFile(config, JSON.stringify({ version: 2, ownership: 'durable-artifacts', extensions: entries.map(entry => ({ ...entry,
     installations: entry.installations.map(grant => ({ ...grant, authentication: { kind: 'environment', revision: grant.authentication.revision,
-      variable: 'AGENTUI_EXTENSION_GOLDEN_TOKEN' } })) })) }));
-  const extensions = takeServerExtensionConfiguration(config, { AGENTUI_EXTENSION_GOLDEN_TOKEN: secret });
+      variable: 'OPENPANE_EXTENSION_GOLDEN_TOKEN' } })) })) }));
+  const extensions = takeServerExtensionConfiguration(config, { OPENPANE_EXTENSION_GOLDEN_TOKEN: secret });
   const host = await runtime.startBrowserHost({ directory, port: 0, assetsDirectory: join(root, 'apps/desktop/web-dist-browser'),
     hostArtifactDirectory: join(root, 'apps/host/dist'), agentStartup: { kind: 'recorded' }, extensions });
   try {

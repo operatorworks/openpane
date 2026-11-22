@@ -1,10 +1,10 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createProviderRegistry, openLocalHost } from '@agentui/host';
-import { loadServerExtension } from '@agentui/host/extensions';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { ConversationScope, OutputId } from '@agentui/contracts';
+import { createProviderRegistry, openLocalHost } from '@openpane/host';
+import { loadServerExtension } from '@openpane/host/extensions';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { ConversationScope, OutputId } from '@openpane/contracts';
 
 export async function openReportExample(options: { hostPath: string; scope: ConversationScope }) {
   const loaded = await loadServerExtension({ directory: resolve(dirname(fileURLToPath(import.meta.url)), '..'),

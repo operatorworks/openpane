@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(CDPATH='' cd -P "$(dirname "$0")" && pwd)
+if [ "${1-}" = setup ]; then
+  shift
+  exec node "$repo_root/scripts/openpane-setup.mjs" "$@"
+fi
+exec node "$repo_root/scripts/openpane-launch.mjs" "$@"

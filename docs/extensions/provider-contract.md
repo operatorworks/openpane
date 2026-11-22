@@ -56,6 +56,7 @@ A provider without `reconcile` advertises no commands.
 An unadvertised cancel or approval is refused at admission with `provider-command-unavailable`. It never reaches the backend.
 Fresh dispatch rechecks the current capability.
 A provider owns its own identifiers. The host never interprets `opaqueId`, `opaqueSessionId` or cursor contents.
+An agent `opaqueId` is visible to clients: provider agent descriptors carry it as `providerAgentId`, and catalog and search entries carry it in `provider`. It must not carry a secret.
 Decisions reach the host only through `snapshot.decisions`. Each choice reference must belong to its decision.
 Transcript output and run outcomes come only from snapshots and `apply` events. Command effects carry no output.
 
@@ -65,10 +66,10 @@ Transcript output and run outcomes come only from snapshots and `apply` events. 
 
 | Backend result | Cause | Fixed reason |
 | --- | --- | --- |
-| `unavailable` | `offline` | The provider service is offline or unreachable. AgentUI checks again automatically. |
-| `authentication-failed` | `authentication-failed` | The provider rejected the configured credential. Fix it on the provider and AgentUI checks again automatically, or change the extension secret and restart the host. |
-| `unauthorized` | `unauthorized` | The configured credential is not authorized for this provider. Grant it access; AgentUI checks again automatically. |
-| `version-unsupported`, `unsupported` | `version-unsupported` | The provider service version is unsupported. Install a compatible version; AgentUI checks again automatically. |
+| `unavailable` | `offline` | The provider service is offline or unreachable. OpenPane checks again automatically. |
+| `authentication-failed` | `authentication-failed` | The provider rejected the configured credential. Fix it on the provider and OpenPane checks again automatically, or change the extension secret and restart the host. |
+| `unauthorized` | `unauthorized` | The configured credential is not authorized for this provider. Grant it access; OpenPane checks again automatically. |
+| `version-unsupported`, `unsupported` | `version-unsupported` | The provider service version is unsupported. Install a compatible version; OpenPane checks again automatically. |
 | Thrown error, malformed result, identity mismatch | `invalid-installation` | The provider installation is invalid. Fix the extension configuration, then restart the host. |
 
 The provider's own reason text is never shown.
@@ -111,6 +112,16 @@ Items and saved state are limited to one million encoded bytes.
 `close()` is idempotent and ends the feed with `closed`. `ended` never rejects.
 An expired or unbridgeable cursor ends the feed with `resync`.
 
+### Polling providers
+
+A service without an event stream can still implement `observe` by polling, as the [Coworkers provider](../../extensions/coworkers/src/provider.ts) does:
+
+- Run one scheduler per installation ([`poller.ts`](../../extensions/coworkers/src/poller.ts)) with an in-flight request limit, a short interval for conversations with unfinished work, a growing interval for idle ones, and a doubling backoff after failed polls. Wake a conversation's feed when the provider submits to it.
+- Deliver whole `snapshot` items and make the cursor a digest of the state, so `after` equal to the current cursor delivers nothing until something changes.
+- Do not end the feed on a failed poll: the host leaves a `disconnected` feed stopped until an explicit retry. End it only on `close()` or with `resync` when the service reports that the conversation is gone.
+- Keep terminal statuses in state so they are never fetched again, and bound the state well under the one-million-byte limit above. A first snapshot has no stored statuses, so it fetches one receipt for each request without a reply (up to 100 for Coworkers, one at a time behind the in-flight limit).
+- Present the newest request as `currentRun`. When it ends, the host's automatic run-end read settles the blocking send.
+
 ## What providers must never do
 
 - Read or send a secret outside `context.credentials.use({ credential, service }, action)`.
@@ -123,12 +134,12 @@ An expired or unbridgeable cursor ends the feed with `resync`.
 
 ## Conformance suite
 
-The suite runs the real host in process through `startBrowserHost`, the same entry `examples/crew/run.mjs` uses, with transient extension entries. Each row is driven only through its public extension entry, and clients reach the host through the desktop client store.
-Transient entries skip module import and manifest resolution. `examples/crew/tests/installed-example.test.mjs` covers loading an installed extension.
+The suite runs the real host in process through `startBrowserHost`, the same entry `extensions/crew/run.mjs` uses, with transient extension entries. Each row is driven only through its public extension entry, and clients reach the host through the desktop client store.
+Transient entries skip module import and manifest resolution. `extensions/crew/tests/installed-example.test.mjs` covers loading an installed extension.
 
 | Row | Request ids | Cursor | Event encoding | Supports |
 | --- | --- | --- | --- | --- |
-| Crew example (`examples/crew`, shared controlled Crew service) | AgentUI operation UUIDs | `{ epoch, sequence, requests }` | SSE AG-UI, folded into authoritative snapshots | cancel, decide |
+| Crew example (`extensions/crew`, shared controlled Crew service) | OpenPane operation UUIDs | `{ epoch, sequence, requests }` | SSE AG-UI, folded into authoritative snapshots | cancel, decide |
 | Ledger fake (`ledger.mjs`) | Service-assigned `room-n` and `ticket-n` | `[epoch, offset]` | NDJSON log entries folded by `apply` | cancel, decide |
 | Ledger fake without controls | Same as ledger | Same as ledger | Same as ledger | none |
 
@@ -146,13 +157,13 @@ What the suite proves:
 - A send behind an uncertain earlier send is refused with `send-awaiting-confirmation` after exactly one `reconcileCommand` lookup and reaches no provider. Once reconciliation settles the earlier send, the next send is admitted.
 - A send cut at the proxy before it reaches the service stays `uncertain` after an explicit Reconcile, keeps refusing later sends in its conversation, and leaves a new conversation free to send.
 
-`boundaries.test.mjs` asserts that provider traffic carries no trace context or collector headers, that telemetry carries no prompt, reply or provider secret, and that no AgentUI agent span is synthesized for a remote run. A positive control proves the telemetry search finds a value that is exported.
+`boundaries.test.mjs` asserts that provider traffic carries no trace context or collector headers, that telemetry carries no prompt, reply or provider secret, and that no OpenPane agent span is synthesized for a remote run. A positive control proves the telemetry search finds a value that is exported.
 It also asserts that `apps`, `packages`, `scripts` and `templates` contain no case-insensitive `crew` substring, so camelCase or underscore names such as `isCrewProvider` are caught, excluding the one adapter-tests fixture that names `example.crew`, and that the repository contains no OpenBot code or dependency.
 The check is lexical. Crew-specific logic that never names Crew would pass. Vendored `.tgz` archives are out of scope; their declared dependencies appear in `package-lock.json`, which is searched.
 
 ## Generic consumers and clients
 
 The MCP read example (`examples/mcp-control/read`) inspects both providers' conversations through `/native/v1`. It has no provider-specific code. `boundaries.test.mjs` runs it against the conformance host.
-The suite uses `createBrowserConnection` and `createConversationStore` from `@agentui/client`. The desktop application builds the same pair in `apps/desktop/src/application/use-application.ts` and `application-controller.ts`. The Tauri shell reaches the same service through `/native/v1`.
+The suite uses `createBrowserConnection` and `createConversationStore` from `@openpane/client`. The desktop application builds the same pair in `apps/desktop/src/application/use-application.ts` and `application-controller.ts`. The Tauri shell reaches the same service through `/native/v1`.
 No pet example exists yet. Bean `agentui-xnk5` tracks it.
 The iOS app cannot reach a host until bean `agentui-3xme` lands. The suite does not cover iOS.

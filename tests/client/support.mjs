@@ -1,4 +1,4 @@
-import { createConversationStore } from '@agentui/client';
+import { createConversationStore } from '@openpane/client';
 
 export const scope = { hostId: 'host-a', conversationId: 'conversation-a' };
 export const projection = {

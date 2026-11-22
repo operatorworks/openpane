@@ -15,7 +15,7 @@ for (const [label, activate] of [
 ]) test(`desktop qualification rejects ${label} without publication`, { timeout: 30_000 }, async t => {
   const f = repository();
   t.after(() => rm(f.directory, { recursive: true, force: true }));
-  f.write('desktop/index.tsx', `export default {kind:'desktop',sdkVersion:'0.11.0',activate(){${activate}}};`);
+  f.write('desktop/index.tsx', `export default {kind:'desktop',sdkVersion:'0.13.0',activate(){${activate}}};`);
   assert.throws(() => buildCustom(f));
   assert.deepEqual(await readdir(f.directory), ['source']);
 });
@@ -44,7 +44,7 @@ fs.readFileSync=function(path,...options){
   return bytes;
 };
 syncBuiltinESMExports();`);
-  f.write('desktop/index.tsx', `import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+  f.write('desktop/index.tsx', `import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 export default {kind:'desktop',sdkVersion:EXTENSION_SDK_VERSION,activate(){return {modules:[],dispose(){}}}};`);
   const out = join(f.directory, 'rejected');
   const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, join(root, 'scripts/build-local-customization.mjs'),

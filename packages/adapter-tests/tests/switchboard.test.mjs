@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { gunzipSync } from 'node:zlib';
 import { hostDependencyLockKey, hostDependencyManifest, importHostDependency } from '../../host/test-support/dependencies.mjs';
-import { parseInteractionContinuation, parseSessionReference } from '@agentui/host';
+import { parseInteractionContinuation, parseSessionReference } from '@openpane/host';
 
 const root = new URL('../../../', import.meta.url);
 const binding = { engine: 'fixture/native', nativeVersion: '1', account: 'fixture-account', authorizedScope: 'fixture-scope', nativeFormat: 'fixture-format' };
@@ -23,8 +23,8 @@ test('host artifact and retained logs match the pin, manifest and npm integrity'
   assert.equal(pin.artifact, `switchboard-${pin.sourceRevision}.tgz`);
   const bytes = await readFile(new URL(`vendor/${pin.artifact}`, root));
   assert.equal(createHash('sha256').update(bytes).digest('hex'), pin.sha256);
-  assert.equal(host.dependencies['@mattsp1290/switchboard'], `file:../../vendor/${pin.artifact}`);
-  const installedPath = hostDependencyLockKey('@mattsp1290/switchboard');
+  assert.equal(host.dependencies['@operatorworks/switchboard'], `file:../../vendor/${pin.artifact}`);
+  const installedPath = hostDependencyLockKey('@operatorworks/switchboard');
   const installed = lock.packages[installedPath];
   assert.equal(installed.resolved, `file:vendor/${pin.artifact}`);
   assert.equal(installed.integrity, `sha512-${createHash('sha512').update(bytes).digest('base64')}`);
@@ -38,10 +38,10 @@ test('all runtime aliases expose the current public Switchboard entries and exac
   const host = JSON.parse(await readFile(new URL('packages/host/package.json', root), 'utf8'));
   const lock = JSON.parse(await readFile(new URL('package-lock.json', root), 'utf8'));
   for (const [alias, pinFile] of [
-    ['@mattsp1290/switchboard', 'switchboard.json'],
-    ['@agentui/switchboard-pi', 'switchboard-pi.json'],
-    ['@agentui/switchboard-codex', 'switchboard-codex.json'],
-    ['@agentui/switchboard-claude', 'switchboard-claude.json'],
+    ['@operatorworks/switchboard', 'switchboard.json'],
+    ['@openpane/switchboard-pi', 'switchboard-pi.json'],
+    ['@openpane/switchboard-codex', 'switchboard-codex.json'],
+    ['@openpane/switchboard-claude', 'switchboard-claude.json'],
   ]) {
     const adapterPin = JSON.parse(await readFile(new URL(`vendor/${pinFile}`, root), 'utf8'));
     const qualificationRecord = pinFile === 'switchboard.json' ? pinFile : adapterPin.qualificationRecord;

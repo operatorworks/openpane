@@ -1,20 +1,20 @@
 import { NO_OBSERVABILITY } from '../../apps/host/build/tsc/observability.js';
-import { recordedInstallation } from '@agentui/host/recorded';
+import { recordedInstallation } from '@openpane/host/recorded';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
-import { openRecordedHost } from '@agentui/host/recorded';
+import { EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
+import { openRecordedHost } from '@openpane/host/recorded';
 import { openAccessDatabase } from '../../apps/host/build/tsc/access-database.js';
 import { createApi } from '../../apps/host/build/tsc/api.js';
 import { FeedRegistry } from '../../apps/host/build/tsc/feed-registry.js';
 import { serviceEndpoint } from '../../apps/host/build/tsc/service-endpoint.js';
 
 async function fixture(t, client) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-admission-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-admission-'));
   const access = openAccessDatabase(join(directory, 'host.sqlite'));
   const host = openRecordedHost({ path: join(directory, 'host.sqlite'), backendPath: join(directory, 'recorded.jsonl'), hostId: access.hostId });
   const feeds = new FeedRegistry();

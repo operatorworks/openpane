@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { until } from '../host/fixture.mjs';
 import { fixture, create, offered, send, actualInput, aguiExtension, unavailable } from './provider-send-fixture.mjs';
 
 const tables = ['conversations', 'events', 'commands', 'frontend_send_owners', 'frontend_send_tombstones', 'runs'];
@@ -99,18 +100,24 @@ for (const outcome of ['completed', 'rejected', 'pending']) test(`crash admissio
   assert.equal(a.calls.submits.length, outcome === 'pending' ? 1 : 2);
 });
 
-test('inconclusive lookup returns latest persisted receipt after concurrent authentic completion', async t => {
-  const entered = Promise.withResolvers(), release = Promise.withResolvers(); let lookups = 0;
-  const { a, f, scope } = await orphan(t, { async reconcile(operation, { effect }) {
-    if (++lookups === 1) { entered.resolve(); await release.promise; return { kind: 'uncertain', reason: 'unknown', evidence: {} }; }
+test('overlapping orphan recovery lookups share an inconclusive read before a later authentic completion', async t => {
+  const release = Promise.withResolvers(); let lookups = 0;
+  const { a, f, scope, admission } = await orphan(t, { async reconcile(operation, { effect }) {
+    if (++lookups === 1) { await release.promise; return { kind: 'uncertain', reason: 'unknown', evidence: {} }; }
     return effect(operation, 'completed', operation.request.runId);
   } });
-  const stale = f.client.reconcile(scope, 'offered'); await entered.promise;
+  const first = f.client.reconcile(scope, 'offered');
+  await until(() => lookups === 1);
+  const joined = f.client.reconcile(scope, 'offered'), readings = Promise.all([first, joined]);
+  try {
+    await assert.rejects(until(() => lookups > 1, 200), /Condition timed out/);
+  } finally { release.resolve(); await readings; }
+  const [initial, same] = await readings;
+  assert.equal(initial.state.kind, 'pending'); assert.deepEqual(same, initial);
+  assert.deepEqual(durable(f), admission);
   const current = await f.client.reconcile(scope, 'offered');
-  assert.equal(current.state.kind, 'completed'); const before = durable(f); release.resolve();
-  assert.deepEqual(await stale, current);
-  assert.deepEqual(durable(f), before);
-  assert.equal(a.calls.submits.length, 1);
+  assert.equal(current.state.kind, 'completed');
+  assert.equal(lookups, 2); assert.equal(a.calls.submits.length, 1);
 });
 
 for (const terminal of ['completed', 'rejected', 'not-dispatched']) test(`tagged v1 cannot reuse ${terminal} offered key after release and restart`, async t => {

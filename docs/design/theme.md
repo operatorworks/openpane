@@ -1,13 +1,15 @@
 # Default theme and primitives
 
+See the [customization guide](../extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview.
+
 The theme packages give desktop and iOS modules the same semantic colors, spacing, typography, and motion durations.
 Desktop uses DOM elements. Native uses React Native controls.
 Neither package depends on the host or an agent adapter.
 
 ## Desktop modules
 
-Import `@agentui/ui-primitives/styles.css` once in the desktop entry.
-Wrap a module in `ThemeScope` from `@agentui/ui-primitives/desktop`.
+Import `@openpane/ui-primitives/styles.css` once in the desktop entry.
+Wrap a module in `ThemeScope` from `@openpane/ui-primitives/desktop`.
 The outer scope follows system appearance and reduced motion unless you provide explicit values.
 Nested scopes inherit those choices.
 Use `ThemeScope` as the outer desktop boundary.
@@ -15,8 +17,8 @@ A plain `ThemeProvider` represents caller-supplied preferences, so scopes below 
 Nested scopes can request reduced motion but cannot re-enable motion that their parent reduced.
 
 ```tsx
-import { Button, Text, TextField, ThemeScope } from '@agentui/ui-primitives/desktop';
-import '@agentui/ui-primitives/styles.css';
+import { Button, Text, TextField, ThemeScope } from '@openpane/ui-primitives/desktop';
+import '@openpane/ui-primitives/styles.css';
 
 export function ComposerExample() {
 	return <ThemeScope>
@@ -33,16 +35,20 @@ The action in this example has no agent connection.
 Controls have a 44-pixel minimum target, keyboard focus outlines, and text that can wrap.
 Desktop text uses `rem` units and responds to browser text scaling.
 
-`toCssVariables(theme)` from `@agentui/ui-primitives/desktop` exposes the same values for custom DOM controls.
+`toCssVariables(theme)` from `@openpane/ui-primitives/desktop` exposes the same values for custom DOM controls.
 Color variables use `--aui-color-*` with kebab-case role names.
 Font sizes use `--aui-font-size-*`.
 The other families are `--aui-space-*`, `--aui-radius-*`, `--aui-leading-*`, `--aui-weight-*`, `--aui-text-color-*`, `--aui-motion-*`, `--aui-control-*`, `--aui-button-*`, and `--aui-disabled-opacity`.
 `ThemeScope` applies them automatically.
 The stylesheet contract test checks every theme variable reference against the emitted variables.
 
+## Application palettes
+
+Desktop Settings stores appearance choices and imported light/dark palette pairs separately from executable UI. Pass a paired `palette` to `ThemeScope` to select its map after resolving appearance; `colors` remains a single-map module override. A scope accepts one input or the other. The application keeps builtin navigation, Settings and recovery outside selected content palettes. See the [customization guide](../extensions/customization-guide.md) for the V1 file contract and origin-local persistence/recovery.
+
 ## Native modules
 
-Import `Button`, `Text`, `Surface`, `TextField`, and `ThemeProvider` from `@agentui/ui-primitives/native`.
+Import `Button`, `Text`, `Surface`, `TextField`, and `ThemeProvider` from `@openpane/ui-primitives/native`.
 The native shell supplies appearance and reduced-motion preferences to `ThemeProvider`.
 This package does not subscribe to native OS preferences or mount an application.
 Native text always enables automatic font scaling and uses unscaled token sizes.

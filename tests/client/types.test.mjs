@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 for (const [entry, types, declaration] of [
-  ['@agentui/client', [], "import type { ClientView, StoreOptions } from '@agentui/client'; export type View = ClientView<string>; export type Options = StoreOptions<string, string>;"],
-  ['@agentui/client/react', ['react'], "import { useConversation } from '@agentui/client/react'; export const hook = useConversation; import type { ConversationModule } from '@agentui/sdk/react'; export type Module = ConversationModule;"],
+  ['@openpane/client', [], "import type { ClientView, StoreOptions } from '@openpane/client'; export type View = ClientView<string>; export type Options = StoreOptions<string, string>;"],
+  ['@openpane/client/react', ['react'], "import { useConversation } from '@openpane/client/react'; export const hook = useConversation; import type { ConversationModule } from '@openpane/sdk/react'; export type Module = ConversationModule;"],
 ]) {
   test(`${entry} emitted declarations compile without platform ambient globals`, async () => {
     const directory = await mkdtemp(`${root}.client-types-`);

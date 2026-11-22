@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { createServiceConnection } from '../../../packages/client/dist/service-engine.js';
 
 const input = await new Promise(resolve => process.once('message', resolve));

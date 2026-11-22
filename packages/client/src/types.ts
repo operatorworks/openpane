@@ -1,5 +1,5 @@
-import type { ClientCommand, FrontendOffer, OfferedCommand, ConversationDocument, ConversationPort, ConversationScope, PermissionScope, Projection, Receipt, SubmitResult } from '@agentui/contracts';
-import type { ImageAttachment, UploadId } from '@agentui/contracts/image';
+import type { ClientCommand, FrontendOffer, OfferedCommand, ConversationDocument, ConversationPort, ConversationScope, PermissionScope, Projection, Receipt, SubmitResult } from '@openpane/contracts';
+import type { ImageAttachment, UploadId } from '@openpane/contracts/image';
 
 export interface OutboxEntry {
   readonly command: ClientCommand;

@@ -28,7 +28,7 @@
     {
       "kind": "interrupted-upload",
       "filename": "interrupted-upload.json",
-      "sha256": "992edda7ec195c59b5411072e017bf81ad6af089d485f732d58353209c3160fe",
+      "sha256": "c24f340a870b302ce1a38d80bb025c7956792d7236bb2416c446f7e1d5a6e723",
       "byteLength": 70,
       "byteSha256": "6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0",
       "keys": [
@@ -55,7 +55,7 @@
     {
       "kind": "ready-attachment",
       "filename": "ready-attachment.json",
-      "sha256": "effdf886df67cd13ceef553901440bd8801676cc2e12347ec1ea71f37335b488",
+      "sha256": "0bd52bed69931062aa8d1d00c8140eacb80b84beebb6f295cbe73e9f3fc6e127",
       "byteLength": 70,
       "byteSha256": "6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0",
       "keys": [
@@ -82,7 +82,7 @@
     {
       "kind": "pending-image-command",
       "filename": "pending-image-command.json",
-      "sha256": "197a067eac8981e131b21da89f271fa71d221e11d260da566d7ae29d44f17698",
+      "sha256": "d441e8d0f27b3d403d793971812d31f4dcd21a913bf92d4875cecaaa2618daa6",
       "byteLength": 70,
       "byteSha256": "6b7fa434f92a8b80aab02d9bf1a12e49ffcae424e4013a1c4f68b67e3d2bbcd0",
       "keys": [

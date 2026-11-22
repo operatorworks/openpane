@@ -15,12 +15,12 @@ function run(command, args, cwd) {
 }
 
 test('packed SDK supports isolated platform-neutral provider authors through public exports', async () => {
-  const temporary = await mkdtemp(join(tmpdir(), 'agentui-provider-consumer-'));
+  const temporary = await mkdtemp(join(tmpdir(), 'openpane-provider-consumer-'));
   try {
     const packs = JSON.parse(run('npm', ['pack', './packages/sdk', './packages/contracts', './packages/protocol', './node_modules/@cfworker/json-schema', './node_modules/@ag-ui/core', '--json', '--ignore-scripts', '--pack-destination', temporary], root));
-    const sdk = join(temporary, 'node_modules', '@agentui/sdk');
-    const protocol = join(sdk, 'node_modules', '@agentui/protocol');
-    const destinationFor = name => name === '@agentui/sdk' ? sdk : name === '@agentui/contracts' ? join(temporary, 'node_modules', name) : join(name === '@ag-ui/core' ? protocol : sdk, 'node_modules', name);
+    const sdk = join(temporary, 'node_modules', '@openpane/sdk');
+    const protocol = join(sdk, 'node_modules', '@openpane/protocol');
+    const destinationFor = name => name === '@openpane/sdk' ? sdk : name === '@openpane/contracts' ? join(temporary, 'node_modules', name) : join(name === '@ag-ui/core' ? protocol : sdk, 'node_modules', name);
     for (const pack of packs) {
       const destination = destinationFor(pack.name);
       await mkdir(destination, { recursive: true });
@@ -34,7 +34,7 @@ test('packed SDK supports isolated platform-neutral provider authors through pub
     await writeFile(join(temporary, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
     await writeFile(join(temporary, 'tsconfig.json'), JSON.stringify({ extends: join(root, 'tsconfig.base.json') }));
     const sources = await Promise.all(['crew.ts', 'local.ts'].map((name) => readFile(new URL(name, import.meta.url), 'utf8')));
-    const prefix = sources.map((source, index) => index ? source.replace("import * as SDK from '@agentui/sdk';", '') : source).join('\n');
+    const prefix = sources.map((source, index) => index ? source.replace("import * as SDK from '@openpane/sdk';", '') : source).join('\n');
     const agui = `declare const output: SDK.ConversationRef<'native-work', 'output'>;
       const outputs: SDK.ProviderOutputs<'native-work'> = {
         async list(binding) { return { kind: 'complete', outputs: [{ reference: { binding, ref: output.ref }, name: 'report.txt', mediaType: 'text/plain', byteLength: 0, sha256: 'a'.repeat(64) }] }; },
@@ -69,17 +69,17 @@ test('packed SDK supports isolated platform-neutral provider authors through pub
       ["crewPresentation.apply({ messages: [] }, { append: 'wrong model' }, { run(ref) { return { conversation: ref.binding.creation.scope, authority: ref.binding.authority, runId: ref.ref.opaqueId }; } });", /'append' does not exist/u],
       ['void process;', /Cannot find name 'process'/u],
       ['void document;', /Cannot find name 'document'/u],
-      ["export type { ProviderModel } from '@agentui/sdk/providers';", /Cannot find module/u],
+      ["export type { ProviderModel } from '@openpane/sdk/providers';", /Cannot find module/u],
     ] });
     run(process.execPath, ['--input-type=module', '-e', `
       import assert from 'node:assert/strict';
-      import { backendProviderContractVersion } from '@agentui/sdk';
+      import { backendProviderContractVersion } from '@openpane/sdk';
       assert.equal(backendProviderContractVersion, 1);
-      const contract = await import('@agentui/contracts/output');
+      const contract = await import('@openpane/contracts/output');
       assert.equal(contract.parseOutputId('output-' + 'a'.repeat(64)), 'output-' + 'a'.repeat(64));
       assert.equal(contract.OUTPUT_MAX_BYTES, 65536);
-      await assert.rejects(import('@agentui/sdk/src/providers.js'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
-      await assert.rejects(import('@agentui/sdk/providers'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
+      await assert.rejects(import('@openpane/sdk/src/providers.js'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
+      await assert.rejects(import('@openpane/sdk/providers'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
     `], temporary);
   } finally {
     await rm(temporary, { recursive: true, force: true });

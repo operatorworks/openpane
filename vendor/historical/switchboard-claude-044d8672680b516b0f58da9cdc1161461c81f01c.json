@@ -1,11 +1,11 @@
 {
-  "sourceRepository": "https://github.com/mattsp1290/switchboard",
+  "sourceRepository": "https://github.com/operatorworks/switchboard",
   "sourceRevision": "044d8672680b516b0f58da9cdc1161461c81f01c",
   "sourceTree": "f5eedf74eaf94a91b191f5f4e2c7a4cc6c14a518",
   "artifact": "switchboard-044d8672680b516b0f58da9cdc1161461c81f01c.tgz",
   "sha256": "6a9d32a9e880ae810de45c3fa34bee494ffb6c43f76a09902f4f2fe4e8e79227",
   "packageName": "@mattsp1290/switchboard",
-  "installedAlias": "@agentui/switchboard-claude",
+  "installedAlias": "@openpane/switchboard-claude",
   "entrypoint": "./claude",
   "nativeSdk": "0.3.323",
   "provider": "anthropic-api-key",

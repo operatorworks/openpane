@@ -45,7 +45,7 @@ export function customizationCssPolicy(roots) {
     }
   }
   return {
-    postcssPlugin: 'agentui-committed-customization-css',
+    postcssPlugin: 'openpane-committed-customization-css',
     async OnceExit(root, { result }) {
       if (!roots.some(directory => within(directory, root.source.input.file))) return;
       for (const message of result.messages) {

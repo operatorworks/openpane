@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canonicalJson, copyJson, parseProviderBinding, parseRunAuthority, parseRunIdentity, parseCommand, foldDocument } from '@agentui/contracts';
+import { canonicalJson, copyJson, parseProviderBinding, parseRunAuthority, parseRunIdentity, parseCommand, foldDocument } from '@openpane/contracts';
 const scope = { hostId: 'host', conversationId: 'conversation' };
 const command = (id, body = { kind: 'send', text: 'hello' }, target = scope) =>
   ({ version: 1, scope: target, clientCommandId: id, body });
@@ -57,7 +57,7 @@ test('canonical JSON rejects non-JSON instances, getters, cycles and excessive s
 
 test('run contracts parse exact authority variants and preserve opaque provider identities', () => {
   const binding = { namespace: 'example.crew', installationId: 'i'.repeat(1025), opaqueSessionId: 's'.repeat(1025) };
-  const run = { conversation: scope, runId: 'r'.repeat(1025), authority: { kind: 'agentui-host', hostId: scope.hostId, binding } };
+  const run = { conversation: scope, runId: 'r'.repeat(1025), authority: { kind: 'openpane-host', hostId: scope.hostId, binding } };
   assert.deepEqual(parseProviderBinding(binding), binding);
   for (const authority of [run.authority, { kind: 'remote-provider', binding }]) {
     assert.deepEqual(parseRunAuthority(authority), authority);

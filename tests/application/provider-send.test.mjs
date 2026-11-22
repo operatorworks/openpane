@@ -1,14 +1,14 @@
-import { canonicalJson } from '@agentui/contracts';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { canonicalJson } from '@openpane/contracts';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import test from 'node:test';
-import { createProviderRegistry } from '@agentui/host';
-import { frontendToolsFor } from '@agentui/host/frontend-tools';
-import { createServerExtensions } from '@agentui/host/extensions';
+import { createProviderRegistry } from '@openpane/host';
+import { frontendToolsFor } from '@openpane/host/frontend-tools';
+import { createServerExtensions } from '@openpane/host/extensions';
 import { entry } from '../host/extensions/fixtures.mjs';
-import { fixture as hostFixture, scope as hostScope, snapshot } from '../host/fixture.mjs';
-import { SERVICE_WIRE_VERSION } from '@agentui/contracts/compatibility';
+import { fixture as hostFixture, scope as hostScope, snapshot, until } from '../host/fixture.mjs';
+import { SERVICE_WIRE_VERSION } from '@openpane/contracts/compatibility';
 import { extension, fixture, create, stored, send, unavailable, actualInput, offered, aguiExtension, secret, selected } from './provider-send-fixture.mjs';
 
 test('authenticated send commits exact target before HTTP effect, persists accepted runs for distinct typed models, and emits receipts only', async t => {
@@ -40,7 +40,7 @@ test('authenticated send commits exact target before HTTP effect, persists accep
   const runs = f.inspect(db => db.prepare('SELECT conversation,data FROM runs ORDER BY conversation').all());
   assert.equal(runs.length, 2);
   assert.deepEqual(runs.map(row => JSON.parse(row.data).identity.runId), ['same-run', 'same-run']);
-  assert.deepEqual(runs.map(row => JSON.parse(row.data).identity.authority.kind), ['agentui-host', 'remote-provider']);
+  assert.deepEqual(runs.map(row => JSON.parse(row.data).identity.authority.kind), ['openpane-host', 'remote-provider']);
   assert.equal(f.inspect(db => db.prepare("SELECT COUNT(*) AS n FROM events WHERE json_extract(payload,'$.event.kind')<>'receipt'").get().n), 0);
   assert.equal((await f.client.conversation(scope).submit(send(scope, 'next'))).reason, 'send-awaiting-confirmation');
   for (const body of [{ kind: 'cancel', runId: 'same-run' }, { kind: 'approve', pendingId: 'same-decision', choiceId: 'same-choice' }]) {
@@ -224,7 +224,7 @@ for (const duplicate of [false, true]) {
     const entered = Promise.withResolvers(), release = Promise.withResolvers();
     const a = extension({ submit: (operation, { effect }) => effect(operation),
       async reconcile(operation, { effect }) {
-        if (a.calls.reconciles.length === 2) entered.resolve();
+        if (a.calls.reconciles.length === 1) entered.resolve();
         await release.promise;
         return effect(operation, 'completed');
       } });
@@ -232,13 +232,16 @@ for (const duplicate of [false, true]) {
     await port.submit(send(scope));
     a.connected.submit = async operation => { a.calls.submits.push(operation); return { kind: 'pending', evidence: { queued: true } }; };
     const left = port.submit(send(scope, 'left')), right = port.submit(send(scope, duplicate ? 'left' : 'right'));
+    const pending = Promise.all([left, right]);
     await entered.promise;
-    release.resolve();
-    const results = await Promise.all([left, right]);
+    try {
+      await assert.rejects(until(() => a.calls.reconciles.length > 1, 200), /Condition timed out/);
+    } finally { release.resolve(); await pending; }
+    const results = await pending;
     assert.equal(results.filter(result => result.kind === 'receipt').length, duplicate ? 2 : 1);
     if (duplicate) assert.equal(results[0].receipt.hostOperationId, results[1].receipt.hostOperationId);
     else assert.equal(results.find(result => result.kind === 'rejected').reason, 'send-awaiting-confirmation');
-    assert.deepEqual(a.calls.reconciles, [a.calls.submits[0], a.calls.submits[0]]);
+    assert.deepEqual(a.calls.reconciles, [a.calls.submits[0]]);
     assert.equal(a.calls.submits.length, 2);
     assert.equal(f.inspect(db => db.prepare('SELECT COUNT(*) AS n FROM commands').get().n), 2);
     assert.equal((await port.receipt('send')).state.kind, 'completed');
@@ -336,7 +339,7 @@ for (const field of ['scope', 'operation', 'generation', 'protocol', 'namespace'
       if (field === 'protocol') run.ref.instance.protocolVersion = 'foreign';
       if (field === 'namespace') run.ref.instance.namespace = 'foreign';
       if (field === 'installation') run.ref.instance.installationId = 'foreign';
-      if (field === 'authority') run.binding.authority = { ...run.binding.authority, kind: 'agentui-host', hostId: operation.binding.creation.scope.hostId };
+      if (field === 'authority') run.binding.authority = { ...run.binding.authority, kind: 'openpane-host', hostId: operation.binding.creation.scope.hostId };
       if (field === 'host') run.binding.authority.hostId = 'foreign';
       if (field === 'session') run.binding.authority.binding.opaqueSessionId = 'foreign';
       if (field === 'effect') result.value.kind = 'cancel';

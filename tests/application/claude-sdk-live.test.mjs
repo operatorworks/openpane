@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { chromium } from 'playwright';
 
-const live = process.env.AGENTUI_CLAUDE_SDK_LIVE === '1';
+const live = process.env.OPENPANE_CLAUDE_SDK_LIVE === '1';
 const models = ['opus', 'sonnet'];
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -55,13 +55,13 @@ async function noSecrets(path, key) {
 }
 
 for (const model of models) {
-  test(`live Claude SDK ${model} chat responds, remembers, reopens and stops through AgentUI`, {
+  test(`live Claude SDK ${model} chat responds, remembers, reopens and stops through OpenPane`, {
     skip: !live, timeout: 360_000,
   }, async t => {
-    const key = process.env.AGENTUI_ANTHROPIC_API_KEY?.trim();
-    assert(key?.trim(), 'Load AGENTUI_ANTHROPIC_API_KEY in the host process before this test');
+    const key = process.env.OPENPANE_ANTHROPIC_API_KEY?.trim();
+    assert(key?.trim(), 'Load OPENPANE_ANTHROPIC_API_KEY in the host process before this test');
     const redact = value => String(value).replaceAll(key, '[REDACTED]');
-    const directory = await mkdtemp(join(tmpdir(), `agentui-claude-sdk-${model}-live-`));
+    const directory = await mkdtemp(join(tmpdir(), `openpane-claude-sdk-${model}-live-`));
     let browser;
     const children = [];
     t.after(async () => {
@@ -71,8 +71,8 @@ for (const model of models) {
         finally { await rm(directory, { recursive: true, force: true }); }
       }
     });
-    const evidence = process.env.AGENTUI_CLAUDE_SDK_EVIDENCE_DIR
-      ? join(process.env.AGENTUI_CLAUDE_SDK_EVIDENCE_DIR, model) : undefined;
+    const evidence = process.env.OPENPANE_CLAUDE_SDK_EVIDENCE_DIR
+      ? join(process.env.OPENPANE_CLAUDE_SDK_EVIDENCE_DIR, model) : undefined;
     if (evidence) await mkdir(evidence, { recursive: true });
     const artifact = JSON.parse(await readFile(new URL('../../apps/host/dist/artifact.json', import.meta.url), 'utf8'));
     const report = {
@@ -84,7 +84,7 @@ for (const model of models) {
     async function open(port) {
       const child = spawn(process.execPath, ['apps/host/dist/main.js', 'claude-sdk', '--model', model,
         '--data-dir', directory, '--workspace', directory, '--port', String(port)], {
-        cwd: root, env: { ...withoutCredentials(), AGENTUI_ANTHROPIC_API_KEY: key },
+        cwd: root, env: { ...withoutCredentials(), OPENPANE_ANTHROPIC_API_KEY: key },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stderr = '';

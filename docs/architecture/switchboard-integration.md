@@ -1,6 +1,6 @@
 # Switchboard host integration
 
-AgentUI consumes Switchboard through the existing Node-only `@agentui/host`
+OpenPane consumes Switchboard through the existing Node-only `@openpane/host`
 package. The host uses a [verified immutable artifact](../../vendor/README.md).
 Its [pin](../../vendor/switchboard.json) records the exact source and digest.
 Private version `0.0.0` is an artifact identity, not a published release or a
@@ -13,14 +13,14 @@ capability states, native session references, bounded event observation and
 interaction continuation parsing. The host exposes only the core contracts used
 by its current consumers. The SDK-backed Pi, Codex, and Claude drivers import
 Switchboard public native adapters. The direct Codex app-server bridge remains
-a separate driver with process and protocol handling in AgentUI. Clients and
-extensions depend on AgentUI contracts rather than the Node host.
+a separate driver with process and protocol handling in OpenPane. Clients and
+extensions depend on OpenPane contracts rather than the Node host.
 
 The installed consumer calls the upstream parser directly:
 
 ```ts
-import { parseInteractionContinuation } from '@agentui/host';
-import type { PendingInteraction } from '@agentui/host';
+import { parseInteractionContinuation } from '@openpane/host';
+import type { PendingInteraction } from '@openpane/host';
 
 function validateReply(value: unknown, expected: PendingInteraction) {
 	return parseInteractionContinuation({ value, expected });
@@ -38,7 +38,7 @@ that host policy.
 
 ## Preserve both identity domains
 
-AgentUI's `RunIdentity` has one `RunAuthority`, including its `ProviderBinding`.
+OpenPane's `RunIdentity` has one `RunAuthority`, including its `ProviderBinding`.
 That binding names a provider namespace, installed provider and opaque session.
 It does not contain Switchboard's engine, native version, account, authorized
 scope or native format. The current host-owned installation record supplies
@@ -68,7 +68,7 @@ that combination. It does not reinterpret parsing success as confirmed delivery.
 Host withholding is local policy, not a fabricated native approval choice.
 
 Switchboard owns bounded observation and library lifecycle semantics.
-AgentUI owns host authorization, installation routing, durable intent and receipts,
+OpenPane owns host authorization, installation routing, durable intent and receipts,
 pending-record ownership, event persistence, replay, uncertainty and retry policy.
 Observer disposal does not cancel authoritative work. Only a separately qualified
 native cancellation operation could establish a native cancellation result.
@@ -86,10 +86,10 @@ The current package exports core, `./agui`, `./testkit`, `./pi`, `./codex`,
 `./claude`, and `./observability`. Its AG-UI projection descriptor is
 `basic-values-messages-terminals-reasoning-and-subagents`, with `planned: none`.
 The AG-UI entry needs the exact optional SDK peer.
-`@agentui/host` declares that peer for its `./agui` entry.
+`@openpane/host` declares that peer for its `./agui` entry.
 Core imports no AG-UI or observability code.
 The [protocol matrix](../protocol/README.md) distinguishes the current runtime
-from historical canonical fixtures. AgentUI's existing reasoning and subagent
+from historical canonical fixtures. OpenPane's existing reasoning and subagent
 fixtures cover availability descriptions, message content, and owner attribution.
 They do not exercise dedicated reasoning or subagent lifecycle output.
 A schema or projection does not prove that a native provider emits an event.
@@ -101,7 +101,7 @@ Package imports and controlled fixtures do not establish broader live native,
 LiteLLM, or integrated Apple qualification.
 
 The optional observability entry uses exact peer `@opentelemetry/api@1.9.0`.
-AgentUI exposes it through `@agentui/host/observability`.
+OpenPane exposes it through `@openpane/host/observability`.
 The host owns providers, exporters, parent contexts, and flush deadlines.
 The [observability guide](../development/observability.md) describes host setup
 and the observed run lifecycle. Observations do not authorize dispatch,
@@ -117,6 +117,6 @@ The original Linux package checks remain in the
 [historical pin](../../vendor/historical/switchboard-58c7922d8fade3617cc86fedcf41677f897025ef.json).
 The [historical Mac consumer record](../qualification/switchboard-macos/58c7922d8fade3617cc86fedcf41677f897025ef/54065e2/README.md)
 qualifies installation, workspace compilation, and five controlled tests at
-AgentUI source `54065e2`. Its artifact and eleven frozen inputs matched before
+OpenPane source `54065e2`. Its artifact and eleven frozen inputs matched before
 and after that run. Neither historical receipt qualifies the current artifact.
 Broader Apple qualification remains `agentui-onxu`.

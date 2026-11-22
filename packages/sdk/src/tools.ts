@@ -1,5 +1,5 @@
-import { canonicalJson, copyJson, parseRunIdentity, type ConversationScope, type RunIdentity } from '@agentui/contracts';
-import { record } from '@agentui/contracts/decode';
+import { canonicalJson, copyJson, parseRunIdentity, type ConversationScope, type RunIdentity } from '@openpane/contracts';
+import { record } from '@openpane/contracts/decode';
 import { behaviour, extensionNamespace, frontendPlatform } from './extensions.js';
 import { compileParameters } from './schema.js';
 import type { FrontendTool, FrontendToolContribution, FrontendToolGeneration, FrontendToolGenerationOptions, FrontendToolActivation, FrontendToolOutcome, FrontendToolPin, FrontendToolPinOptions, FrontendToolRetentionOptions, RetainedFrontendTools } from './tool-contracts.js';

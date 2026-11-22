@@ -1,18 +1,20 @@
 # Committed customization sources
 
+See the [customization guide](../extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview.
+
 The source API retrieves committed inputs. An internal preparation helper installs their locked dependencies into disposable copies. The [desktop builder](../../templates/customization/README.md) uses prepared graphs to build and browser-qualify the complete application.
 
 The Node host resolves the committed package and its pinned external sources through its dedicated entry point.
 
 ```ts
-import { resolveCustomizationSources } from '@agentui/host/customization';
+import { resolveCustomizationSources } from '@openpane/host/customization';
 
 const sources = await resolveCustomizationSources({
 	reference: {
-		repository: '/home/me/personal-agentui',
+		repository: '/home/me/personal-openpane',
 		commit: fullCommitId,
 	},
-	scratchParent: '/home/me/.agentui/sources',
+	scratchParent: '/home/me/.openpane/sources',
 });
 try {
 	console.log(sources.root.directory, sources.root.customization);
@@ -23,9 +25,9 @@ try {
 
 ## Git sources
 
-`package.json.agentui.extension` is the existing SDK manifest. `sources` maps every declared runtime module to exactly one committed source file. Runtime output paths such as `./dist/desktop.js` do not need to exist in Git. All source paths start with `./` and remain inside the repository. An absent package, absent `agentui`, or empty `agentui` declares no customization. Shared or external inputs may appear without a local extension.
+`package.json.openpane.extension` is the existing SDK manifest. `sources` maps every declared runtime module to exactly one committed source file. Runtime output paths such as `./dist/desktop.js` do not need to exist in Git. All source paths start with `./` and remain inside the repository. An absent package, absent `openpane`, or empty `openpane` declares no customization. Shared or external inputs may appear without a local extension.
 
-Optional `extensions` entries declare immutable external sources. The resolver retrieves them recursively in declaration order. Repeated references share the same package object. External packages require meaningful `agentui` metadata. Before resolution, the caller must trust the pinned root and every source declared transitively by its committed descendants. Resolving the root authorizes all descendant repository locations with the same host Git access and credentials, including local paths and remote repositories. Relative repository paths at every depth use the captured invocation working directory. Local path aliases share an acquisition after absolute path normalization. Remote address spellings remain distinct acquisition addresses, including SSH and HTTPS spellings with different authentication semantics.
+Optional `extensions` entries declare immutable external sources. The resolver retrieves them recursively in declaration order. Repeated references share the same package object. External packages require meaningful `openpane` metadata. Before resolution, the caller must trust the pinned root and every source declared transitively by its committed descendants. Resolving the root authorizes all descendant repository locations with the same host Git access and credentials, including local paths and remote repositories. Relative repository paths at every depth use the captured invocation working directory. Local path aliases share an acquisition after absolute path normalization. Remote address spellings remain distinct acquisition addresses, including SSH and HTTPS spellings with different authentication semantics.
 
 Local repository paths may contain spaces. File URLs use ordinary URL encoding. Remote locations cannot contain raw whitespace, control characters, backslashes, or embedded credentials. Malformed caller locations and commit IDs report `invalid-input`; malformed external references in committed metadata report a fixed `invalid-package` diagnostic.
 
@@ -50,6 +52,8 @@ Contained committed `file:` tarballs and links to declared members of the select
 Every read fetches the full commit into private storage, copies raw regular-file blobs, and leaves your working tree, index, refs, and `FETCH_HEAD` alone. Dirty and untracked changes are excluded. Executable bits are preserved. LFS pointers stay pointer bytes. Symlinks and Git submodules are unsupported. Git uses existing SSH agents and credential helpers. Do not put passwords or tokens in repository URLs. Custom code will run with host or client process privileges when a later builder and activation path enables it.
 
 A selected `subdirectory` reads that package's metadata while preserving the complete repository for sibling imports. Workspace declarations support literal paths and a trailing `/*` over immediate packages, as an array or a `packages` array inside an object. Duplicate patterns, overlapping declarations, and unsupported patterns on any examined ancestor fail. A declaring ancestor owns the npm lock. Multiple declaring ancestors, or a selected package lock alongside a declaring ancestor, fail as ambiguous. Workspace manifests and contained local package manifests must agree with their exact lock entries. Each workspace member also requires its canonical `node_modules/<name>` link with the matching member path, including entries with an explicit name. Normalized-only link spellings such as `packages/./foo` do not match the canonical member path. Sibling workspace customization does not activate automatically.
+
+In-repo extensions are different. Every package under this repository's top-level `extensions/` directory is first-party and is bundled into the default desktop build when its `openpane.extension` manifest declares a `desktop` entry and `openpane.sources` maps that entry to a source file (`scripts/bundled-extensions.mjs`). The same import and CSS policies apply to them. Their package names stay outside the `@openpane/` scope. An external customization build merges its plan with the bundled plan, and a namespace in both fails the build. The rule for external repositories above is unchanged.
 
 ## Resolved packages
 

@@ -1,7 +1,9 @@
 # Author an extension
 
-The existing `@agentui/sdk` package exposes server contracts at its root and UI contracts at `@agentui/sdk/react`.
-The `@agentui/sdk/react-tools` entry combines UI presentation capture with frontend tool generations.
+See the [customization guide](../extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview.
+
+The existing `@openpane/sdk` package exposes server contracts at its root and UI contracts at `@openpane/sdk/react`.
+The `@openpane/sdk/react-tools` entry combines UI presentation capture with frontend tool generations.
 Installed server code runs with host process privileges.
 Installed UI code runs with client process privileges.
 Extensions are full trust. There is no sandbox or isolation promise.
@@ -17,7 +19,7 @@ Call `parseExtensionManifest` on unknown metadata, then `checkExtensionEntrypoin
 An incompatible result names an unsupported version, an undeclared or mismatched target, or an invalid entry export.
 Parsing accepts declared version strings within the currently known manifest field shape so compatibility checking can report unsupported versions separately.
 It does not parse speculative future manifest shapes.
-Manifest path checking validates syntax. `loadServerExtension` from `@agentui/host/extensions` checks filesystem containment and existence.
+Manifest path checking validates syntax. `loadServerExtension` from `@openpane/host/extensions` checks filesystem containment and existence.
 It checks manifest compatibility before import and requires a regular file beneath the real installation directory.
 Symlinks that escape that directory are rejected. The imported default export must pass the SDK entry check.
 Use immutable revision directories. Node caches each module URL, so changing bytes at an existing path does not select a new revision.
@@ -30,16 +32,18 @@ Its context supplies `providers.add(id, provider, presentation)`, a generic meth
 `providers.addAgui` uses the same registration and authority with a model whose request is the actual `RunAgentInput`.
 The backend must send that exact input and confirm its preallocated `runId`.
 Allocate a fresh run ID for each independent offered send. Exact retries keep the saved input and original run ID.
-SDK 0.5.0 introduced this required activation-context method. Extensions built before SDK 0.11.0 must rebuild; exact-version hosts refuse them before activation.
+SDK 0.5.0 introduced this required activation-context method. Extensions built before SDK 0.13.0 must rebuild; exact-version hosts refuse them before activation.
 A provider-only entry requires no React import or UI bootstrap.
 The [provider contract](provider-contracts.md) stays independent of UI activation.
 The server-only `credentials.use({ credential, service }, action)` resolves a host-issued handle for an authorized callback.
-SDK compatibility is `0.11.0`. Both the manifest and loaded entry must match this version exactly.
+SDK compatibility is `0.13.0`. Both the manifest and loaded entry must match this version exactly.
 SDK 0.6.0 adds the optional `contentLayout` contribution and requires rebuilding older extensions.
 SDK 0.9.0 adds optional provider text outputs through `ConnectedProvider.outputs`. Hosts enumerate complete scoped descriptors and read verified UTF-8 bytes through `LocalHost.conversationOutputs` and `LocalHost.readOutput`. Existing providers may omit the capability. This in-process addition keeps backend contract 1, wire 10, core DB 7 and transcript 4.
 SDK 0.10.0 adds the optional `ProviderPresentation.closure(state)` hook. It reads a provider-confirmed end of the conversation from saved state without I/O and returns `{ cause }` or `null`. Hosts report such a conversation as `concluded`, start no observation for it and refuse its sends. Existing presentations may omit the hook. The new observation status requires wire 12; backend contract 1, core DB 7 and transcript 4 are unchanged.
 SDK 0.11.0 adds the optional `CreationIntent.from`, which names the confirmed conversation a new creation continues, and the optional `ProviderPresentation.continuation(evidence)` hook. The host copies `from` from its own record of that conversation: the scope must be on the same host and the binding must belong to the same provider installation. A presentation opts its provider in to continuation by declaring `continuation`. A presentation may omit it; the host then refuses a successor for that provider and never passes it `from`. A provider that receives `from` must continue that predecessor or refuse the creation. It derives the binding of a `from` creation from its intent except for what the provider service assigns: the session and, optionally, `carryingTurn`, the provider's ID for the turn that carried the predecessor. The host refuses a successor whose session equals the predecessor's and any other binding that names `carryingTurn`. `continuation(evidence)` reads the creation's saved evidence without I/O and returns the carried turn and byte counts, `{ refused }` or `null`. Core DB 8 adds an index of creations by predecessor, and format 7 hosts refuse it. Wire 12, backend contract 1 and transcript 4 are unchanged.
-Wire 13 later adds the `abandon` service operation and wire 14 the `continuation` operation, both without an SDK change, so SDK 0.11.0 stays current.
+Wire 13 later adds the `abandon` service operation and wire 14 the `continuation` operation, both without an SDK change.
+SDK 0.12.0 adds `ServerExtensionContext.installations` and `ServerExtensionContext.operations`, and wire 15 adds the `extension-call` service operation and `ServiceMetadata.extensions`. See [Call server operations from the client](#call-server-operations-from-the-client).
+Wire 16 adds `installationId` and `providerAgentId` to provider agent descriptors, `provider` to catalog and search entries, and an optional `filter` (`namespace` or `provider-agent`) to `catalog`. The filter reads the installation stored with each conversation, so conversations of retired, replaced or earlier-generation agents stay listed. No stored data format changes.
 
 SDK 0.8.0 adds an optional fourth `providers.addAgui` argument, `AguiObservations<Model, Installation>`.
 Its `event(event)` callback returns ordered `AguiRunBatch` values. Its `snapshot(state, originals)` callback returns complete prefixes or explicit unavailable histories for the supplied original operations.
@@ -53,7 +57,7 @@ This contract does not add browser consent, execution or continuation. Existing 
 
 SDK 0.7.0 adds the optional `overrides.activity` contribution.
 Authors supply a presentation and hosts supply the credential capability.
-Workspace package versions are `0.0.0`, service wire version is 14, and transcript projection version is 4.
+Workspace package versions are `0.0.0`, service wire version is 16, and transcript projection version is 4.
 
 Desktop contributions may arrange transcript and module presentation with `contentLayout`.
 The composer, approvals, Stop, recovery, agent selection and protected navigation remain host-owned.
@@ -96,7 +100,7 @@ The production CLI selects installed server entries and verified server artifact
 
 The returned host exposes `discoverProviders()`, `extensionStatus()`, `replaceProviderExtensions(selection)`, and `close()`.
 An empty selection disables local extensions. It does not send a provider cancel, delete, or other remote command.
-The owner in `@agentui/host/extensions` manages one whole provider registry generation at a time.
+The owner in `@openpane/host/extensions` manages one whole provider registry generation at a time.
 The host supplies its `prepare()` callback only after replacement admission and successful old cleanup.
 Preparation loads all entries before creating authorities and closes any authorities acquired before a preparation failure.
 A custom host using `createServerExtensions()` must follow that same preparation ownership contract.
@@ -136,7 +140,7 @@ Each cause has one fixed, sanitized reason; provider-supplied reasons and errors
 Healthy installations stay selectable. The chooser lists an unavailable installation as a disabled entry labeled with its namespace and installation ID, and existing conversations show its reason instead of "no longer configured".
 Every cause except `invalid-installation` is retried on the next discovery: a refused connection holds nothing and reconnects, a reported `version-unsupported` closes its connection so the reconnect probes capabilities again, and other reported causes keep their connection.
 When metadata or conversation reads find that the last discovery started at least 30 seconds ago, the host starts one background discovery without waiting for it. This both recovers retryable outages and reports outages that begin after a healthy discovery. No timer runs, and shutdown waits for that discovery.
-An `authentication-failed` installation recovers automatically when the credential is fixed on the provider. AgentUI reads its own extension secret once at startup, so changing that secret needs a host restart.
+An `authentication-failed` installation recovers automatically when the credential is fixed on the provider. OpenPane reads its own extension secret once at startup, so changing that secret needs a host restart.
 `providers-refresh` (`node apps/host/dist/main.js providers-refresh --data-dir /private/host`) discovers immediately and returns every installation's status.
 An `invalid-installation` closes that installation's connection and recovers only after the configuration is fixed and the extension is replaced, normally by restarting the host.
 Transient and durable serving keep running through provider discovery failures.
@@ -176,7 +180,7 @@ UI refresh does not invoke server replacement.
 
 `serve --config ./agents.json --extensions ./extensions.json --data-dir ./state` selects server extensions alongside configured native agents.
 `serve --extensions ./extensions.json --data-dir ./state` runs providers without native agents or recorded playback.
-`--extensions` is valid only for `serve`.
+`--extensions` is valid for `serve` and `desktop`. With `desktop`, the configured native default stays selected and provider agents are listed beside the native agents.
 With both files, the configured native default remains selected. Without native configuration, the default is the ready provider with the smallest stable ID in the current catalog, independent of discovery order.
 Empty, changing, or failed catalogs remain readable with no default. Creation is disabled while saved conversations and their original agent identities remain available.
 Omitting `--extensions` preserves the existing native-agent behavior.
@@ -189,20 +193,20 @@ The version 2 extension configuration has this shape:
 	"version": 2,
 	"ownership": "transient",
 	"extensions": [{
-		"directory": "./installed/crew-v1",
+		"directory": "/absolute/path/to/openpane/extensions/crew",
 		"installations": [{
-			"id": "service",
+			"id": "personal",
 			"instance": {
-				"namespace": "example-crew",
+				"namespace": "crew",
 				"installationId": "personal",
 				"generation": "1",
-				"protocolVersion": "crew-v2"
+				"protocolVersion": "1"
 			},
 			"service": "https://crew.example",
 			"expectedAuthority": "remote-provider",
 			"authentication": {
 				"kind": "environment",
-				"variable": "AGENTUI_EXTENSION_CREW_TOKEN",
+				"variable": "OPENPANE_EXTENSION_CREW_TOKEN",
 				"revision": "rotation-1"
 			}
 		}]
@@ -218,12 +222,12 @@ To select a [built server artifact](../customization/server-artifacts.md), use a
 	"directory": "./artifacts/crew-v1",
 	"artifactId": "<64-character artifact ID printed by the builder>",
 	"installations": [{
-		"id": "service",
+		"id": "personal",
 		"instance": {
-			"namespace": "example-crew",
+			"namespace": "crew",
 			"installationId": "personal",
 			"generation": "1",
-			"protocolVersion": "crew-v2"
+			"protocolVersion": "1"
 		},
 		"service": "https://crew.example",
 		"expectedAuthority": "remote-provider",
@@ -235,33 +239,33 @@ To select a [built server artifact](../customization/server-artifacts.md), use a
 Put this object in the `extensions` array. The `artifactId` must be the exact lowercase hexadecimal ID printed by the builder. A catalog can contain several extension namespaces. Each installation grant names a namespace in that catalog. Installed entries and artifact entries can appear together under transient ownership. Use `"ownership": "durable-artifacts"` for journaled next-start selection.
 
 `directory` resolves relative to the selection file's directory. Absolute directories are also accepted.
-Each installed package supplies its canonical manifest at `package.json.agentui.extension`:
+Each installed package supplies its canonical manifest at `package.json.openpane.extension`:
 
 ```json
 {
-	"name": "@example/crew",
-	"agentui": {
+	"name": "openpane-extension-crew",
+	"openpane": {
 		"extension": {
-			"namespace": "example-crew",
+			"namespace": "crew",
 			"trust": "full",
-			"sdkVersion": "0.11.0",
+			"sdkVersion": "0.13.0",
 			"entries": [{ "kind": "server", "module": "./dist/server.mjs" }]
 		}
 	}
 }
 ```
 
-Package metadata outside `agentui.extension` is ignored.
+Package metadata outside `openpane.extension` is ignored.
 Selection objects, grants, authentication objects, identities, and manifests reject extra or missing fields.
 Empty `extensions` and `installations` arrays are valid.
 Selected namespaces, grant IDs within a package, and complete provider identities must be unique.
 Under transient ownership, each grant's namespace must match a manifest in its selected package or artifact catalog.
 [Durable selection](#durable-selection-and-explicit-live-application) retains unused startup grants when an artifact is disabled.
-`expectedAuthority` accepts `agentui-host` or `remote-provider`.
+`expectedAuthority` accepts `openpane-host` or `remote-provider`.
 `service` must be an HTTP or HTTPS origin without credentials, a query, a fragment, or a non-root path.
 
 `authentication` accepts either the environment reference shown above or exactly `{ "kind": "unauthenticated" }`.
-Environment names follow `AGENTUI_EXTENSION_[A-Za-z0-9_]+` and have at most 1024 characters.
+Environment names follow `OPENPANE_EXTENSION_[A-Za-z0-9_]+` and have at most 1024 characters.
 Missing or blank secrets fail startup. The host captures the original secret bytes without trimming.
 After the entire selection passes validation, the host removes only referenced variables from its environment before extension activation and native child startup.
 Extensions access the captured value through the existing credential authority. The host persists only grant metadata.
@@ -281,6 +285,28 @@ Installed entries are trusted ordinary filesystem modules with host process priv
 Artifact entries also run with full host process privileges. The host imports the verified retained bytes, so later changes to artifact files do not change the loaded catalog. Under transient ownership, the programmatic server replacement method accepts artifact, installed, and empty selections through the same lifecycle owner.
 CLI hosts configured with durable ownership use [durable selection](#durable-selection-and-explicit-live-application), followed by explicit live application or a restart. Admitted provider work defers replacement before candidate preparation; retry explicitly after the work settles. Replacement retires the old generation before verifying and importing the requested selection. Each artifact activation uses a fresh module generation, including repeated selection of the same bytes. A failed candidate leaves the old generation retired and reports the existing replacement or restart recovery classification. The host does not restore old code automatically.
 
+## Call server operations from the client
+
+A server entry reads its configured installations from `context.installations`. Each `ServerExtensionInstallation` has the grant `id`, the provider `instance`, the `service` origin and `expectedAuthority`. It holds no secret.
+A provider contribution ID must equal the grant `id` of the installation it serves. An entry that serves every configured installation registers one provider per installation with `providers.add(installation.id, …)`.
+
+`context.operations.add(id, operation)` registers a named operation. The ID matches `[a-z][a-z0-9.-]{0,63}`. A duplicate ID, an invalid ID or a registration after activation throws and fails the activation.
+`operation.run({ installation, credential, input, signal })` receives the installation the client named, a credential handle the host issued for it (`null` when unauthenticated), a bounded copy of the input and an `AbortSignal`.
+It returns `{ kind: 'ok', output, agentsChanged? }` or `{ kind: 'refused', code }`, where `code` matches `[a-z][a-z0-9-]{0,63}`.
+
+Clients call an operation through the `extension-call` service operation with `namespace`, `installationId` (the `ProviderInstance.installationId`), `operation` and `input`.
+The host replies `{ kind: 'ok', output }`, `{ kind: 'refused', code }` or `{ kind: 'failed', cause }`. The causes are `unknown-extension`, `unknown-installation`, `unknown-operation`, `unavailable`, `too-large`, `invalid-result`, `threw` and `timeout`.
+Input is limited to 64,000 bytes of canonical JSON and output to 256,000 bytes. A thrown handler, malformed result or exception text never reaches the client.
+The host replies within 15 seconds of admission, below the 20-second native transport deadline. At the deadline it aborts `signal`, replies `timeout`, releases the call's admission so replacement is not deferred, and discards a late result.
+`agentsChanged: true` makes the host wait for any discovery that is already running, then start a fresh discovery, before it replies; a slow or failed discovery does not change the reply.
+The channel gives no idempotency. An operation that changes remote state carries its own idempotency key inside `input`; after `timeout` or a lost reply the outcome is unknown, and the caller retries with the same key.
+
+An error thrown inside a `credentials.use` action reaches the caller as one fixed opaque error. Code that needs to classify a failure catches inside the action and returns a typed value.
+Operation code must pass `call.signal` to every request it makes. A request that ignores the signal keeps its `credentials.use` task pending and holds generation close.
+`ServiceMetadata.extensions` lists each configured namespace with `state` (`active` or `failed`), its operation IDs and each installation's `available` or `unavailable` status. It contains no credential, handle or service origin. While a replacement is changing, it keeps listing the retiring generation's namespaces with every installation `unavailable`, and calls fail `unavailable` until the new generation is active.
+Host close aborts every admitted operation's `signal` and replies `unavailable` at once, so shutdown does not wait for the operation deadline.
+Full-trust extensions share one realm. The host's namespace and installation checks are the only enforcement.
+
 ## Contribute conversation views and actions
 
 The [provider-free fixture](../../tests/extensions/contracts/fixture.ts) declares nested views and a conversation action.
@@ -297,8 +323,8 @@ Every command and contributed action returns `Promise<SubmitResult>`.
 Preserve rejected admission and uncertain receipt states for the caller.
 Resolving an action does not establish native execution success.
 
-The desktop customization host renders nested modules as labeled sections after the transcript, before approvals and the composer.
-Transcript and modules share one content scrollbar by default.
+The desktop customization host renders nested modules as labeled sections under Conversation tools in Extensions; an explicitly selected content layout may place them with the transcript. Approvals and the composer remain host-owned.
+A selected content layout can place transcript and modules in one content scrollbar. Without that claim, Conversation tools remains in Extensions.
 It renders declarative actions as labeled buttons, suppresses duplicate clicks while an action is pending, and reports the returned submission state.
 The host reports rejected admission, rejected receipts, not-dispatched receipts, uncertain receipts, abandoned receipts, and thrown errors.
 An abandoned receipt means the user stopped waiting on the command; it does not say whether the command ran.
@@ -329,7 +355,7 @@ function MyTranscript({ conversation, activity }: ConversationModuleProps) {
 return { modules: [], overrides: { transcript: MyTranscript }, dispose() {} };
 ```
 
-The desktop activates each namespace once for its contributions.
+The desktop retains each admitted namespace activation for its contributions. Appearance, palette and slot choices do not restart it; selectively disabling another namespace preserves surviving activations. A namespace cannot reactivate until its prior activation and retirement barrier settle. Failed cleanup requires a process/page restart for that namespace.
 The override changes only transcript presentation. The ordinary composer, approvals, Stop, and command recovery keep their owners.
 An activity override replaces command and file presentation while native messages, Markdown and sent images remain visible.
 It receives `ConversationActivityProps`, which extends `ConversationModuleProps` with readonly `updates` equal to `connected`, `reconnecting` or `paused`.
@@ -340,8 +366,7 @@ Return `overrides: { activity: MyActivity }` to claim this combined command and 
 A claimed whole transcript takes precedence over selective activity, including its native fallback during loading or failure.
 Activity loading, conflict or failure uses native activity without replacing messages or the protected composer.
 An outer content layout fallback is fully native and does not mount another activity override.
-The default transcript stays visible while any selected activation is pending or a lazy override is loading.
-If multiple ready namespaces claim the transcript after all activations settle, the host reports their sorted names and keeps the default transcript.
+Settings persists an automatic, builtin or explicit namespace choice for each global slot. In automatic mode, builtin presentation stays visible while an admitted activation is pending; after settlement, multiple claims produce sorted conflict diagnostics and builtin presentation. An explicit choice considers only the named namespace: loading, failure, disablement, absence or a missing claim keeps builtin presentation with a diagnostic and retains the saved choice. Builtin mode always uses builtin presentation. A lazy selected view uses its builtin fallback while loading.
 A failed namespace releases its claim and disposes once; other namespaces remain available.
 Restore default view removes all presentation contributions while preserving the composer and draft.
 This slot does not provide a layout language, split conversations, or live artifact refresh.
@@ -353,7 +378,23 @@ Controls are disabled when the conversation is unavailable, disconnected, busy, 
 Captured commands still validate the active conversation and availability at invocation; a saved callback cannot bypass those checks.
 The client owns command IDs, persisted intent, and retries of captured commands.
 The SDK supplies no second command identity mechanism and never retries arbitrary extension action callbacks.
-Theme and platform controls remain direct imports from `@agentui/theme/react` and `@agentui/ui-primitives/desktop` or `/native`.
+Theme and platform controls remain direct imports from `@openpane/theme/react` and `@openpane/ui-primitives/desktop` or `/native`.
+
+## Bundled in-repo extensions
+
+Every package under the repository's `extensions/` directory is first-party. Its `package.json.openpane.extension` is its canonical manifest, its package name stays outside the `@openpane/` scope, and the default desktop build bundles its `desktop` entry through `openpane.sources` (`scripts/bundled-extensions.mjs`). Its server entry loads as an installed entry from the working tree through `serve --extensions` or `desktop --extensions`; the [launcher](../development/launcher.md#load-server-extensions-on-a-local-host) passes the file when every token variable is set. Restart the host after rebuilding an extension: Node keeps the module it imported.
+
+## Contribute a workspace view
+
+SDK 0.13.0 adds the optional `workspace` contribution: `{ label, component, transcript? }`. The label has 1 to 40 characters and names the extension in the Extensions view. `component` and the optional `transcript` follow the same function, memo, forwardRef and lazy rules as transcript overrides. Unknown keys are rejected.
+The desktop rail shows Chats, Extensions and Settings. The Extensions view lists every namespace in the desktop selection and in `ServiceMetadata.extensions`, sorted by namespace, with a state of `Ready`, `Not configured`, `Unavailable`, `No view`, `Failed`, `Disabled` or `Loading` (while the desktop entry activates, or while the host has not yet reported its extensions, for example during startup or while it is unreachable). Selecting a row with a workspace renders its component inside an element with `data-extension-workspace="<namespace>"`; scope every stylesheet selector under that attribute. That element also contains the host-rendered `conversation` node, so the attribute alone does not keep a rule off the host composer, approvals or agent picker: scope element rules such as `button` or `h2` to your own containers, for example `[data-extension-workspace="crew"] :is(.crew-header, .crew-member-form) button`. The host conversation keeps the host styles; only theme tokens set by an enclosing `ThemeScope` reach it.
+
+`WorkspaceViewProps` gives the component its namespace, installation status, this namespace's agents (with `installationId` and `providerAgentId`), its conversations (catalog order, paged with `more()`, except that a conversation created in this session is listed first until the list is next read from its first page, for example by `refresh()`; when the selected conversation's agent has a `providerAgentId`, the selected conversation is always among them, after the loaded pages when it is not on one yet; otherwise it is among them only if a loaded page lists it), the selected conversation and a host-rendered `conversation` node.
+`open(scope)` and `create(agentId)` reject only a conversation or agent outside the namespace. Otherwise they resolve when the attempt ends, including an attempt that did not open or create anything: the application was busy, a pending creation needs recovery, the agent is unavailable or the host refused. `selected` stays unchanged, so react to a change of `selected`, not to the resolved promise. The host shows a refusal, a pending creation or an unavailable agent in the workspace status strip. An attempt made while the application is busy with another operation is ignored without a notice. `call(installationId, operation, input)` calls the extension's own server operations and never rejects: a transport failure resolves as `{ kind: 'failed', cause: 'unavailable' }`. `refresh()` re-reads metadata and the conversation list.
+The host-rendered conversation keeps the composer, approvals, Stop, recovery and permissions. Inside a workspace it uses the workspace `transcript` when one is supplied, no `contentLayout` and no modules, and its agent control lists only the namespace's agents.
+
+The application has one active conversation (decision D4). Opening a conversation in a workspace changes that same active conversation, so switching to Chats shows it selected. At most one conversation view is mounted at a time, and the draft is kept in the persisted draft store across views.
+A workspace render failure retires its namespace once and returns the Extensions list with the row `Failed`. Restore default view disables workspaces with the other presentation contributions.
 
 ## Arrange conversation content
 
@@ -366,7 +407,7 @@ Inspecting, cloning, or rendering these elements' props is unsupported and does 
 The typed layout props add no commands, draft editor, conversation selector, or lifetime API.
 
 ```tsx
-import type { ConversationContentLayoutProps } from '@agentui/sdk/react';
+import type { ConversationContentLayoutProps } from '@openpane/sdk/react';
 
 function ReviewLayout({ transcript, modules }: ConversationContentLayoutProps) {
 	return <div className="review-layout"><div>{transcript}</div><aside>{modules}</aside></div>;
@@ -374,16 +415,16 @@ function ReviewLayout({ transcript, modules }: ConversationContentLayoutProps) {
 return { contentLayout: ReviewLayout, modules, dispose() {} };
 ```
 
-The [Plan review template](../../templates/customization/desktop/index.tsx) includes responsive CSS for this arrangement.
-The host supplies one scroll viewport and an inline-size container. The template stacks its columns at or below 640px of available content width.
+This arrangement is opt-in. The [Plan review template](../../templates/customization/desktop/index.tsx) uses a namespace workspace and scoped transcript without claiming a global content layout.
+The host supplies one scroll viewport and an inline-size container. An opt-in content layout can use container queries to adapt to the available content width.
 Permissions, approvals, the composer, Stop, command recovery, and navigation remain outside the layout.
 Activation, failure, suspension, and restore preserve those controls for the same selected conversation.
 Navigation retains the existing conversation identity and command checks. Layouts do not create independently active conversations.
 
 The host captures `contentLayout` once with the same function, memo, forwardRef, and lazy rules as transcript components.
-Layout selection waits for every selected namespace to settle. Multiple ready claims produce sorted diagnostics and the default transcript-then-modules arrangement.
-An omitted layout uses that same default arrangement. Without an active conversation, namespace diagnostics remain visible in customization catalog order and layouts do not render.
-Layout activation, conflict changes, and render failure can remount module and transcript views. Pending action feedback and duplicate-click suppression do not survive a remount.
+Automatic layout selection waits for admitted namespaces to settle. Multiple ready claims produce sorted diagnostics and builtin presentation. Explicit and builtin selection follow the same persisted choice rules as transcript/activity.
+An omitted layout uses builtin presentation with Conversation tools in Extensions. Without an active conversation, namespace diagnostics remain visible in stable namespace order and layouts do not render.
+Layout activation, conflict changes, and render failure can remount module and transcript views. Host-owned pending action feedback and duplicate-click suppression survive presentation remounts for the same namespace generation, conversation, and complete module/action path. A different conversation or namespace generation has separate action state. Authored component React state may still remount.
 Pending commands retain their original identities in the conversation outbox.
 
 While a layout suspends, the host shows native messages, command and file activity, and a loading notice.
@@ -399,13 +440,13 @@ The UI context exposes `frontendTools.add(tool)`.
 Each contribution supplies a protocol tool definition, a decoder from `unknown`, and an async handler returning a string.
 The handler receives the pinned conversation scope.
 The factory supplies the validated namespace and registration sink in an immutable activation context.
-The `@agentui/sdk/react-tools` adapter includes tool validation.
+The `@openpane/sdk/react-tools` adapter includes tool validation.
 The root and React presentation entries stay lightweight.
 Import the adapter and the pin runtime from their separate entries:
 
 ```ts
-import { createUiExtensionGeneration } from '@agentui/sdk/react-tools';
-import { pinFrontendTools } from '@agentui/sdk/tools';
+import { createUiExtensionGeneration } from '@openpane/sdk/react-tools';
+import { pinFrontendTools } from '@openpane/sdk/tools';
 
 const { generation, presentation } = await createUiExtensionGeneration({
   namespace: manifest.namespace, generation: 'activation-1', platform: 'desktop',
@@ -454,7 +495,7 @@ The generation label is captured for diagnostics and owner correlation; the SDK 
 Disposal runs once after all pins and calls drain.
 Its failure rejects every retirement caller.
 Always observe the retirement promise.
-A replacement generation can activate before the previous generation disposes, so extensions must tolerate overlapping activations.
+Independent SDK generation owners can activate a replacement before the previous generation disposes and must tolerate that overlap. The desktop application serializes each namespace. Disabling and re-enabling waits for that namespace's earlier activation and retirement, including held tool pins.
 A disposer must not await its own generation's retirement, since retirement waits for that disposer.
 - **Pins.** Existing pins and calls remain usable until released or settled.
 Release every pin on every run outcome, including cancellation and failure.
@@ -476,7 +517,7 @@ Duplicate local names and duplicate selected namespaces are rejected.
 Platform belongs to the activation generation, not individual tools.
 A mixed desktop and iOS generation list is intentionally filtered to the pin's platform.
 The `ag-ui` metadata key is reserved.
-Contributed provider instance namespaces must match their validated extension manifest namespace, such as `example-crew`.
+Contributed provider instance namespaces must match their validated extension manifest namespace, such as `crew`.
 
 Parameters use a bounded JSON copy and an object-root inline draft-07 JSON Schema.
 Schema-position `$ref`, `definitions`, `$id`, unknown keywords, nested or non-draft-07 `$schema`, and unsupported formats are rejected.

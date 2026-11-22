@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { useConversation } from '@agentui/client/react';
+import { useConversation } from '@openpane/client/react';
 import { fixture, snapshot, events } from './support.mjs';
 
 const left = fixture();

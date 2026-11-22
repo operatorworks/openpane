@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { UiExtensionEntry } from '@agentui/sdk/react';
-import { createUiExtensionGeneration } from '@agentui/sdk/react-tools';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { UiExtensionEntry } from '@openpane/sdk/react';
+import { createUiExtensionGeneration } from '@openpane/sdk/react-tools';
 
 function ToolModule() {
   const [count, setCount] = useState(0);

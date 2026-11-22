@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { canonicalJson } from '@agentui/contracts';
-import { frontendToolsFor } from '@agentui/host/frontend-tools';
+import { canonicalJson } from '@openpane/contracts';
+import { frontendToolsFor } from '@openpane/host/frontend-tools';
 import { fixture, installed, run, scope } from '../fixture.mjs';
 const key = { threadId: 'thread', runId: 'run-a' };
 const start = { type: 'RUN_STARTED', ...key }, finish = { type: 'RUN_FINISHED', ...key };

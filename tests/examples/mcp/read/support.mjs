@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { createRecordedDriver, openLocalHost } from '@agentui/host';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import { EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
+import { createRecordedDriver, openLocalHost } from '@openpane/host';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import { EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
 import { openAccessDatabase } from '../../../../apps/host/build/tsc/access-database.js';
 import { createApi } from '../../../../apps/host/build/tsc/api.js';
 import { FeedRegistry } from '../../../../apps/host/build/tsc/feed-registry.js';
@@ -22,10 +22,10 @@ const installed = { ...originalInstalled, binding: { ...originalInstalled.bindin
 export const main = fileURLToPath(new URL('../../../../examples/mcp-control/read/dist/main.js', import.meta.url));
 export const compatibility = { wireVersion: 1, extensionSdkVersion: EXTENSION_SDK_VERSION, nativeRuntime: RECORDED_RUNTIME,
   desiredGitRevision: 'test', appliedArtifact: { artifactId: 'test', gitRevision: 'test' } };
-export const tools = ['agentui_agents', 'agentui_conversations', 'agentui_inspect', 'agentui_receipt'];
+export const tools = ['openpane_agents', 'openpane_conversations', 'openpane_inspect', 'openpane_receipt'];
 export const empty = () => ({ events: [], runs: [], decisions: [] });
 export const privateDirectory = t => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-mcp-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-mcp-'));
   chmodSync(directory, 0o700);
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   return directory;
@@ -48,7 +48,7 @@ export function cli(args, input = '') {
   });
 }
 export async function connect(t, origin) {
-  const client = new Client({ name: 'agentui-read-test', version: '1' });
+  const client = new Client({ name: 'openpane-read-test', version: '1' });
   const transport = new StdioClientTransport({ command: process.execPath, args: [main, 'serve', origin], stderr: 'pipe' });
   let stderr = '';
   transport.stderr.on('data', data => { stderr += data; });

@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { chromium } from 'playwright';
 import { fixture, providerService } from './provider-stream-fixture.mjs';
 import { local, localBackend, localPresentation } from '../extensions/providers/contracts/local.ts';
 
 const sentinel = 'PRIVATE_PROVIDER_STATUS_SENTINEL_31';
 const reasons = {
-  offline: 'The provider service is offline or unreachable. AgentUI checks again automatically.',
-  'authentication-failed': 'The provider rejected the configured credential. Fix it on the provider and AgentUI checks again automatically, or change the extension secret and restart the host.',
-  unauthorized: 'The configured credential is not authorized for this provider. Grant it access; AgentUI checks again automatically.',
-  'version-unsupported': 'The provider service version is unsupported. Install a compatible version; AgentUI checks again automatically.',
+  offline: 'The provider service is offline or unreachable. OpenPane checks again automatically.',
+  'authentication-failed': 'The provider rejected the configured credential. Fix it on the provider and OpenPane checks again automatically, or change the extension secret and restart the host.',
+  unauthorized: 'The configured credential is not authorized for this provider. Grant it access; OpenPane checks again automatically.',
+  'version-unsupported': 'The provider service version is unsupported. Install a compatible version; OpenPane checks again automatically.',
   'invalid-installation': 'The provider installation is invalid. Fix the extension configuration, then restart the host.',
 };
 function healthy() {

@@ -7,9 +7,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { createBrowserConnection } from '@agentui/client/service';
-import { EXTENSION_SDK_VERSION, backendProviderContractVersion } from '@agentui/sdk';
-import { parseTranscript, transcriptProjection } from '@agentui/contracts/conversation';
+import { createBrowserConnection } from '@openpane/client/service';
+import { EXTENSION_SDK_VERSION, backendProviderContractVersion } from '@openpane/sdk';
+import { parseTranscript, transcriptProjection } from '@openpane/contracts/conversation';
 
 const artifact = new URL('../../apps/host/build/tsc/artifact.js', import.meta.url).href;
 registerHooks({ resolve(specifier, context, next) {
@@ -61,7 +61,7 @@ export async function providerService(t, { native = false } = {}) {
     const input = JSON.parse(body); requests.push({ path: request.url, input });
     response.setHeader('content-type', 'application/json');
     if (request.url === '/create') {
-      const binding = { kind: 'agentui-created', creation: input, authority: { kind: native ? 'agentui-host' : 'remote-provider',
+      const binding = { kind: 'openpane-created', creation: input, authority: { kind: native ? 'openpane-host' : 'remote-provider',
         ...(native ? { hostId: input.scope.hostId } : {}), binding: { namespace: instance.namespace, installationId: instance.installationId, opaqueSessionId: 'same-session' } } };
       conversations.set(input.scope.conversationId, { history: [], snapshot: { binding, cursor: cursor(binding), projectionVersion: 1, state: state(), decisions: [] } });
       response.end(JSON.stringify({ kind: 'confirmed', value: binding, evidence: null }));
@@ -154,14 +154,14 @@ export async function providerService(t, { native = false } = {}) {
         } }, presentation);
         return { async dispose() { calls.disposed++; } };
       } },
-      installations: [{ id: 'service', instance: installed, service, expectedAuthority: native ? 'agentui-host' : 'remote-provider',
+      installations: [{ id: 'service', instance: installed, service, expectedAuthority: native ? 'openpane-host' : 'remote-provider',
         authentication: { kind: 'secret', revision, resolve: async () => secret } }],
     } };
   };
   return { extension, service, requests, conversations, clients, ref, cursor, makeEvent, emit, command(handler) { commandHandler = handler; }, beforeReply() { beforeReply = true; } };
 }
 export async function fixture(t, extensions, { shutdownFailure = false } = {}) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-provider-stream-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-provider-stream-'));
   let running, port;
   const control = op => new Promise((resolve, reject) => {
     const socket = createConnection(join(directory, 'control.sock')); let output = '';

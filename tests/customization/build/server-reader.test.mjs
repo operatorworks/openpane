@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { cp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
-import { parseServerCustomizationArtifact, readServerCustomizationArtifact } from '@agentui/host/customization';
+import { parseServerCustomizationArtifact, readServerCustomizationArtifact } from '@openpane/host/customization';
 import { setup, expectation, resigned } from './server-support.mjs';
 
 const reverseKeys = value => Array.isArray(value) ? value.map(reverseKeys) : value && typeof value === 'object'

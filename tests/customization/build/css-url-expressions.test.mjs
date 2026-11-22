@@ -11,7 +11,7 @@ import { cssUrlExpressions } from '../../../scripts/lib/css-url-expressions.mjs'
 import { repository, buildCustom } from './support.mjs';
 
 test('relative CSS URL expressions retain precedence, bytes and source maps in Chromium', { timeout: 60_000 }, async t => {
-  const root = await mkdtemp(join(tmpdir(), 'agentui-css-expressions-'));
+  const root = await mkdtemp(join(tmpdir(), 'openpane-css-expressions-'));
   const browser = await chromium.launch();
   t.after(async () => { await browser.close(); await rm(root, { recursive: true, force: true }); });
   await writeFile(join(root, 'style.css'), '.fixture { color: rgb(1, 2, 3); }');
@@ -59,7 +59,7 @@ test('relative CSS URL expressions retain precedence, bytes and source maps in C
 });
 
 test('pre-CSS grouping handles emitted keys and quasis without rewriting tagged raw text', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'agentui-css-ast-'));
+  const root = await mkdtemp(join(tmpdir(), 'openpane-css-ast-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(join(root, 'entry.js'), 'globalThis.probe = true;');
   let parse;
@@ -89,6 +89,6 @@ test('committed custom artifact qualifies the original single-use CSS guard', { 
   f.write('desktop/style.css', '.guard { color: red; }');
   f.write('desktop/index.tsx', `import style from './style.css?url';
     if(!style) throw new Error('valid CSS URL became falsy');
-    export default {kind:'desktop',sdkVersion:'0.11.0',activate(){return {modules:[],dispose(){}}}};`);
+    export default {kind:'desktop',sdkVersion:'0.13.0',activate(){return {modules:[],dispose(){}}}};`);
   buildCustom(f, f.commit());
 });

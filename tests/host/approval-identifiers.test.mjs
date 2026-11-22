@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { canonicalJson, parseCommand } from '@agentui/contracts';
-import { createConversationStore } from '@agentui/client';
+import { canonicalJson, parseCommand } from '@openpane/contracts';
+import { createConversationStore } from '@openpane/client';
 import { storage } from '../client/support.mjs';
 import { fixture, scope, installed, projection, command, empty, completed, run, question, snapshot, until } from './fixture.mjs';
 

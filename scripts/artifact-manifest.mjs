@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
-import { canonicalJson } from '@agentui/contracts';
-import { RECORDED_RUNTIME, SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION } from '@agentui/contracts/compatibility';
-import { BROWSER_RUNTIME, manifestPayload, parseArtifactManifest } from '@agentui/contracts/artifact';
+import { canonicalJson } from '@openpane/contracts';
+import { RECORDED_RUNTIME, SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION } from '@openpane/contracts/compatibility';
+import { BROWSER_RUNTIME, manifestPayload, parseArtifactManifest } from '@openpane/contracts/artifact';
 
 const targets = {
   host: { directory: 'apps/host/dist', nativeRuntime: { engine: 'node', version: process.versions.node, format: 'esm' } },
@@ -35,11 +35,11 @@ function assetsAt(path) {
 function isProductSource(path) {
   const parts = path.split('/');
   if (parts.some(part => ['node_modules', '.audit', '.git'].includes(part))) return false;
-  if (/^(?:apps|packages|examples)\/[^/]+\/dist\//.test(path) ||
+  if (/^(?:apps|packages|examples|extensions)\/[^/]+\/dist\//.test(path) ||
       ['apps/host/build/', 'apps/desktop/web-dist/', 'apps/desktop/web-dist-browser/',
         'apps/desktop/src-tauri/target/', 'apps/desktop/src-tauri/gen/'].some(output => path.startsWith(output))) return false;
   if (parts.some(part => /^\.env|\.pem$|\.key$|\.p12$/i.test(part))) return false;
-  return ['apps', 'packages', 'scripts', 'tests', 'examples'].includes(parts[0]) ||
+  return ['apps', 'packages', 'scripts', 'tests', 'examples', 'extensions'].includes(parts[0]) ||
     (parts.length === 1 && /^(?:package(?:-lock)?\.json|tsconfig[^/]*\.json|[^/]*config\.[cm]?[jt]s|\.npmrc)$/.test(path));
 }
 

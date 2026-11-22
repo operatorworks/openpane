@@ -4,8 +4,8 @@ import { projectionFacts } from '../coverage.mjs';
 export const publishedTypeContracts = {
   'published-sdk-availability': () => assertCompileCases({
     config: 'packages/protocol/tsconfig.json',
-    prefix: `import type { Event, RunAgentInput, AgentCapabilities, BackendAvailability } from '@agentui/protocol';
-import { EventType } from '@agentui/protocol';
+    prefix: `import type { Event, RunAgentInput, AgentCapabilities, BackendAvailability } from '@openpane/protocol';
+import { EventType } from '@openpane/protocol';
 export const knownEvent: Event = { type: EventType.TEXT_MESSAGE_END, messageId: 'm' };
 export const sdkOnlyRawEvent: Event = { type: EventType.TEXT_MESSAGE_END, messageId: 'm', rawEvent: null };
 export const knownDiscriminator: \`\${Event['type']}\` = 'TEXT_MESSAGE_END';
@@ -46,9 +46,9 @@ export function describe(value: BackendAvailability): string {
   }),
   'availability-family-alignment': () => assertCompileCases({
     config: 'packages/adapter-tests/tsconfig.json',
-    prefix: `import type { BackendAvailability } from '@agentui/protocol';
-import type { Capability } from '@agentui/host';
-import type { describeProjection } from '@agentui/host/agui';
+    prefix: `import type { BackendAvailability } from '@openpane/protocol';
+import type { Capability } from '@openpane/host';
+import type { describeProjection } from '@openpane/host/agui';
 export const publishedNative = ${JSON.stringify(projectionFacts.nativeAvailability)} satisfies BackendAvailability;
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 type Description = Extract<ReturnType<typeof describeProjection>, { kind: 'ok' }>['value'];

@@ -3,16 +3,16 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { openLocalHost } from '@agentui/host';
-import { createCodexSdkDriver } from '@agentui/host/codex-sdk';
-import { CODEX_RUNTIME } from '@agentui/contracts/compatibility';
-import { canonicalJson } from '@agentui/contracts';
-import { createConversationStore } from '@agentui/client';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { openLocalHost } from '@openpane/host';
+import { createCodexSdkDriver } from '@openpane/host/codex-sdk';
+import { CODEX_RUNTIME } from '@openpane/contracts/compatibility';
+import { canonicalJson } from '@openpane/contracts';
+import { createConversationStore } from '@openpane/client';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { command, scope, until } from './fixture.mjs';
 
 async function fixture(t) {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-sdk-driver-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-sdk-driver-'));
   const executable = join(directory, 'codex.mjs');
   const fixtureUrl = new URL('./fixtures/codex-sdk-exec.mjs', import.meta.url).href;
   await writeFile(executable, `#!${process.execPath}\nawait import(${JSON.stringify(fixtureUrl)});\n`, { mode: 0o700 });

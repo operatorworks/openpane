@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canonicalJson, isOutputId, parseOutputId, parseTextMetadata } from '@agentui/contracts';
+import { canonicalJson, isOutputId, parseOutputId, parseTextMetadata } from '@openpane/contracts';
 import { parseProviderCapture } from '../../packages/host/dist/provider-commands.js';
 import { providerReference } from '../../packages/host/dist/provider-commands.js';
 import { fixture, hash, invalid, missing, secret, unavailable, unsupported } from './provider-outputs-fixture.mjs';
@@ -39,7 +39,7 @@ const mutations = [
   ...['namespace', 'installationId', 'opaqueSessionId'].map(key => [`authority ${key}`, b => { b.authority.binding[key] += '-foreign'; }]),
 ];
 test('every original binding and reference identity dimension rejects foreign listings before read', async t => {
-  const f = await fixture(t, { expectedAuthority: 'agentui-host' }), id = await f.id();
+  const f = await fixture(t, { expectedAuthority: 'openpane-host' }), id = await f.id();
   for (const [label, mutate] of mutations) {
     f.hooks.list = binding => { const row = f.row(binding); mutate(row.reference.binding); return { kind: 'complete', outputs: [row] }; };
     assert.deepEqual(await f.host.conversationOutputs(f.scope), invalid, label);
@@ -53,7 +53,7 @@ test('every original binding and reference identity dimension rejects foreign li
 });
 
 test('provider mutations of outward arguments cannot alter pristine binding or ID', async t => {
-  const f = await fixture(t, { expectedAuthority: 'agentui-host' }), id = await f.id(), pristine = structuredClone(f.original);
+  const f = await fixture(t, { expectedAuthority: 'openpane-host' }), id = await f.id(), pristine = structuredClone(f.original);
   for (const [label, mutate] of mutations) {
     f.hooks.list = binding => { mutate(binding); return { kind: 'complete', outputs: [f.row(binding)] }; };
     assert.deepEqual(await f.host.readOutput(f.scope, id), invalid, label);

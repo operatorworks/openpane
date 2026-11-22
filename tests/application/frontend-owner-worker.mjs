@@ -1,5 +1,5 @@
-import { openLocalHost } from '@agentui/host';
-import { frontendToolsFor } from '@agentui/host/frontend-tools';
+import { openLocalHost } from '@openpane/host';
+import { frontendToolsFor } from '@openpane/host/frontend-tools';
 import { projection, scope } from '../host/fixture.mjs';
 const [path, encodedKey, activationId] = process.argv.slice(2), key = JSON.parse(encodedKey);
 const host = openLocalHost({ path, projection, driver: [], authorize: () => true });

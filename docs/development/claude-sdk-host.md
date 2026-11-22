@@ -11,7 +11,7 @@ npm ci
 npm run build
 ```
 
-Export `AGENTUI_ANTHROPIC_API_KEY` in your host environment. If your shell profile
+Export `OPENPANE_ANTHROPIC_API_KEY` in your host environment. If your shell profile
 already exports it, load that profile:
 
 ```sh
@@ -21,7 +21,7 @@ source ~/.profile
 Start an Opus host with a private data directory and an existing workspace:
 
 ```sh
-node apps/host/dist/main.js claude-sdk --model opus --data-dir "$HOME/.local/share/agentui-opus" --workspace "$PWD" --port 7140
+node apps/host/dist/main.js claude-sdk --model opus --data-dir "$HOME/.local/share/openpane-opus" --workspace "$PWD" --port 7140
 ```
 
 Open the printed loopback origin with `/browser.html` appended. The browser

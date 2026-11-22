@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { chromium } from 'playwright';
-import { parseServiceRequest, parseServiceResponse } from '@agentui/contracts/service';
-import { canRetryObservation } from '@agentui/contracts';
+import { parseServiceRequest, parseServiceResponse } from '@openpane/contracts/service';
+import { canRetryObservation } from '@openpane/contracts';
 import { providerService, fixture, saved, send } from './provider-stream-fixture.mjs';
 import { until } from '../host/fixture.mjs';
 

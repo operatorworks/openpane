@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { assertCompileCases } from '../../../support/compile.mjs';
 
 export const fixtureSource = (await Promise.all(['crew.ts', 'local.ts'].map((name) => readFile(new URL(name, import.meta.url), 'utf8'))))
-  .map((source, index) => index ? source.replace("import * as SDK from '@agentui/sdk';", '') : source).join('\n');
+  .map((source, index) => index ? source.replace("import * as SDK from '@openpane/sdk';", '') : source).join('\n');
 
 const control = `
 export const secondCrew: SDK.BackendProvider<CrewModel, 'native-work'> = createCrewFixture(localInstance).crew;
@@ -92,7 +92,7 @@ test('public providers construct and reject crossed scopes, incompatible payload
     ['void crewBackend.observe({ binding: crewBinding, after: 7 }, async () => {});', /not assignable/u],
     ["void crewBackend.snapshot({ kind: 'session', opaqueId: 'same-session', instance: crewInstance });", /not assignable/u],
     ['void crewBackend.snapshot(crewAgent);', /missing the following properties.*creation, authority/u],
-    ["export const invalid: SDK.ProviderConversation<'crew-personal'> = { kind: 'agentui-created', authority: crewBinding.authority };", /'creation' is missing/u],
+    ["export const invalid: SDK.ProviderConversation<'crew-personal'> = { kind: 'openpane-created', authority: crewBinding.authority };", /'creation' is missing/u],
     ["export const invalid: SDK.ProviderCursor<LocalModel, 'crew-personal'> = crewCursor;", /not assignable/u],
     ["export const invalid: SDK.ProviderCursor<CrewModel | LocalModel, 'crew-personal'> = crewCursor;", /not assignable/u],
     ["export const invalid: SDK.ProviderInstance<'crew-personal' | 'native-work'> = crewInstance;", /not assignable/u],
@@ -107,6 +107,6 @@ test('public providers construct and reject crossed scopes, incompatible payload
     ["export const invalid: SDK.CredentialHandle<string> = crewCredential;", /not assignable/u],
     ['void document;', /Cannot find name 'document'/u],
     ['void process;', /Cannot find name 'process'/u],
-    ["export type { ProviderModel } from '@agentui/sdk/src/providers.js';", /Cannot find module/u],
+    ["export type { ProviderModel } from '@openpane/sdk/src/providers.js';", /Cannot find module/u],
   ],
 }));

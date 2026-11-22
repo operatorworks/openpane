@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { openReportExample } from '@agentui/example-generated-text-output';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { openReportExample } from '@openpane/example-generated-text-output';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 
-assert.equal(EXTENSION_SDK_VERSION, '0.11.0');
-process.env.AGENTUI_REPORT_DATABASE = join(process.cwd(), 'reports.sqlite');
+assert.equal(EXTENSION_SDK_VERSION, '0.13.0');
+process.env.OPENPANE_REPORT_DATABASE = join(process.cwd(), 'reports.sqlite');
 const scope = { hostId: 'packed', conversationId: 'reports' }, hostPath = join(process.cwd(), 'host.sqlite');
 let example = await openReportExample({ hostPath, scope });
 try {

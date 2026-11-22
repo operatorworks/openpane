@@ -3,10 +3,10 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { hostDependencyLockKey, importHostDependency } from '../../host/test-support/dependencies.mjs';
-import { contracts, createFakeFixture } from '@agentui/switchboard-qualification/testkit';
+import { contracts, createFakeFixture } from '@openpane/switchboard-qualification/testkit';
 
 const root = new URL('../../../', import.meta.url);
-const alias = '@agentui/switchboard-qualification';
+const alias = '@openpane/switchboard-qualification';
 
 for (const [name, contract] of Object.entries(contracts)) {
   test(`controlled qualification imports the upstream ${name} contract and official fake`, { timeout: 10_000 }, async (context) => {
@@ -24,7 +24,7 @@ test('controlled qualification retains a separate development archive and produc
   const lock = await readJson('package-lock.json');
   assert.equal(manifest.dependencyAlias, alias);
   assert.equal(manifest.license, 'MIT');
-  assert.equal(manifest.consumerPackage, '@agentui/adapter-tests');
+  assert.equal(manifest.consumerPackage, '@openpane/adapter-tests');
   const installedManifest = await readJson(`node_modules/${alias}/package.json`);
   assert.equal(installedManifest.license, manifest.license);
   assert.equal(installedManifest.exports['./testkit'].import, './dist/testkit/index.js');
@@ -52,8 +52,8 @@ test('controlled qualification retains a separate development archive and produc
   assert.equal(historical.sourceRevision, '58c7922d8fade3617cc86fedcf41677f897025ef');
   assert.equal(historical.sha256, '15416f5505eb8c3f5b0e3236a48f879f873661e46d27a652ad845f08cb0b9421');
   assert.notEqual(pin.sourceRevision, historical.sourceRevision);
-  assert.equal(host.dependencies['@mattsp1290/switchboard'], `file:../../vendor/${pin.artifact}`);
-  const installedPath = hostDependencyLockKey('@mattsp1290/switchboard');
+  assert.equal(host.dependencies['@operatorworks/switchboard'], `file:../../vendor/${pin.artifact}`);
+  const installedPath = hostDependencyLockKey('@operatorworks/switchboard');
   assert.equal(lock.packages[installedPath].resolved, `file:vendor/${pin.artifact}`);
 });
 
@@ -63,9 +63,9 @@ test('controlled qualification alias exposes public runtime imports and rejects 
   assert.equal(typeof core.createEventStream, 'function');
   assert.equal(core.contracts, undefined);
   assert.equal(core.createFakeFixture, undefined);
-  const currentTestkit = await importHostDependency('@mattsp1290/switchboard/testkit');
+  const currentTestkit = await importHostDependency('@operatorworks/switchboard/testkit');
   assert.equal(typeof currentTestkit.createFakeFixture, 'function');
-  const observability = await importHostDependency('@mattsp1290/switchboard/observability');
+  const observability = await importHostDependency('@operatorworks/switchboard/observability');
   assert.equal(typeof observability.createGenAiObserver, 'function');
   for (const path of ['src/index.ts', 'src/testkit/index.ts', 'dist/testkit/index.js', 'dist/testkit/contracts.js', 'dist/testkit/fake.js']) {
     await assert.rejects(import(`${alias}/${path}`), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });

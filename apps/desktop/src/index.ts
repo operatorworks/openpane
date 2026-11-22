@@ -1,5 +1,5 @@
 import type { Root } from 'react-dom/client';
-import type { ConversationModule } from '@agentui/sdk/react';
+import type { ConversationModule } from '@openpane/sdk/react';
 
 export const clientPlatform = 'desktop';
 

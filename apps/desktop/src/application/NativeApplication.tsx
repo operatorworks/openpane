@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { macConnect, createMacConnection } from '@agentui/client/mac';
-import type { MacNativeInvoke } from '@agentui/client/mac';
-import { ThemeScope, Surface } from '@agentui/ui-primitives/desktop';
+import { macConnect, createMacConnection } from '@openpane/client/mac';
+import type { MacNativeInvoke } from '@openpane/client/mac';
+import { ThemeScope, Surface } from '@openpane/ui-primitives/desktop';
 import { BrowserApplication } from '../shell/BrowserApplication.js';
 import { createApplicationController } from './application-controller.js';
 import type { ApplicationController } from './application-controller.js';
+import { usePersonalization } from './use-personalization.js';
+import { PersonalizationSettings } from './PersonalizationSettings.js';
 import { BrowserViewStorage } from './browser-storage.js';
 
 type Session = { readonly id: string; readonly controller: ApplicationController };
 const nativeInvoke: MacNativeInvoke = command => invoke('native_access', { command });
 export function NativeApplication() {
+  const personalization = usePersonalization();
   const [session, setSession] = useState<Session | null>(null);
   const current = useRef<Session | null>(null);
   const pending = useRef(false);
@@ -28,7 +31,7 @@ export function NativeApplication() {
         ownedViewStorage: { open: failure => BrowserViewStorage.reopen('native-mac-default', failure, true), reopen: BrowserViewStorage.reopen } });
       current.current = { id: crypto.randomUUID(), controller };
       setSession(current.current);
-    } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : 'Native connection unavailable. Reconnect, or restart AgentUI if the problem continues. Local work is retained.'); }
+    } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : 'Native connection unavailable. Reconnect, or restart OpenPane if the problem continues. Local work is retained.'); }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
   useEffect(() => {
@@ -36,14 +39,17 @@ export function NativeApplication() {
     return () => { alive.current = false; void current.current?.controller.dispose(); };
   }, []);
   const controls = <section aria-label="Mac connection">
-    <p>This Mac connects directly to the AgentUI host on this computer. Your chats, drafts, and unresolved commands stay saved. No command is replayed on reconnect.</p>
+    <p>This Mac connects directly to the OpenPane host on this computer. Your chats, drafts, and unresolved commands stay saved. No command is replayed on reconnect.</p>
     {error && <p role="alert">{error}</p>}
     {busy && <p role="status">Connecting to the local host…</p>}
   </section>;
+  if (personalization.readiness === 'loading') return <p role="status">Loading local preferences…</p>;
   return session
     ? <BrowserApplication key={session.id} controller={session.controller} connection={{ kind: 'native', controls, reconnect: () => void connect() }} suspended={busy} />
-    : <ThemeScope className="desktop-shell"><Surface className="landing"><h1>Connect this Mac</h1>
-        <p>Start the AgentUI host on this Mac, then reconnect.</p>
+    : <ThemeScope appearance={personalization.document.appearance === 'system' ? undefined : personalization.document.appearance} className="desktop-shell"><Surface className="landing"><h1>Connect this Mac</h1>
+        <p>Start the OpenPane host on this Mac, then reconnect.</p>
+        {personalization.diagnostic && <p role="alert">{personalization.diagnostic}</p>}
         {controls}<button disabled={busy} onClick={() => void connect()}>Reconnect</button>
+        <details><summary>Appearance and local recovery</summary><PersonalizationSettings state={personalization} customizations={[]} namespaces={[]} /></details>
       </Surface></ThemeScope>;
 }

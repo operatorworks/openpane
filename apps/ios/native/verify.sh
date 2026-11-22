@@ -80,4 +80,4 @@ if ! mv "$evidence" .work/evidence; then
   exit 1
 fi
 rm -rf "$previous"
-echo "Inspect $PWD/.work/evidence/relaunch.png for the disconnected AgentUI screen."
+echo "Inspect $PWD/.work/evidence/relaunch.png for the disconnected OpenPane screen."

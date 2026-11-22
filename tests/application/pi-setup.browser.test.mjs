@@ -8,9 +8,9 @@ import test from 'node:test';
 import { chromium } from 'playwright';
 
 test('Pi setup guidance activates without exposing the key to chat and survives reconnect', { timeout: 30_000 }, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-pi-setup-browser-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-pi-setup-browser-'));
   const capability = 'b'.repeat(64), apiKey = 'synthetic-pi-setup-browser-marker';
-  const env = { ...process.env, AGENTUI_SETUP_CAPABILITY: capability };
+  const env = { ...process.env, OPENPANE_SETUP_CAPABILITY: capability };
   delete env.OPENCODE_GO_API_KEY;
   let child;
   const stop = async () => {

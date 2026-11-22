@@ -46,7 +46,7 @@ test('abrupt daemon death drains canonical building child, qualifier, grandchild
     ${append('process.pid','null')}${append('child.pid','null')}
     await new Promise(()=>{setInterval(()=>{},1000)});
     ${validSource}`;
-  await write(repo.directory,'package.json',{type:'module',agentui:extension('abrupt-death')});
+  await write(repo.directory,'package.json',{type:'module',openpane:extension('abrupt-death')});
   await write(repo.directory,'index.ts',source);
   const reference=repo.reference(repo.commit());
   const daemon=join(f.root,'daemon.mjs');
@@ -93,7 +93,7 @@ test('post-source canonical builder graph drift fails before artifact publicatio
   const builder=await createInstalledRefreshBuilder({entry:join(tooling,'scripts/build-server-customization.mjs'),expected:q.compatibility});
   assert.equal(builder.kind,'ready');t.after(()=>builder.close());
   const repo=await f.repository('source');
-  await write(repo.directory,'package.json',{type:'module',agentui:extension('tooling-drift')});
+  await write(repo.directory,'package.json',{type:'module',openpane:extension('tooling-drift')});
   await write(repo.directory,'index.ts',`import {appendFileSync} from 'node:fs';appendFileSync(${JSON.stringify(join(tooling,'scripts/server-customization-qualifier.mjs'))},'\\n');${validSource}`);
   const out=join(await realpath(f.root),'artifact');
   const result=await builder.run({id:'drift',requestId:'drift',source:repo.reference(repo.commit()),directory:out,toolchain:builder.identity});

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createServerExtensions } from '@agentui/host/extensions';
+import { createServerExtensions } from '@openpane/host/extensions';
 import { join } from 'node:path';
 import { openAccessDatabase } from '../../../apps/host/build/tsc/access-database.js';
 import { createProviderAuthority } from '../../../apps/host/build/tsc/provider-credentials.js';

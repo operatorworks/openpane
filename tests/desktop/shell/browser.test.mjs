@@ -140,7 +140,7 @@ test('chat workspace separates the icon rail and chat list and opens settings wi
   const settings = page.getByRole('button', { name: 'Settings', exact: true });
   await chats.waitFor();
   assert.equal(await chats.getAttribute('aria-pressed'), 'true');
-  assert.equal(await page.locator('.shell-header').isVisible(), false);
+  assert.equal(await page.locator('.recovery-menu summary').isVisible(), true);
   const rail = await page.getByRole('navigation', { name: 'Workspace views' }).boundingBox();
   const sidebar = await page.locator('.application-controls').boundingBox();
   assert.ok(rail.x + rail.width <= sidebar.x, 'icon rail is a separate pane beside the chat list');
@@ -155,8 +155,34 @@ test('chat workspace separates the icon rail and chat list and opens settings wi
   await revealRecovery(page);
   await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   assert.equal(await chats.getAttribute('aria-pressed'), 'true');
-  assert.equal(await page.locator('.shell-header').isVisible(), false);
+  assert.equal(await page.locator('.recovery-menu summary').isVisible(), true);
   assert.equal(await page.locator('.settings-panel').isVisible(), false);
+});
+
+test('the rail lists Chats, Extensions and Settings in order and Extensions toggles its view at every width', async t => {
+  const server = await preview({
+    root: fileURLToPath(desktop), mode: 'browser',
+    configFile: fileURLToPath(new URL('vite.config.mjs', desktop)),
+    preview: { host: '127.0.0.1', port: 0 },
+  });
+  const browser = await chromium.launch();
+  t.after(async () => { await browser.close(); await server.close(); });
+  const page = await browser.newPage({ viewport: { width: 1120, height: 780 } });
+  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/browser.html`);
+  const rail = page.getByRole('navigation', { name: 'Workspace views' });
+  await rail.getByRole('button', { name: 'Chats', exact: true }).waitFor();
+  assert.deepEqual(await rail.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))), ['Chats', 'Extensions', 'Settings']);
+  const extensions = rail.getByRole('button', { name: 'Extensions', exact: true });
+  assert.equal(await extensions.getAttribute('aria-pressed'), 'false');
+  await extensions.click();
+  assert.equal(await extensions.getAttribute('aria-pressed'), 'true');
+  assert.equal(await rail.getByRole('button', { name: 'Chats', exact: true }).getAttribute('aria-pressed'), 'false');
+  await page.getByRole('heading', { name: 'Extensions', level: 2, exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Extensions', level: 1, exact: true }).waitFor();
+  await page.setViewportSize({ width: 360, height: 480 });
+  for (const name of ['Chats', 'Extensions', 'Settings']) assert.equal(await rail.getByRole('button', { name, exact: true }).isVisible(), true, name);
+  await rail.getByRole('button', { name: 'Chats', exact: true }).click();
+  assert.equal(await extensions.getAttribute('aria-pressed'), 'false');
 });
 
 test('connection settings stay reachable while the content boundary is failed', async (t) => {

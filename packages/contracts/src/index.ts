@@ -12,7 +12,7 @@ export interface ProviderBinding {
 }
 
 export type RunAuthority =
-  | { readonly kind: 'agentui-host'; readonly hostId: string; readonly binding: ProviderBinding }
+  | { readonly kind: 'openpane-host'; readonly hostId: string; readonly binding: ProviderBinding }
   | { readonly kind: 'remote-provider'; readonly binding: ProviderBinding };
 
 export interface RunIdentity {

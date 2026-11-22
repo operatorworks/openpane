@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { canonicalJson } from '@agentui/contracts';
-import { FILE_CHANGE_DETAIL_BYTES, FILE_CHANGE_LIMIT, FILE_CHANGE_PATH_BYTES, fileChangeDetailBytes, retainText } from '@agentui/contracts/conversation';
-import type { FileChange, FileChangeActivity, FileChangeStatus, TranscriptEvent } from '@agentui/contracts/conversation';
+import { canonicalJson } from '@openpane/contracts';
+import { FILE_CHANGE_DETAIL_BYTES, FILE_CHANGE_LIMIT, FILE_CHANGE_PATH_BYTES, fileChangeDetailBytes, retainText } from '@openpane/contracts/conversation';
+import type { FileChange, FileChangeActivity, FileChangeStatus, TranscriptEvent } from '@openpane/contracts/conversation';
 import { object, nonempty } from './codec.js';
 
 type Entry = { activity: FileChangeActivity; published: FileChangeActivity | null };

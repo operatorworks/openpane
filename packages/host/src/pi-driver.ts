@@ -1,13 +1,13 @@
 import type { V1Command } from './provider-commands.js';
 import { randomUUID } from 'node:crypto';
 import { piInstallation } from './native-installations.js';
-import { identifier, record } from '@agentui/contracts/decode';
-import { canonicalJson } from '@agentui/contracts';
-import type { ConversationScope } from '@agentui/contracts';
-import type { RunOutcome, TranscriptEvent } from '@agentui/contracts/conversation';
-import type { NativeDispatchObservation } from '@mattsp1290/switchboard';
-import { createPiRuntime } from '@agentui/switchboard-pi/pi';
-import type { PiEvent, PiSession, PiTerminal } from '@agentui/switchboard-pi/pi';
+import { identifier, record } from '@openpane/contracts/decode';
+import { canonicalJson } from '@openpane/contracts';
+import type { ConversationScope } from '@openpane/contracts';
+import type { RunOutcome, TranscriptEvent } from '@openpane/contracts/conversation';
+import type { NativeDispatchObservation } from '@operatorworks/switchboard';
+import { createPiRuntime } from '@openpane/switchboard-pi/pi';
+import type { PiEvent, PiSession, PiTerminal } from '@openpane/switchboard-pi/pi';
 import type { CapturedTarget, CommandResult, HostOutput, Installation, NativeRun, ProviderDriver } from './durable-model.js';
 import { createTranscriptWriter } from './transcript-writer.js';
 
@@ -56,7 +56,7 @@ export async function createPiDriver(options: PiDriverOptions): Promise<Provider
   }
   function sealSaved(turn: Turn) {
     if (!turn.transcript.sealSaved()) {
-      process.emitWarning('Could not finish stored Pi output. Start a new conversation.', { code: 'AGENTUI_PI_STORAGE' });
+      process.emitWarning('Could not finish stored Pi output. Start a new conversation.', { code: 'OPENPANE_PI_STORAGE' });
     }
   }
   function registerReference(turn: Turn) {
@@ -79,7 +79,7 @@ export async function createPiDriver(options: PiDriverOptions): Promise<Provider
       } catch {
         cleanupFailed.add(key);
         turn.text += '\n\nPi session cleanup failed. Restart the host before continuing.';
-        process.emitWarning('Pi session cleanup failed. Restart the host before continuing.', { code: 'AGENTUI_PI_CLEANUP' });
+        process.emitWarning('Pi session cleanup failed. Restart the host before continuing.', { code: 'OPENPANE_PI_CLEANUP' });
       }
       try {
         registerReference(turn);
@@ -94,7 +94,7 @@ export async function createPiDriver(options: PiDriverOptions): Promise<Provider
       catch {
         outputFailed(turn);
         try { publish(turn, [{ kind: 'run-ended', runId: turn.run.identity.runId, outcome: 'failed' }]); }
-        catch { process.emitWarning('Could not store Pi output. Start a new conversation.', { code: 'AGENTUI_PI_STORAGE' }); }
+        catch { process.emitWarning('Could not store Pi output. Start a new conversation.', { code: 'OPENPANE_PI_STORAGE' }); }
       }
     });
     finalizations.add(finalization);
@@ -165,7 +165,7 @@ export async function createPiDriver(options: PiDriverOptions): Promise<Provider
           const runId = randomUUID();
           const opaque = canonicalJson({ id: session.id, file: session.sessionFile });
           const run: NativeRun = { identity: { conversation: command.scope, runId,
-            authority: { kind: 'agentui-host', hostId: command.scope.hostId,
+            authority: { kind: 'openpane-host', hostId: command.scope.hostId,
               binding: { namespace: 'pi-sdk-session', installationId: installation.installationId, opaqueSessionId: opaque } } },
             reference: { kind: 'session', formatVersion: 1, binding: installation.binding, opaque } };
           turn = { scope: command.scope, session, run, text: '',

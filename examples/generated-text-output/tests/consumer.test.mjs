@@ -7,14 +7,14 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { canonicalJson } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
 import { openReportExample } from '../dist/consumer.js';
 
 for (const [name, text] of [['BOM-prefixed', '\ufeffReport preserves its first character. é🐦\n'], ['BOM-only', '\ufeff']]) {
   test(`public ${name} send preserves creation, receipt, output identity and exact bytes after restart`, async t => {
-    const directory = mkdtempSync(join(tmpdir(), 'agentui-report-bom-'));
-    const previous = process.env.AGENTUI_REPORT_DATABASE;
-    process.env.AGENTUI_REPORT_DATABASE = join(directory, 'reports.sqlite');
+    const directory = mkdtempSync(join(tmpdir(), 'openpane-report-bom-'));
+    const previous = process.env.OPENPANE_REPORT_DATABASE;
+    process.env.OPENPANE_REPORT_DATABASE = join(directory, 'reports.sqlite');
     const options = { hostPath: join(directory, 'host.sqlite'), scope: { hostId: 'host', conversationId: 'bom' } };
     let example;
     try {
@@ -40,7 +40,7 @@ for (const [name, text] of [['BOM-prefixed', '\ufeffReport preserves its first c
     } finally {
       try { if (example) await example.close(); }
       finally {
-        if (previous === undefined) delete process.env.AGENTUI_REPORT_DATABASE; else process.env.AGENTUI_REPORT_DATABASE = previous;
+        if (previous === undefined) delete process.env.OPENPANE_REPORT_DATABASE; else process.env.OPENPANE_REPORT_DATABASE = previous;
         rmSync(directory, { recursive: true, force: true });
       }
     }
@@ -48,9 +48,9 @@ for (const [name, text] of [['BOM-prefixed', '\ufeffReport preserves its first c
 }
 
 test('public reopening rejects invalid UTF-8 even with matching payload length and digest without repair', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-report-invalid-utf8-'));
-  const previous = process.env.AGENTUI_REPORT_DATABASE, path = join(directory, 'reports.sqlite');
-  process.env.AGENTUI_REPORT_DATABASE = path;
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-report-invalid-utf8-'));
+  const previous = process.env.OPENPANE_REPORT_DATABASE, path = join(directory, 'reports.sqlite');
+  process.env.OPENPANE_REPORT_DATABASE = path;
   const options = { hostPath: join(directory, 'host.sqlite'), scope: { hostId: 'host', conversationId: 'invalid-utf8' } };
   let example;
   try {
@@ -70,7 +70,7 @@ test('public reopening rejects invalid UTF-8 even with matching payload length a
   } finally {
     try { if (example) await example.close(); }
     finally {
-      if (previous === undefined) delete process.env.AGENTUI_REPORT_DATABASE; else process.env.AGENTUI_REPORT_DATABASE = previous;
+      if (previous === undefined) delete process.env.OPENPANE_REPORT_DATABASE; else process.env.OPENPANE_REPORT_DATABASE = previous;
       rmSync(directory, { recursive: true, force: true });
     }
   }

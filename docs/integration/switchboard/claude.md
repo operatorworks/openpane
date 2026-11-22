@@ -13,15 +13,15 @@ Switchboard owns native SDK queries, credential mapping, private native session
 storage, session resume, assistant message normalization, cancellation, and
 child-process cleanup. Its public declarations do not expose native SDK types.
 It starts one native query for each user turn and resumes only the native
-session ID supplied by AgentUI's private run record.
+session ID supplied by OpenPane's private run record.
 
-AgentUI owns authorization, command receipts, installation bindings, transcript
+OpenPane owns authorization, command receipts, installation bindings, transcript
 writes, browser replay, and restart recovery. Codex and Claude share the SDK
 chat driver that handles these host responsibilities. Model families have
 distinct installation bindings and native storage directories. Native IDs and
 credentials do not appear in browser conversation events.
 
-The host reads only `AGENTUI_ANTHROPIC_API_KEY` for Claude authentication. It
+The host reads only `OPENPANE_ANTHROPIC_API_KEY` for Claude authentication. It
 passes the credential in memory to Switchboard, which maps it to the native
 SDK's `ANTHROPIC_API_KEY`. Ambient provider authentication and routing settings
 are excluded from the child environment.
@@ -46,10 +46,10 @@ Run both journeys after loading the host credential and building the project:
 ```sh
 source ~/.profile
 npm run build
-AGENTUI_CLAUDE_SDK_LIVE=1 node --test tests/application/claude-sdk-live.test.mjs
+OPENPANE_CLAUDE_SDK_LIVE=1 node --test tests/application/claude-sdk-live.test.mjs
 ```
 
-Set `AGENTUI_CLAUDE_SDK_EVIDENCE_DIR` to retain per-model reports and screenshots.
+Set `OPENPANE_CLAUDE_SDK_EVIDENCE_DIR` to retain per-model reports and screenshots.
 The default test suite skips live paid-provider calls.
 
 The existing GPT subscription journey remains independently available in
@@ -65,7 +65,7 @@ registration beans remain open. The live journey reports record exact built arti
 model IDs observed during each run.
 
 The Claude SDK requires the MCP SDK as a peer dependency even though this route
-disables MCP servers. AgentUI does not import that peer in its host chat code.
+disables MCP servers. OpenPane does not import that peer in its host chat code.
 The lockfile records the installed peer versions. The artifact pin records and
 tests the peer versions resolved from the Claude SDK's own location, including
 shared dependencies used by the other providers.

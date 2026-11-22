@@ -1,4 +1,4 @@
-import type { ConversationScope } from '@agentui/contracts';
+import type { ConversationScope } from '@openpane/contracts';
 import type { SqliteStore } from './sqlite-store.js';
 
 type Context = Pick<SqliteStore<unknown, unknown>, 'frontendTools'> & {

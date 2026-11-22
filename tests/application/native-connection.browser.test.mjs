@@ -7,11 +7,13 @@ import { chromium } from 'playwright';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const bundle = await build({ stdin: { contents: `import React from 'react';
   import { createRoot } from 'react-dom/client';
+  import { PersonalizationProvider } from './apps/desktop/src/application/use-personalization.tsx';
+  import { DesktopCustomizationProvider } from './apps/desktop/src/application/DesktopCustomizations.tsx';
   import { NativeApplication } from './apps/desktop/src/application/NativeApplication.tsx';
   import { BrowserViewStorage } from './apps/desktop/src/application/browser-storage.ts';
-  import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
+  import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
   const agent = { id: 'recorded', label: 'Recorded', runtime: RECORDED_RUNTIME, imageInput: { kind: 'unsupported', reason: 'This agent cannot receive images.' }, frontendOffers: 'unsupported', commands: ['send', 'approve'], availability: { kind: 'ready' } };
-  const metadata = { agents: [agent], defaultAgentId: agent.id, hostId: 'host', principalId: 'trusted-owner', compatibility: {
+  const metadata = { extensions: [], agents: [agent], defaultAgentId: agent.id, hostId: 'host', principalId: 'trusted-owner', compatibility: {
     wireVersion: SERVICE_WIRE_VERSION, extensionSdkVersion: EXTENSION_SDK_VERSION, nativeRuntime: RECORDED_RUNTIME, desiredGitRevision: 'test', appliedArtifact: { artifactId: 'test', gitRevision: 'test' } } };
   globalThis.nativeCalls = [];
   globalThis.answeringHost = 'host';
@@ -41,10 +43,10 @@ const bundle = await build({ stdin: { contents: `import React from 'react';
     await storage.saveView('host', { version: 2, route: null, pendingCreation: null });
     await storage.drafts(() => {}).save({ version: 1, scope, draft: 'Keep the native draft', draftRevision: 1, outbox: [] });
     await storage.close();
-    createRoot(document.getElementById('root')).render(<NativeApplication />);
+    createRoot(document.getElementById('root')).render(<PersonalizationProvider><DesktopCustomizationProvider><NativeApplication /></DesktopCustomizationProvider></PersonalizationProvider>);
   };
   globalThis.savedRecords = async () => {
-    const opened = indexedDB.open('agentui-browser-views', 1);
+    const opened = indexedDB.open('openpane-browser-views', 1);
     const db = await new Promise((resolve, reject) => { opened.onsuccess = () => resolve(opened.result); opened.onerror = () => reject(opened.error); });
     const read = db.transaction('records').objectStore('records').getAll();
     const records = await new Promise((resolve, reject) => { read.onsuccess = () => resolve(read.result); read.onerror = () => reject(read.error); });
@@ -77,7 +79,7 @@ async function fixture(t, initialFailure = null) {
 async function assertNoPairing(page) {
   const text = await page.locator('#root').textContent();
   assert.doesNotMatch(text, /[Pp]air|[Ii]nvit|[Rr]evok|Forget|Keychain/);
-  assert.equal(await page.getByRole('textbox').count(), 0);
+  assert.equal(await page.locator('.settings-section').first().getByRole('textbox').count(), 0);
 }
 
 test('a fresh Mac connects directly to the local host with no pairing step', async t => {
@@ -91,7 +93,7 @@ test('a fresh Mac connects directly to the local host with no pairing step', asy
 test('native connection controls show category-specific recovery without exposing unknown causes', async t => {
   const page = await fixture(t);
   for (const [cause, guidance] of [
-    ['forbidden', /installed AgentUI app/],
+    ['forbidden', /installed OpenPane app/],
     ['profile-unavailable', /local profile.*access/i],
     ['network-failed', /host is running/],
     ['private-host-response-and-profile-path', /Native connection unavailable\. Reconnect/],
@@ -111,7 +113,7 @@ test('a host replaced during a session disables the app until an explicit reconn
   await page.getByRole('button', { name: 'Chats', exact: true }).click();
   await page.evaluate(() => { globalThis.answeringHost = 'replacement'; });
   await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: /different AgentUI host.*Reconnect/ }).waitFor();
+  await page.getByRole('alert').filter({ hasText: /different OpenPane host.*Reconnect/ }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'New conversation', exact: true }).isDisabled(), true);
   assert.deepEqual(await page.evaluate(() => globalThis.nativeCalls.filter(call => call.kind === 'execute' && call.request.op === 'create').map(call => call.request.scope.hostId)), ['host']);
   assert.equal(await draft(), true);
@@ -144,4 +146,37 @@ test('cold failed startup connects on Reconnect, deduplicates clicks and retains
   ]);
   assert.equal(await page.evaluate(() => globalThis.nativeCalls.some(call => call.kind === 'execute' && call.request.op === 'metadata')), true);
   assert.deepEqual(await page.evaluate(() => globalThis.savedRecords()), records);
+});
+
+
+test('failed appearance recovery remains effective across native keyed Reconnect with production session owners', async t => {
+  const page = await fixture(t);
+  await page.getByLabel('Appearance mode', { exact: true }).selectOption('dark');
+  await page.waitForFunction(() => document.querySelector('.desktop-shell')?.dataset.appearance === 'dark');
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.put;
+    globalThis.restorePreferenceWrites = () => { IDBObjectStore.prototype.put = original; };
+    IDBObjectStore.prototype.put = function (...args) {
+      if (this.transaction.db.name === 'openpane-personalization' && this.name === 'preferences') throw new DOMException('Test write failure', 'QuotaExceededError');
+      return original.apply(this, args);
+    };
+  });
+  await page.getByRole('button', { name: 'Restore default appearance', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'Could not save this change' }).first().waitFor();
+  assert.equal(await page.locator('.desktop-shell').getAttribute('data-appearance'), 'light');
+  await page.evaluate(() => {
+    globalThis.restorePreferenceWrites();
+    window.dispatchEvent(new Event('focus'));
+    const peer = new BroadcastChannel('openpane-personalization'); peer.postMessage('invalidate'); peer.close();
+  });
+  await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent === 'New recorded conversation' && !button.disabled));
+  assert.equal(await page.locator('.desktop-shell').getAttribute('data-appearance'), 'light');
+  assert.equal(await page.evaluate(() => globalThis.nativeCalls.filter(call => call.kind === 'connect').length), 2);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  assert.equal(await page.getByLabel('Appearance mode', { exact: true }).inputValue(), 'system');
+  await page.getByRole('button', { name: 'Edit preferences JSON', exact: true }).click();
+  const saved = JSON.parse(await page.getByRole('textbox', { name: 'Preferences JSON', exact: true }).inputValue());
+  assert.equal(saved.appearance, 'dark', 'failed recovery did not rewrite durable preferences');
 });

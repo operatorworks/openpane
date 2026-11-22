@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canonicalJson } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
 import { createHash } from 'node:crypto';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
-import { createFrontendToolGeneration, retainFrontendTools } from '@agentui/sdk/tools';
+import { createFrontendToolGeneration, retainFrontendTools } from '@openpane/sdk/tools';
 import { DatabaseSync } from 'node:sqlite';
-import { createProviderRegistry } from '@agentui/host';
-import { frontendToolsFor } from '@agentui/host/frontend-tools';
+import { createProviderRegistry } from '@openpane/host';
+import { frontendToolsFor } from '@openpane/host/frontend-tools';
 import { fixture, scope } from '../host/fixture.mjs';
 import { offered, aguiExtension } from './provider-send-fixture.mjs';
 

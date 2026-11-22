@@ -5,11 +5,11 @@ import { setImmediate } from 'node:timers/promises';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { contractVersion } from '@agentui/contracts';
-import { contractVersion as sdkVersion } from '@agentui/sdk';
-import { createEventStream, hostRuntime } from '@agentui/host';
-import { clientPlatform as desktop } from '@agentui/desktop';
-import { clientPlatform as ios } from '@agentui/ios';
+import { contractVersion } from '@openpane/contracts';
+import { contractVersion as sdkVersion } from '@openpane/sdk';
+import { createEventStream, hostRuntime } from '@openpane/host';
+import { clientPlatform as desktop } from '@openpane/desktop';
+import { clientPlatform as ios } from '@openpane/ios';
 
 const root = new URL('../../../', import.meta.url);
 
@@ -24,14 +24,14 @@ test('emitted workspace packages resolve through public exports', async () => {
   assert.equal(hostRuntime, 'node');
   assert.equal(desktop, 'desktop');
   assert.equal(ios, 'ios');
-  assert.equal(typeof (await import('@agentui/host/frontend-tools')).frontendToolsFor, 'function');
-  await import('@agentui/sdk/react');
-  await import('@agentui/theme');
-  const { EventType } = await import('@agentui/protocol');
+  assert.equal(typeof (await import('@openpane/host/frontend-tools')).frontendToolsFor, 'function');
+  await import('@openpane/sdk/react');
+  await import('@openpane/theme');
+  const { EventType } = await import('@openpane/protocol');
   assert.equal(EventType.TEXT_MESSAGE_END, 'TEXT_MESSAGE_END');
-  await import('@agentui/theme/react');
-  await import('@agentui/ui-primitives/desktop');
-  await import('@agentui/adapter-tests');
+  await import('@openpane/theme/react');
+  await import('@openpane/ui-primitives/desktop');
+  await import('@openpane/adapter-tests');
 });
 
 test('host consumes real Switchboard bounded FIFO observation', async () => {
@@ -59,7 +59,7 @@ test('host consumes real Switchboard bounded FIFO observation', async () => {
 });
 
 test('package exports reject private implementation imports', async () => {
-  for (const name of ['@agentui/contracts', '@agentui/protocol', '@agentui/sdk', '@agentui/host', '@agentui/theme', '@agentui/ui-primitives', '@mattsp1290/switchboard']) {
+  for (const name of ['@openpane/contracts', '@openpane/protocol', '@openpane/sdk', '@openpane/host', '@openpane/theme', '@openpane/ui-primitives', '@operatorworks/switchboard']) {
     await assert.rejects(importHostDependency(`${name}/src/index.js`), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
   }
 });
@@ -68,7 +68,7 @@ test('clients and customization declare no host runtime dependency', async () =>
   for (const path of ['packages/contracts', 'packages/protocol', 'packages/sdk', 'packages/theme', 'packages/ui-primitives', 'apps/desktop', 'apps/ios']) {
     const pkg = JSON.parse(await readFile(new URL(`${path}/package.json`, root), 'utf8'));
     const dependencies = { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.peerDependencies };
-    assert.equal(dependencies['@agentui/host'], undefined, path);
-    assert.equal(dependencies['@mattsp1290/switchboard'], undefined, path);
+    assert.equal(dependencies['@openpane/host'], undefined, path);
+    assert.equal(dependencies['@operatorworks/switchboard'], undefined, path);
   }
 });

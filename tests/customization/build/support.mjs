@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 export const root = fileURLToPath(new URL('../../../', import.meta.url));
 export function repository() {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-custom-build-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-custom-build-'));
   const repo = join(directory, 'source');
   cpSync(join(root, 'templates/customization'), repo, { recursive: true });
   const git = (...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();

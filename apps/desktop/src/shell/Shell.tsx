@@ -1,5 +1,7 @@
 import { Component, useState, type ReactNode } from 'react';
-import { Button, Surface, Text, ThemeScope } from '@agentui/ui-primitives/desktop';
+import { Button, Surface, Text, ThemeScope } from '@openpane/ui-primitives/desktop';
+
+import { palettes, type Appearance } from '@openpane/theme';
 
 type ContentState = { readonly kind: 'ready' } | { readonly kind: 'failed' };
 
@@ -32,12 +34,12 @@ function DefaultView() {
     <section className="introduction" aria-labelledby="welcome-title">
       <Text variant="label">YOUR AGENTS. YOUR WORKSPACE.</Text>
       <Text variant="title" as="h1" id="welcome-title">A home for your conversations.</Text>
-      <Text variant="muted">AgentUI brings your existing agents into a workspace you can make your own.</Text>
+      <Text variant="muted">OpenPane brings your existing agents into a workspace you can make your own.</Text>
       <Surface className="connection-card">
         <div className="connection-heading"><span className="status-dot" /><Text as="h2" variant="label">No host connected</Text></div>
         <Text>Connect to the local Codex host on this Mac to open your conversations.</Text>
         <Button className="connect-host" onClick={() => window.location.assign('http://127.0.0.1:7140/browser.html')}>Connect to local Codex</Button>
-        <Text variant="muted">Start the AgentUI Codex host first, then connect. Keep the host running while you work.</Text>
+        <Text variant="muted">Start the OpenPane Codex host first, then connect. Keep the host running while you work.</Text>
       </Surface>
     </section>
     <aside className="workspace-notes" aria-label="About this build">
@@ -53,13 +55,18 @@ function DefaultView() {
   </div>;
 }
 
-export function DesktopShell({ children, defaultView, settingsView, protectedContent, navigation, activeView, onRestore, restoreMode = 'remount', status, buildLabel }: {
+export function DesktopShell({ appearance, onRestoreAppearance, children, defaultView, settingsView, extensionsView, workspaceOpen = false, protectedContent, navigation, activeView, onRestore, restoreMode = 'remount', status, buildLabel }: {
+  readonly appearance?: Appearance | undefined;
+  readonly onRestoreAppearance?: () => void;
   readonly children?: ReactNode;
   readonly defaultView?: ReactNode;
   readonly settingsView?: ReactNode;
+  readonly extensionsView?: ReactNode;
+  /** An extension workspace owns the area right of the rail, so the sidebar column collapses. */
+  readonly workspaceOpen?: boolean;
   readonly protectedContent?: ReactNode;
   readonly navigation?: ReactNode;
-  readonly activeView?: 'chats' | 'settings';
+  readonly activeView?: 'chats' | 'extensions' | 'settings';
   readonly onRestore?: () => void;
   readonly restoreMode?: 'remount' | 'managed';
   readonly status?: ReactNode;
@@ -69,24 +76,29 @@ export function DesktopShell({ children, defaultView, settingsView, protectedCon
   const boundaryKey = restoreMode === 'managed' ? 0 : view.kind === 'initial' ? 0 : view.revision;
   const revision = view.kind === 'initial' ? 0 : view.revision;
   const showSettings = settingsView !== undefined && activeView === 'settings';
-  return <ThemeScope className="desktop-shell" data-workspace-view={activeView}>
+  const showExtensions = extensionsView !== undefined && activeView === 'extensions';
+  return <ThemeScope appearance={appearance} className="desktop-shell" data-workspace-view={activeView} data-workspace-open={showExtensions && workspaceOpen ? 'true' : undefined}>
     <header className="shell-header">
-      <div className="brand"><span className="brand-mark" aria-hidden="true">a</span><strong>AgentUI</strong><span className="platform-label">Desktop</span></div>
+      <div className="brand"><span className="brand-mark" aria-hidden="true">a</span><strong>OpenPane</strong><span className="platform-label">Desktop</span></div>
       <details className="recovery-menu"><summary>View options</summary><nav aria-label="Recovery controls">
         <Button tone="secondary" onClick={() => { onRestore?.(); setView((current) => ({ kind: 'default', revision: current.kind === 'default' ? current.revision + 1 : 1 })); }}>Restore default view</Button>
+        {onRestoreAppearance && <Button tone="secondary" onClick={onRestoreAppearance}>Restore default appearance</Button>}
         <Button tone="secondary" onClick={() => window.location.reload()}>Reload app</Button>
       </nav></details>
     </header>
     {navigation}
     {protectedContent}
     <main id="main-content">
-      <div className="shell-view" hidden={showSettings}>
+      <div className="shell-view" hidden={showSettings || showExtensions}>
         <ContentBoundary key={boundaryKey} revision={revision}>
-          {view.kind === 'initial' ? children ?? defaultView ?? <DefaultView /> : defaultView ?? <DefaultView />}
+          <ThemeScope palette={palettes} className="content-theme">{view.kind === 'initial' ? children ?? defaultView ?? <DefaultView /> : defaultView ?? <DefaultView />}</ThemeScope>
         </ContentBoundary>
       </div>
       {settingsView !== undefined && <div className="shell-view" hidden={!showSettings}>
         <ContentBoundary key={`settings-${boundaryKey}`} revision={revision}>{settingsView}</ContentBoundary>
+      </div>}
+      {extensionsView !== undefined && <div className="shell-view" hidden={!showExtensions}>
+        <ContentBoundary key={`extensions-${boundaryKey}`} revision={revision}>{extensionsView}</ContentBoundary>
       </div>}
     </main>
     <footer className="shell-footer"><span className="footer-status">{status ?? 'Disconnected'}</span><span>{buildLabel ?? 'Local app · No host connection'}</span></footer>

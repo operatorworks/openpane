@@ -1,4 +1,4 @@
-import type { ConversationPermission, PermissionScope, ConversationScope, Json, ProviderBinding, RunAuthority, TextMetadata } from '@agentui/contracts';
+import type { ConversationPermission, PermissionScope, ConversationScope, Json, ProviderBinding, RunAuthority, TextMetadata } from '@openpane/contracts';
 
 export const backendProviderContractVersion = 1;
 
@@ -45,7 +45,7 @@ export interface CreationIntent<I extends string> {
 }
 
 export interface ProviderConversation<I extends string> {
-  readonly kind: 'agentui-created';
+  readonly kind: 'openpane-created';
   readonly creation: CreationIntent<I>;
   readonly authority: RunAuthority & { readonly binding: { readonly installationId: I } };
   /** The provider's ID for the turn that carried `creation.from` into this conversation. Only a `from` creation may name one. */

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { NativeAgentDescriptor } from '@agentui/contracts/service';
+import type { NativeAgentDescriptor } from '@openpane/contracts/service';
 
 export type CodexModel = NonNullable<NativeAgentDescriptor['model']> & { readonly inputModalities?: readonly ('text' | 'image')[] };
 interface CatalogModel {

@@ -2,7 +2,7 @@
 
 ios_native_root="$(CDPATH='' cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly ios_native_root
-readonly ios_product="$ios_native_root/.work/build/Build/Products/Release-iphonesimulator/AgentUI.app"
+readonly ios_product="$ios_native_root/.work/build/Build/Products/Release-iphonesimulator/OpenPane.app"
 
 ios_acquire_work_lock() {
   mkdir -p .work
@@ -39,7 +39,7 @@ ios_source_snapshot() (
   set -o pipefail
   cd "$ios_native_root/../../.." || exit 1
   local paths=(apps/ios packages/theme packages/ui-primitives package.json package-lock.json
-    tsconfig.base.json .node-version scripts/check-toolchain.mjs agentui-ios)
+    tsconfig.base.json .node-version scripts/check-toolchain.mjs openpane-ios)
   local untracked
   untracked="$(mktemp)" || exit 1
   trap 'rm -f "$untracked"' EXIT

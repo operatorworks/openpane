@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createFrontendToolGeneration } from '@agentui/sdk/tools';
-import { createConversationStore } from '@agentui/client';
+import { createFrontendToolGeneration } from '@openpane/sdk/tools';
+import { createConversationStore } from '@openpane/client';
 import { createFrontendSends, createGenerationSource } from '../../apps/desktop/dist/application/frontend-sends.js';
 import { scope, projection, storage, fakePort, deferred, receipt } from '../client/support.mjs';
 

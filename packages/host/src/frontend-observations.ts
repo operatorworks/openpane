@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { canonicalJson } from '@agentui/contracts';
-import type { ConversationScope } from '@agentui/contracts';
-import type { AguiOriginalRun } from '@agentui/sdk';
+import { canonicalJson } from '@openpane/contracts';
+import type { ConversationScope } from '@openpane/contracts';
+import type { AguiOriginalRun } from '@openpane/sdk';
 import { isOffered, scopeKey } from './durable-model.js';
 import type { OfferedStoredCommand } from './durable-model.js';
 import { nonempty } from './codec.js';

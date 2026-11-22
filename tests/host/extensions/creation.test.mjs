@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { createProviderRegistry } from '@agentui/host';
-import { createServerExtensions } from '@agentui/host/extensions';
+import { createProviderRegistry } from '@openpane/host';
+import { createServerExtensions } from '@openpane/host/extensions';
 import { openAccessDatabase } from '../../../apps/host/build/tsc/access-database.js';
 import { providerExtensionSource } from '../../../apps/host/build/tsc/provider-extensions.js';
-import { createBrowserConnection } from '@agentui/client/service';
+import { createBrowserConnection } from '@openpane/client/service';
 import { entry, listenerLog, options, secret, service, startBrowserHost, turn } from './fixtures.mjs';
 
 async function connected(t, extensions) {

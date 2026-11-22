@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canonicalJson, parseCommand } from '@agentui/contracts';
-import { createConversationStore } from '@agentui/client';
+import { canonicalJson, parseCommand } from '@openpane/contracts';
+import { createConversationStore } from '@openpane/client';
 import { fakePort, storage, scope, projection, receipt } from './support.mjs';
 
 for (const count of [1, 10]) test(`actual client saves and reloads ${count} legal large offers without losing history`, async t => {

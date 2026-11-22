@@ -1,6 +1,6 @@
 import { useCallback, useId, useSyncExternalStore, type HTMLAttributes, type ButtonHTMLAttributes, type InputHTMLAttributes } from 'react';
-import { buttonTones, textVariantColor, control, type ButtonTone, type TextVariant, type Theme } from '@agentui/theme';
-import { ThemeProvider, useProvidedTheme, useTheme, type ThemeProviderProps } from '@agentui/theme/react';
+import { buttonTones, textVariantColor, control, type ButtonTone, type TextVariant, type Theme, type Appearance, type ThemeColors } from '@openpane/theme';
+import { ThemeProvider, useProvidedTheme, useTheme, type ThemeProviderProps } from '@openpane/theme/react';
 
 function colorVariable(role: string): `--aui-color-${string}` {
   return `--aui-color-${role.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
@@ -41,12 +41,17 @@ function useMediaQuery(query: string, enabled: boolean): boolean {
   }, [query, enabled]);
   return useSyncExternalStore(subscribe, () => enabled && window.matchMedia(query).matches, () => false);
 }
-export interface ThemeScopeProps extends ThemeProviderProps, Omit<HTMLAttributes<HTMLDivElement>, 'color' | 'children'> {}
-export function ThemeScope({ appearance, reducedMotion, colors, children, ...props }: ThemeScopeProps) {
-  const isRoot = useProvidedTheme() === undefined;
+export type ThemeScopeProps = Omit<ThemeProviderProps, 'colors'> & Omit<HTMLAttributes<HTMLDivElement>, 'color' | 'children'> & (
+  | { readonly colors?: ThemeProviderProps['colors']; readonly palette?: never }
+  | { readonly colors?: never; readonly palette: Readonly<Record<Appearance, ThemeColors>> }
+);
+export function ThemeScope({ appearance, reducedMotion, colors, palette, children, ...props }: ThemeScopeProps) {
+  const parent = useProvidedTheme();
+  const isRoot = parent === undefined;
   const prefersDark = useMediaQuery('(prefers-color-scheme: dark)', isRoot);
   const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)', isRoot);
-  return <ThemeProvider colors={colors} appearance={appearance ?? (isRoot ? (prefersDark ? 'dark' : 'light') : undefined)}
+  const resolved = appearance ?? parent?.appearance ?? (prefersDark ? 'dark' : 'light');
+  return <ThemeProvider colors={palette ? palette[resolved] : colors} appearance={resolved}
     reducedMotion={reducedMotion ?? (isRoot ? prefersReducedMotion : undefined)}>
     <ThemeSurface {...props}>{children}</ThemeSurface>
   </ThemeProvider>;

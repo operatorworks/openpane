@@ -1,6 +1,6 @@
 import { NO_OBSERVABILITY } from '../../apps/host/build/tsc/observability.js';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -9,10 +9,10 @@ import { chromium } from 'playwright';
 import { repository, buildCustom } from '../customization/build/support.mjs';
 import { readArtifactBytes } from '../../apps/host/build/tsc/artifact.js';
 import { serviceEndpoint } from '../../apps/host/build/tsc/service-endpoint.js';
-import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, CODEX_RUNTIME, CODEX_SDK_MODEL, CODEX_SDK_RUNTIME, CLAUDE_SDK_RUNTIMES } from '@agentui/contracts/compatibility';
-import { parseServiceRequest, parseServiceResponse } from '@agentui/contracts/service';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import { openLocalHost, createRecordedDriver } from '@agentui/host';
+import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, CODEX_RUNTIME, CODEX_SDK_MODEL, CODEX_SDK_RUNTIME, CLAUDE_SDK_RUNTIMES } from '@openpane/contracts/compatibility';
+import { parseServiceRequest, parseServiceResponse } from '@openpane/contracts/service';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import { openLocalHost, createRecordedDriver } from '@openpane/host';
 import { ownerPrincipal } from '../../apps/host/build/tsc/principal.js';
 import { openAccessDatabase } from '../../apps/host/build/tsc/access-database.js';
 import { createApi } from '../../apps/host/build/tsc/api.js';
@@ -23,7 +23,7 @@ const installed = (runtime, account) => ({ installationId: 'same-installation-id
   account, authorizedScope: '/private/workspace',
 } });
 test('authorized agent API and browser route two recorded agents and retain unavailable history', { timeout: 60000 }, async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-agent-routing-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-agent-routing-'));
   const path = join(directory, 'host.sqlite'), access = openAccessDatabase(path);
   const feeds = new FeedRegistry(), calls = [];
   const a = installed(CODEX_RUNTIME, 'private-account-a'), b = installed(CLAUDE_SDK_RUNTIMES.sonnet, 'private-account-b');
@@ -79,6 +79,7 @@ test('authorized agent API and browser route two recorded agents and retain unav
   }
 
   const custom = repository();
+  custom.write('desktop/index.tsx', readFileSync(new URL('./fixtures/global-layout.tsx', import.meta.url), 'utf8'));
   t.after(() => rmSync(custom.directory, { recursive: true, force: true }));
   buildCustom(custom);
   const assets = readArtifactBytes(join(custom.directory, 'browser'), 'browser-development');
@@ -142,12 +143,12 @@ test('authorized agent API and browser route two recorded agents and retain unav
   const message = page.getByRole('textbox', { name: 'Message', exact: true });
   assert.equal(await page.getByRole('combobox', { name: 'Agent for new chat', exact: true }).count(), 0);
   await open('a');
-  assert.match(await page.locator('.composer-footer').textContent(), /Local Codex/);
-  assert.deepEqual(await page.getByRole('group', { name: 'Chat settings', exact: true }).getByRole('button').allTextContents(), ['Codex', 'Select model', 'Default']);
-  assert.equal(await page.getByRole('button', { name: 'Effort, Default. Managed by the host.', exact: true }).isDisabled(), true);
+  assert.match(await page.locator('.shell-footer').textContent(), /Local Codex · Approvals required for changes/);
+  assert.deepEqual(await page.getByRole('group', { name: 'Chat settings', exact: true }).getByRole('button').allTextContents(), ['Codex', 'Select model']);
+  assert.equal(await page.getByRole('button', { name: /^Effort/ }).count(), 0);
   await message.fill('Draft for Codex');
   await open('b');
-  assert.match(await page.locator('.composer-footer').textContent(), /Claude.*Sonnet/);
+  assert.match(await page.locator('.shell-footer').textContent(), /Sonnet.* · Chat only · No tools/);
   await message.fill('Draft for Sonnet');
   await page.screenshot({ path: '.audit/mvp/native-agent-routing-sonnet.png' });
   await open('a');
@@ -188,7 +189,7 @@ test('authorized agent API and browser route two recorded agents and retain unav
   await page.getByRole('button', { name: 'Claude', exact: true }).click();
   assert.equal(await page.getByRole('button', { name: `Start new chat with ${opus.label}`, exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('button', { name: `Start new chat with ${sonnet.label}`, exact: true }).isEnabled(), true);
-  assert.match(await page.locator('.composer-footer').textContent(), /Local Codex/);
+  assert.match(await page.locator('.shell-footer').textContent(), /Local Codex · Approvals required for changes/);
   assert.equal(await message.inputValue(), 'Draft for Codex');
   let loseCreate = true, dropCreate = false, droppedScope;
   const createRequests = [], recoveryResponses = [];
@@ -208,7 +209,7 @@ test('authorized agent API and browser route two recorded agents and retain unav
   await page.getByRole('button', { name: 'Recover creation', exact: true }).waitFor();
   assert.equal(await page.getByRole('combobox', { name: 'Agent for pending creation', exact: true }).count(), 0);
   await page.getByRole('button', { name: 'Recover creation', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.composer-footer')?.textContent?.includes('Sonnet'));
+  await page.waitForFunction(() => /Sonnet.* · Chat only · No tools/.test(document.querySelector('.shell-footer')?.textContent ?? ''));
   await page.getByRole('heading', { name: 'Plan review', exact: true }).waitFor();
   await message.fill('Unsent selected Sonnet draft');
   await page.getByRole('button', { name: 'Review the plan', exact: true }).click();
@@ -233,12 +234,12 @@ test('authorized agent API and browser route two recorded agents and retain unav
   assert.equal(await message.inputValue(), 'Draft for Sonnet');
   await open('a');
   await page.evaluate(hostId => new Promise((resolve, reject) => {
-    const request = indexedDB.open('agentui-browser-views', 1);
+    const request = indexedDB.open('openpane-browser-views', 1);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const db = request.result, transaction = db.transaction('records', 'readwrite');
       transaction.objectStore('records').put({ version: 1, route: { hostId, conversationId: 'a' },
-        pendingCreation: { hostId, conversationId: 'legacy-absent' } }, ['view', sessionStorage.getItem('agentui.viewId'), hostId]);
+        pendingCreation: { hostId, conversationId: 'legacy-absent' } }, ['view', sessionStorage.getItem('openpane.viewId'), hostId]);
       transaction.oncomplete = () => { db.close(); resolve(); };
     };
   }), access.hostId);
@@ -281,7 +282,7 @@ test('authorized agent API and browser route two recorded agents and retain unav
   await harness.click();
   await page.getByRole('button', { name: 'Claude', exact: true }).click();
   await page.getByRole('button', { name: `Start new chat with ${sonnet.label}`, exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.creation-recovery') === null && document.querySelector('.composer-footer')?.textContent?.includes('Sonnet'));
+  await page.waitForFunction(() => document.querySelector('.creation-recovery') === null && /Sonnet.* · Chat only · No tools/.test(document.querySelector('.shell-footer')?.textContent ?? ''));
   const newScope = createRequests.at(-1).scope;
   assert.notDeepEqual(newScope, droppedScope);
   assert.equal(createRequests.at(-1).agentId, sonnet.id);
@@ -294,7 +295,7 @@ test('authorized agent API and browser route two recorded agents and retain unav
   assert.equal(await page.getByRole('button', { name: 'Send', exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('button', { name: 'Review the plan', exact: true }).isDisabled(), true);
   assert.equal(await page.getByText('Draft for Codex', { exact: true }).count(), 1);
-  assert.match(await page.locator('.composer-footer').textContent(), /Local Codex/);
+  assert.match(await page.locator('.shell-footer').textContent(), /Local Codex · Approvals required for changes/);
   await model.click();
   assert.equal(await page.getByRole('button', { name: 'Codex, current model', exact: true }).count(), 0);
   await page.keyboard.press('Escape');

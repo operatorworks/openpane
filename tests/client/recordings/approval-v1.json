@@ -1,6 +1,6 @@
 {
   "recordingVersion": 1,
-  "provider": "agentui-recorded",
+  "provider": "openpane-recorded",
   "projectionVersion": 1,
   "send": {
     "kind": "completed",
@@ -11,7 +11,7 @@
           "conversation": { "hostId": "host-a", "conversationId": "conversation-a" },
           "runId": "run-a",
           "authority": {
-            "kind": "agentui-host",
+            "kind": "openpane-host",
             "hostId": "host-a",
             "binding": {
               "namespace": "recorded",

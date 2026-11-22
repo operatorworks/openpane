@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createFrontendToolGeneration, pinFrontendTools } from '@agentui/sdk/tools';
+import { createFrontendToolGeneration, pinFrontendTools } from '@openpane/sdk/tools';
 
 const run = {
   conversation: { hostId: 'h', conversationId: 'c' },
   runId: 'r',
   authority: {
-    kind: 'agentui-host',
+    kind: 'openpane-host',
     hostId: 'h',
     binding: { namespace: 'n', installationId: 'i', opaqueSessionId: 's' },
   },

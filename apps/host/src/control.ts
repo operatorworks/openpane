@@ -2,13 +2,13 @@ import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, unlinkSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import type { Socket } from 'node:net';
-import { record, identifier, count, hex } from '@agentui/contracts/decode';
+import { record, identifier, count, hex } from '@openpane/contracts/decode';
 import { SelectionRefusal, parseLiveRequest, parseSelectionQuery, parseSelectionCommand, parseOperationSummary, parseSelectionStatus, parseReceiptChunk, chunkReceipt, RECEIPT_LIMIT, operationId } from './selection-protocol.js';
 import type { SelectionControl, SelectionCommand, LiveRequest, SelectionQuery, OperationSummary, SelectionStatus, ReceiptChunk } from './selection-protocol.js';
 import { parseRefreshReceipt, parseRefreshRequest, RefreshRefusal } from './refresh-jobs.js';
 import type { RefreshController, RefreshRequest, RefreshReceipt } from './refresh-jobs.js';
-import { isProviderUnavailableCause, providerUnavailableReasons } from '@agentui/host';
-import type { ProviderStatus, ProviderUnavailableCause } from '@agentui/host';
+import { isProviderUnavailableCause, providerUnavailableReasons } from '@openpane/host';
+import type { ProviderStatus, ProviderUnavailableCause } from '@openpane/host';
 
 const providerRefreshLimit = 100;
 type ProviderRefreshStatus = { readonly contributionId: string; readonly namespace: string } &

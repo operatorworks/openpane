@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { AgentDescriptor } from '@agentui/contracts/service';
-import { CLAUDE_SDK_RUNTIMES, CODEX_SDK_MODEL, CODEX_SDK_RUNTIME, PI_RUNTIME, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
+import type { AgentDescriptor } from '@openpane/contracts/service';
+import { CLAUDE_SDK_RUNTIMES, CODEX_SDK_MODEL, CODEX_SDK_RUNTIME, PI_RUNTIME, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
 
 type Harness = 'pi' | 'claude' | 'codex' | 'recorded' | 'provider' | 'other';
 type Picker = { readonly kind: 'closed' } | { readonly kind: 'harness' } | { readonly kind: 'model'; readonly harness: Harness };
@@ -18,7 +18,7 @@ function harness(agent: AgentDescriptor | null): Harness {
     case 'pi': return 'pi';
     case 'claude-sdk': return 'claude';
     case 'codex': case 'codex-sdk': return 'codex';
-    case 'agentui-recorded': return 'recorded';
+    case 'openpane-recorded': return 'recorded';
     default: return 'other';
   }
 }
@@ -94,7 +94,6 @@ export function ComposerAgentControls({ agents, agent, hasConversation, enabled,
       trigger.current = event.currentTarget;
       setPicker(previous => previous.kind === 'model' ? { kind: 'closed' } : { kind: 'model', harness: currentHarness });
     }}>{currentModel}<Chevron /></button>
-    <button type="button" className="composer-setting composer-effort" aria-label="Effort, Default. Managed by the host." title="Effort is managed by the host. This host does not offer effort settings." disabled>Default<Chevron /></button>
     {open && <div id={id} ref={dialog} className="composer-picker" role="dialog" aria-label={picker.kind === 'harness' ? 'Choose harness' : 'Choose model'} tabIndex={-1}>
       <div className="composer-picker-heading"><strong>{picker.kind === 'harness' ? 'Harness' : 'Select model'}</strong><button type="button" aria-label="Close chat settings" onClick={() => close(true)}>×</button></div>
       {picker.kind === 'harness' && <p>{hasConversation ? 'Choosing a different harness starts a new chat. Your draft stays here.' : 'Choose a harness to start a new chat.'}</p>}

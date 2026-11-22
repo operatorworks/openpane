@@ -7,13 +7,13 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { createCodexDriver, openLocalHost } from '@agentui/host';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { createCodexDriver, openLocalHost } from '@openpane/host';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { command, scope, snapshot } from './fixture.mjs';
 import { png } from './image-fixtures.mjs';
 
 function fixture(t, mode = 'stream', readImage) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-codex-models-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-codex-models-'));
   const logPath = join(directory, 'rpc.jsonl'), sessions = [];
   const records = () => existsSync(logPath) ? readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
   const open = async () => {

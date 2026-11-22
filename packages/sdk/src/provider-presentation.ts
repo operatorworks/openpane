@@ -1,5 +1,5 @@
-import type { ContinuationCarried, ContinuationRefusal, ConversationClosure, Json, RunIdentity } from '@agentui/contracts';
-import type { Transcript, TranscriptEvent } from '@agentui/contracts/conversation';
+import type { ContinuationCarried, ContinuationRefusal, ConversationClosure, Json, RunIdentity } from '@openpane/contracts';
+import type { Transcript, TranscriptEvent } from '@openpane/contracts/conversation';
 import type { ConversationRef, CredentialHandle, ProviderConversation, ProviderInstance, ProviderModel } from './providers.js';
 
 declare const invariant: unique symbol;

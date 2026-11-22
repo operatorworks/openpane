@@ -1,4 +1,4 @@
-import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION } from '@agentui/contracts/compatibility';
+import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION } from '@openpane/contracts/compatibility';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -8,12 +8,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { readArtifact, readArtifactBytes, readInstalledArtifact } from '../../apps/host/build/tsc/artifact.js';
-import { parseArtifactManifest, artifactIdentityText } from '@agentui/contracts/artifact';
+import { parseArtifactManifest, artifactIdentityText } from '@openpane/contracts/artifact';
 import { createNativeOutput, stageNativeArtifact } from '../../scripts/stage-native-artifact.mjs';
 
 const generator = fileURLToPath(new URL('../../scripts/artifact-manifest.mjs', import.meta.url));
 function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'agentui-artifact-'));
+  const root = mkdtempSync(join(tmpdir(), 'openpane-artifact-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const put = (path, bytes) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -46,7 +46,7 @@ test('actual CLI hashes built files, excludes its manifest, and records applied 
   assert.equal(first.sourceRevision, f.git('rev-parse', 'HEAD'));
   assert.equal(first.wireVersion, SERVICE_WIRE_VERSION);
   assert.equal(first.extensionSdkVersion, EXTENSION_SDK_VERSION);
-  assert.deepEqual(first.nativeRuntime, { engine: 'agentui-recorded', version: 'recorded-v1', format: 'agentui-recorded-v1' });
+  assert.deepEqual(first.nativeRuntime, { engine: 'openpane-recorded', version: 'recorded-v1', format: 'openpane-recorded-v1' });
   assert.deepEqual(first.artifactRuntime, { engine: 'node', version: process.versions.node, format: 'esm' });
   assert.deepEqual(first.assets.map(asset => asset.path), ['index.js', 'nested/code.js.map']);
   assert.equal(first.assets[0].sha256, createHash('sha256').update(readFileSync(join(f.directory, 'index.js'))).digest('hex'));
@@ -231,4 +231,17 @@ test('installed host rejects a declared artifact runtime that differs from the r
   different.artifactId = createHash('sha256').update(artifactIdentityText(different)).digest('hex');
   f.put('apps/host/dist/artifact.json', JSON.stringify(different));
   assert.throws(() => readInstalledArtifact(f.directory), /runtime does not match/);
+});
+
+test('in-repo extension sources mark the source dirty while their build output does not', t => {
+  const f = fixture(t);
+  f.put('extensions/crew/src/provider.ts', 'export const value = 1;\n');
+  f.git('add', 'extensions/crew/src/provider.ts');
+  f.git('-c', 'user.name=Artifact test', '-c', 'user.email=artifact@example.invalid', 'commit', '-m', 'Add extension source');
+  const clean = f.build();
+  assert.deepEqual(clean.sourceDirty, { kind: 'clean' });
+  f.put('extensions/crew/dist/provider.js', 'export const value = 2;\n');
+  assert.deepEqual(f.build().sourceDirty, { kind: 'clean' });
+  f.put('extensions/crew/src/provider.ts', 'export const value = 2;\n');
+  assert.equal(f.build().sourceDirty.kind, 'dirty');
 });

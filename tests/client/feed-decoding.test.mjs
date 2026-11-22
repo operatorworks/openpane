@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { FeedMismatchError, parseFeedItem } from '@agentui/contracts';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import { parseServicePull } from '@agentui/contracts/service';
-import { createBrowserConnection } from '@agentui/client/service';
+import { FeedMismatchError, parseFeedItem } from '@openpane/contracts';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import { parseServicePull } from '@openpane/contracts/service';
+import { createBrowserConnection } from '@openpane/client/service';
 import { connected, events, projection, scope, snapshot } from './support.mjs';
 
 const transcriptSnapshot = { kind: 'snapshot', snapshot: { scope, cursor: 0, projectionVersion: 4,

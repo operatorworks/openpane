@@ -1,0 +1,48 @@
+{
+  "name": "openpane-extension-coworkers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./server": "./dist/server.js",
+    "./provider": "./dist/provider.js",
+    "./client": "./dist/client.js",
+    "./poller": "./dist/poller.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.desktop.json"
+  },
+  "dependencies": {
+    "@openpane/contracts": "0.0.0",
+    "@openpane/sdk": "0.0.0",
+    "zod": "4.6.6"
+  },
+  "peerDependencies": {
+    "react": "^19.3.0",
+    "@openpane/theme": "0.0.0",
+    "@openpane/ui-primitives": "0.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "@openpane/theme": { "optional": true },
+    "@openpane/ui-primitives": { "optional": true }
+  },
+  "openpane": {
+    "extension": {
+      "namespace": "coworkers",
+      "trust": "full",
+      "sdkVersion": "0.13.0",
+      "entries": [
+        { "kind": "server", "module": "./dist/server.js" },
+        { "kind": "desktop", "module": "./dist/desktop.js" }
+      ]
+    },
+    "sources": {
+      "./dist/desktop.js": "./src/desktop/index.tsx"
+    }
+  }
+}

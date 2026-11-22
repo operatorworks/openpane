@@ -1,6 +1,6 @@
 import { lazy, useEffect, useState } from 'react';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { ConversationContentLayoutProps, UiExtensionContributions, UiExtensionEntry } from '@agentui/sdk/react';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { ConversationContentLayoutProps, UiExtensionContributions, UiExtensionEntry } from '@openpane/sdk/react';
 
 const mode = new URLSearchParams(location.search).get('activity');
 const ready = Promise.withResolvers<{ default: () => React.ReactNode }>();

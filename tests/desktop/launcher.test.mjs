@@ -5,15 +5,15 @@ import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseLaunchArgs } from '../../scripts/agentui-launch.mjs';
+import { parseLaunchArgs } from '../../scripts/openpane-launch.mjs';
 
-const launcher = fileURLToPath(new URL('../../agentui', import.meta.url));
-const entry = fileURLToPath(new URL('../../scripts/agentui-launch.mjs', import.meta.url));
+const launcher = fileURLToPath(new URL('../../openpane', import.meta.url));
+const entry = fileURLToPath(new URL('../../scripts/openpane-launch.mjs', import.meta.url));
 const cases = JSON.parse(readFileSync(new URL('./host-url-cases.json', import.meta.url), 'utf8'));
 const invalid = cases.filter(({ accepted }) => !accepted).map(({ args }) => args);
 
 function launch(t, args) {
-  const dir = mkdtempSync(join(tmpdir(), 'agentui-launcher-'));
+  const dir = mkdtempSync(join(tmpdir(), 'openpane-launcher-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(join(dir, 'npm'), '#!/bin/sh\nprintf \'Build reached\\n\' >&2\nexit 99\n', { mode: 0o755 });
   return spawnSync(launcher, args, { encoding: 'utf8', timeout: 2_000,
@@ -28,7 +28,7 @@ for (const args of invalid) {
     const result = launch(t, args);
     assert.equal(result.error, undefined);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /Cannot connect to AgentUI host:.*(?:--host-url|http:\/\/127\.0\.0\.1:PORT\/browser\.html)/s);
+    assert.match(result.stderr, /Cannot connect to OpenPane host:.*(?:--host-url|http:\/\/127\.0\.0\.1:PORT\/browser\.html)/s);
     assert.equal(result.stdout, '');
     assert.doesNotMatch(result.stderr, /Build reached/);
   });
@@ -54,11 +54,11 @@ test('launcher forwards a valid host URL to its build step', { skip: process.pla
 });
 
 test('launcher rejects an invalid host URL through a symbolic link', { skip: process.platform === 'win32' }, t => {
-  const dir = mkdtempSync(join(tmpdir(), 'agentui-validator-link-'));
+  const dir = mkdtempSync(join(tmpdir(), 'openpane-validator-link-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const linked = join(dir, 'validate.mjs');
   symlinkSync(entry, linked);
   const result = spawnSync(process.execPath, [linked, '--host-url', 'https://example.com/browser.html'], { encoding: 'utf8' });
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /Cannot connect to AgentUI host/);
+  assert.match(result.stderr, /Cannot connect to OpenPane host/);
 });

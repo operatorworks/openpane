@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerHooks } from 'node:module';
-import { classifyHostSpecifier } from '@agentui/host/server-artifact-policy';
+import { classifyHostSpecifier } from '@openpane/host/server-artifact-policy';
 
 const unsupportedImport = () => Object.assign(new Error('Unsupported catalog import'), { code: 'ERR_UNSUPPORTED_CATALOG_IMPORT' });
 

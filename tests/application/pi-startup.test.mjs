@@ -25,7 +25,7 @@ function launch(args, env) {
 }
 
 test('Pi requires a host-only OpenCode Go key before creating data or publishing a listener', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-pi-startup-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-pi-startup-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const env = { ...process.env };
   delete env.OPENCODE_GO_API_KEY;
@@ -48,7 +48,7 @@ for (const [args, expected] of [
   [['pi', '--workspace', '/fixture', 'extra'], /Use serve, codex, pi, browser-dev/],
 ]) {
   test(`Pi rejects invalid command arguments ${args.join(' ')}`, async t => {
-    const directory = mkdtempSync(join(tmpdir(), 'agentui-pi-args-'));
+    const directory = mkdtempSync(join(tmpdir(), 'openpane-pi-args-'));
     t.after(() => rmSync(directory, { recursive: true, force: true }));
     const data = join(directory, 'data');
     const result = await launch([...args, '--data-dir', data], { ...process.env, OPENCODE_GO_API_KEY: 'unused-test-key' });
@@ -61,7 +61,7 @@ for (const [args, expected] of [
 }
 
 test('Pi startup advertises one runtime to browser and native clients and labels its chat-only UI', { timeout: 20_000 }, async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-pi-ready-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-pi-ready-'));
   const data = join(directory, 'data');
   const token = 'unused-pi-startup-key';
   const env = { ...process.env, OPENCODE_GO_API_KEY: token };
@@ -132,8 +132,9 @@ test('Pi startup advertises one runtime to browser and native clients and labels
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`${ready.origin}/browser.html`);
   await page.getByRole('button', { name: 'New conversation', exact: true }).click();
-  await page.getByPlaceholder('Write to Pi…').waitFor();
-  assert.match(await page.locator('.composer-footer').textContent(), /Pi · GLM 5.3 · OpenCode Go · Chat only · No tools/);
+  // The new-conversation screen shares the placeholder; wait for the conversation itself.
+  await page.getByRole('region', { name: 'Conversation', exact: true }).getByPlaceholder('Write to Pi…').waitFor();
+  assert.match(await page.locator('.shell-footer').textContent(), /Pi · GLM 5.3 · OpenCode Go · Chat only · No tools/);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   assert.match(await page.locator('.application-status').textContent(), /Pi · GLM 5.3 · OpenCode Go/);
   assert.match(await page.getByRole('region', { name: 'Settings', exact: true }).textContent(), /Pi provides text chat without tools/);

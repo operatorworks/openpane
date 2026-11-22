@@ -1,4 +1,4 @@
-import type { Transcript } from '@agentui/contracts/conversation';
+import type { Transcript } from '@openpane/contracts/conversation';
 import { AGENT_PRESENTATION } from './agent-presentation.js';
 
 const presentations = new Map(Object.entries(AGENT_PRESENTATION));

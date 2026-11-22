@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { openLocalHost } from '@agentui/host';
-import { createClaudeSdkDriver } from '@agentui/host/claude-sdk';
-import { CLAUDE_SDK_RUNTIMES } from '@agentui/contracts/compatibility';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { openLocalHost } from '@openpane/host';
+import { createClaudeSdkDriver } from '@openpane/host/claude-sdk';
+import { CLAUDE_SDK_RUNTIMES } from '@openpane/contracts/compatibility';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { command, scope, until } from './fixture.mjs';
 
 async function fixture(t) {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-claude-driver-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-claude-driver-'));
   const executable = join(directory, 'claude.mjs');
   const fixtureUrl = new URL('./fixtures/claude-sdk-exec.mjs', import.meta.url).href;
   await writeFile(executable, `#!${process.execPath}\nawait import(${JSON.stringify(fixtureUrl)});\n`, { mode: 0o700 });

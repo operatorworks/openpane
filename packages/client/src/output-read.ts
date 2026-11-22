@@ -1,6 +1,6 @@
 import { hash } from 'fast-sha256';
-import type { OutputRead } from '@agentui/contracts';
-import type { ServiceValueMap } from '@agentui/contracts/service';
+import type { OutputRead } from '@openpane/contracts';
+import type { ServiceValueMap } from '@openpane/contracts/service';
 export function finishOutputRead(value: ServiceValueMap['output-read']): OutputRead {
   if (value.result.kind !== 'available') return value.result;
   const { output, base64 } = value.result;

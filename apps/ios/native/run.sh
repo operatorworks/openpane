@@ -26,7 +26,7 @@ env -u SKIP_BUNDLING -u FORCE_BUNDLING -u ENTRY_FILE -u PROJECT_ROOT \
   -u CONFIG_JSON -u CONFIG_CMD -u BUNDLE_NAME -u EXTRA_PACKAGER_ARGS \
   -u EXTRA_COMPILER_ARGS -u COMPOSE_SOURCEMAP_PATH -u SOURCEMAP_FILE \
   -u HERMES_CLI_PATH -u USE_HERMES \
-  xcodebuild -workspace ios/AgentUI.xcworkspace -scheme AgentUI -configuration Release \
+  xcodebuild -workspace ios/OpenPane.xcworkspace -scheme OpenPane -configuration Release \
   -sdk iphonesimulator -destination "id=$simulator" -derivedDataPath "$PWD/.work/build" \
   CODE_SIGNING_ALLOWED=NO build > .work/build.log 2>&1 || {
   tail -80 .work/build.log >&2; exit 1;
