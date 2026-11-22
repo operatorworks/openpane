@@ -1,7 +1,8 @@
-import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
-import { checkExtensionEntrypoint, type ExtensionManifest } from '@openpane/sdk';
-import type { ConversationActivityProps, ConversationModuleProps, UiExtensionPresentation, UiExtensionEntry } from '@openpane/sdk/react';
-import { createUiExtensionGeneration } from '@openpane/sdk/react-tools';
+import { Component, Suspense, createContext, useContext, useEffect, useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import type { ExtensionManifest } from '@openpane/sdk';
+import type { ConversationActivityProps, ConversationModuleProps, UiExtensionPresentation } from '@openpane/sdk/react';
+import { DesktopExtensionLifecycle } from './desktop-extension-lifecycle.js';
+import { BuiltinColors } from './BuiltinColors.js';
 import type { GenerationSink } from './frontend-sends.js';
 import type { FrontendToolGeneration } from '@openpane/sdk/tools';
 
@@ -22,12 +23,19 @@ type SlotOwner<S extends Slot> = ReadyActivation & {
 type SlotSelection<S extends Slot> =
   | { readonly kind: 'default' }
   | { readonly kind: 'conflict'; readonly namespaces: readonly string[] }
+  | { readonly kind: 'missing'; readonly namespace: string }
   | { readonly kind: 'claimed'; readonly owner: SlotOwner<S> };
 export type TranscriptSelection = SlotSelection<'transcript'>;
 export type ActivitySelection = SlotSelection<'activity'>;
 export type ContentLayoutSelection = SlotSelection<'contentLayout'>;
 const DEFAULT_SLOT: { readonly kind: 'default' } = { kind: 'default' };
-function selectSlot<S extends Slot>(owners: readonly NamespaceActivation[], slot: S): SlotSelection<S> {
+type SlotPreference = import('./personalization.js').SlotPreference;
+export function selectSlot<S extends Slot>(owners: readonly NamespaceActivation[], slot: S, preference: SlotPreference = { kind: 'automatic' }): SlotSelection<S> {
+  if (preference.kind === 'builtin') return DEFAULT_SLOT;
+  if (preference.kind === 'extension') {
+    const owner = owners.find((owner): owner is SlotOwner<S> => owner.namespace === preference.namespace && owner.kind === 'ready' && owner.presentation[slot] !== undefined);
+    return owner ? { kind: 'claimed', owner } : { kind: 'missing', namespace: preference.namespace };
+  }
   if (owners.some(owner => owner.kind === 'loading')) return DEFAULT_SLOT;
   const claims = owners.filter((owner): owner is SlotOwner<S> => owner.kind === 'ready' && owner.presentation[slot] !== undefined);
   if (claims.length > 1) return { kind: 'conflict', namespaces: claims.map(owner => owner.namespace).sort() };
@@ -38,32 +46,6 @@ function selectSlot<S extends Slot>(owners: readonly NamespaceActivation[], slot
 export function workspaceTranscript(owner: ReadyActivation, transcript: NonNullable<UiExtensionPresentation['transcript']>): TranscriptSelection {
   return { kind: 'claimed', owner: { ...owner, presentation: { ...owner.presentation, transcript } } };
 }
-export function customizationMessage(error: unknown): string {
-  const limit = 10;
-  const pending: unknown[] = [error];
-  const seen = new Set<unknown>();
-  const messages: string[] = [];
-  for (let index = 0; index < pending.length; index++) {
-    const cause = pending[index];
-    if (seen.has(cause)) continue;
-    seen.add(cause);
-    try {
-      if (!(cause instanceof Error)) {
-        messages.push('Customization failed.');
-        continue;
-      }
-      const message: unknown = cause.message;
-      messages.push(typeof message === 'string' ? message : 'Customization failed.');
-      if (cause instanceof AggregateError) {
-        const causes: unknown = cause.errors;
-        if (Array.isArray(causes)) {
-          for (let index = 0; index < causes.length && pending.length < limit; index++) pending.push(causes[index]);
-        }
-      }
-    } catch { messages.push('Customization failed.'); }
-  }
-  return messages.join(' ');
-}
 
 export class CustomizationBoundary extends Component<{
   readonly children: ReactNode; readonly fallback: ReactNode; readonly fail: (error: unknown) => void;
@@ -71,78 +53,57 @@ export class CustomizationBoundary extends Component<{
   override state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
   override componentDidCatch(error: unknown) { this.props.fail(error); }
-  override render() { return this.state.failed ? this.props.fallback : this.props.children; }
+  override render() { return this.state.failed ? <BuiltinColors>{this.props.fallback}</BuiltinColors> : this.props.children; }
 }
 
-function activateNamespace(customization: DesktopCustomization, lifetime: number, publish: (owner: NamespaceActivation) => void): () => void {
-  const namespace = customization.manifest.namespace;
-  let removed = false;
-  let generation: FrontendToolGeneration | undefined;
-  const cleanup = () => {
-    const retiring = generation;
-    generation = undefined;
-    if (retiring) void retiring.retire().catch(error => {
-      if (!removed) publish({ kind: 'failed', namespace, message: `Customization cleanup failed. ${customizationMessage(error)}` });
-    });
-  };
-  const fail = (error: unknown) => {
-    if (!removed) publish({ kind: 'failed', namespace, message: customizationMessage(error) });
-    cleanup();
-  };
-  void (async () => {
-    try {
-      const imported = await customization.load();
-      if (removed) return;
-      const compatibility = checkExtensionEntrypoint(customization.manifest, 'desktop', imported.default);
-      if (compatibility.kind !== 'compatible') throw new Error(compatibility.reason);
-      const entry = imported.default as UiExtensionEntry<'desktop'>;
-      const active = await createUiExtensionGeneration({ namespace, generation: String(lifetime), platform: 'desktop',
-        activate: context => entry.activate(context), onFailure: fail });
-      generation = active.generation;
-      if (removed) { cleanup(); return; }
-      publish({ kind: 'ready', namespace, lifetime, generation, presentation: active.presentation, fail });
-    } catch (error) { fail(error); }
-  })();
-  return () => { removed = true; cleanup(); };
-}
-
-export function useDesktopCustomizations({ customizations, enabled, sink }: {
-  readonly customizations: readonly DesktopCustomization[]; readonly enabled: boolean; readonly sink?: GenerationSink;
-}): { readonly namespaces: readonly NamespaceActivation[]; readonly transcript: TranscriptSelection; readonly activity: ActivitySelection; readonly contentLayout: ContentLayoutSelection; readonly generations: readonly FrontendToolGeneration[] } {
-  const [request, setRequest] = useState({ customizations, enabled });
-  const [snapshot, setSnapshot] = useState<{ readonly request: typeof request; readonly namespaces: readonly NamespaceActivation[] }>(() => ({ request, namespaces: [] }));
-  const nextLifetime = useRef(0);
-  const current = request.customizations === customizations && request.enabled === enabled;
-  if (!current) setRequest({ customizations, enabled });
+const EMPTY_NAMESPACES: readonly string[] = [];
+const lifecycleSubscribers = new WeakMap<DesktopExtensionLifecycle, number>();
+function useLifecycleLifetime(owner: DesktopExtensionLifecycle | null): void {
   useEffect(() => {
-    const token = {};
-    sink?.begin(token);
-    if (!request.enabled) { sink?.publish(token, { kind: 'ready', generations: [] }); return () => sink?.clear(token); }
-    let removed = false;
-    let namespaces: readonly NamespaceActivation[] = request.customizations.map(item => ({ kind: 'loading', namespace: item.manifest.namespace }));
-    const publish = () => {
-      if (removed) return;
-      sink?.publish(token, namespaces.some(owner => owner.kind === 'loading') ? { kind: 'transitioning' }
-        : { kind: 'ready', generations: namespaces.flatMap(owner => owner.kind === 'ready' ? [owner.generation] : []) });
-      setSnapshot({ request, namespaces });
+    if (!owner) return;
+    lifecycleSubscribers.set(owner, (lifecycleSubscribers.get(owner) ?? 0) + 1);
+    const close = (event: PageTransitionEvent) => { if (!event.persisted) void owner.close(); };
+    window.addEventListener('pagehide', close);
+    return () => {
+      window.removeEventListener('pagehide', close);
+      const remaining = (lifecycleSubscribers.get(owner) ?? 1) - 1;
+      if (remaining === 0) lifecycleSubscribers.delete(owner); else lifecycleSubscribers.set(owner, remaining);
+      queueMicrotask(() => { if (!lifecycleSubscribers.has(owner)) void owner.close(); });
     };
-    publish();
-    const cleanups = request.customizations.map((customization, index) => activateNamespace(customization, ++nextLifetime.current, owner => {
-      namespaces = namespaces.map((previous, position) => position === index ? owner : previous);
-      publish();
-    }));
-    return () => { removed = true; sink?.clear(token); cleanups.forEach(cleanup => cleanup()); };
-  }, [request, sink]);
-  const namespaces = current && enabled && snapshot.request === request ? snapshot.namespaces : [];
-  const ready = namespaces.filter((owner): owner is ReadyActivation => owner.kind === 'ready');
-  return { namespaces, transcript: selectSlot(namespaces, 'transcript'), activity: selectSlot(namespaces, 'activity'), contentLayout: selectSlot(namespaces, 'contentLayout'), generations: ready.map(owner => owner.generation) };
+  }, [owner]);
+}
+const LifecycleContext = createContext<DesktopExtensionLifecycle | null>(null);
+export function DesktopCustomizationProvider({ children }: { readonly children: ReactNode }) {
+  const [owner] = useState(() => new DesktopExtensionLifecycle());
+  useLifecycleLifetime(owner);
+  return <LifecycleContext.Provider value={owner}>{children}</LifecycleContext.Provider>;
+}
+
+export function useDesktopCustomizations({ customizations, enabled, sink, disabledNamespaces = EMPTY_NAMESPACES, slots, loading = false }: {
+  readonly customizations: readonly DesktopCustomization[]; readonly enabled: boolean; readonly sink?: GenerationSink;
+  readonly disabledNamespaces?: readonly string[];
+  readonly slots?: Readonly<Record<Slot, SlotPreference>>;
+  readonly loading?: boolean;
+}): { readonly namespaces: readonly NamespaceActivation[]; readonly transcript: TranscriptSelection; readonly activity: ActivitySelection; readonly contentLayout: ContentLayoutSelection; readonly generations: readonly FrontendToolGeneration[] } {
+  const provided = useContext(LifecycleContext);
+  const [local] = useState(() => new DesktopExtensionLifecycle());
+  const owner = provided ?? local;
+  useLifecycleLifetime(provided ? null : local);
+  const namespaces = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
+  useLayoutEffect(() => {
+    if (!loading) owner.reconcile(enabled ? customizations.filter(item => !disabledNamespaces.includes(item.manifest.namespace)) : []);
+    if (sink) owner.attach(sink);
+  }, [owner, customizations, enabled, sink, disabledNamespaces, loading]);
+  return { namespaces, transcript: selectSlot(namespaces, 'transcript', slots?.transcript), activity: selectSlot(namespaces, 'activity', slots?.activity),
+    contentLayout: selectSlot(namespaces, 'contentLayout', slots?.contentLayout), generations: namespaces.flatMap(item => item.kind === 'ready' ? [item.generation] : []) };
 }
 
 export function CustomizationActivity({ selection, context, fallback, conversationKey }: {
   readonly selection: ActivitySelection; readonly context: ConversationActivityProps; readonly fallback: ReactNode; readonly conversationKey: string;
 }) {
   if (selection.kind === 'default') return fallback;
-  if (selection.kind === 'conflict') return <><p role="alert">Activity override conflict. {selection.namespaces.join(', ')} claim the activity. The default view remains active.</p>{fallback}</>;
+  if (selection.kind === 'missing') return <><BuiltinColors><p role="alert">Selected {selection.namespace} view is unavailable. The default view remains active.</p></BuiltinColors>{fallback}</>;
+  if (selection.kind === 'conflict') return <><BuiltinColors><p role="alert">Activity override conflict. {selection.namespaces.join(', ')} claim the activity. The default view remains active.</p></BuiltinColors>{fallback}</>;
   const View = selection.owner.presentation.activity;
   return <Suspense fallback={fallback}>
     <CustomizationBoundary key={`${selection.owner.lifetime}/${conversationKey}`} fail={selection.owner.fail} fallback={fallback}>
@@ -156,7 +117,8 @@ export function CustomizationTranscript({ selection, context, fallback, appendix
   readonly appendix: ReactNode;
 }) {
   if (selection.kind === 'default') return fallback;
-  if (selection.kind === 'conflict') return <><p role="alert">Transcript override conflict. {selection.namespaces.join(', ')} claim the transcript. The default view remains active.</p>{fallback}</>;
+  if (selection.kind === 'missing') return <><BuiltinColors><p role="alert">Selected {selection.namespace} view is unavailable. The default view remains active.</p></BuiltinColors>{fallback}</>;
+  if (selection.kind === 'conflict') return <><BuiltinColors><p role="alert">Transcript override conflict. {selection.namespaces.join(', ')} claim the transcript. The default view remains active.</p></BuiltinColors>{fallback}</>;
   const View = selection.owner.presentation.transcript;
   return <Suspense fallback={fallback}>
     <CustomizationBoundary key={`${selection.owner.lifetime}/${conversationKey}`} fail={selection.owner.fail} fallback={fallback}>

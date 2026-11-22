@@ -1,3 +1,5 @@
+import { customizationMessage as message } from './customization-message.js';
+import { BuiltinColors } from './BuiltinColors.js';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useConversation } from '@openpane/client/react';
 import type { ConversationModule, ConversationModuleProps, ModuleAction } from '@openpane/sdk/react';
@@ -6,7 +8,7 @@ import { Button } from '@openpane/ui-primitives/desktop';
 import { refusalMessage } from './application-controller.js';
 import type { ConversationActions, OpenConversation } from './application-controller.js';
 import { conversationResponding } from './responding.js';
-import { CustomizationBoundary, customizationMessage as message, type NamespaceActivation } from './DesktopCustomizations.js';
+import { CustomizationBoundary, type NamespaceActivation } from './DesktopCustomizations.js';
 
 function actionOutcome(result: SubmitResult): string {
   if (result.kind === 'rejected') return `Submission rejected. ${refusalMessage(result.reason)}`;
@@ -96,9 +98,9 @@ export function CustomizationModules({ owner, active, actions, enabled, agent, s
   }
   return <aside className="customization-panel" aria-label={`Customization ${owner.namespace}`}
     data-customization-namespace={owner.namespace} data-customization-state={owner.kind}>
-    {owner.kind === 'loading' && <p role="status">Loading custom tools…</p>}
-    {owner.kind === 'failed' && <p role="alert">Custom tools could not load. {owner.message} Use Restore default view to continue without them.</p>}
-    {owner.kind === 'ready' && active && actions && <Suspense fallback={<p role="status">Loading custom tools…</p>}>
+    {owner.kind === 'loading' && <BuiltinColors><p role="status">Loading custom tools…</p></BuiltinColors>}
+    {owner.kind === 'failed' && <BuiltinColors><p role="alert">Custom tools could not load. {owner.message} Use Restore default view to continue without them.</p></BuiltinColors>}
+    {owner.kind === 'ready' && active && actions && <Suspense fallback={<BuiltinColors><p role="status">Loading custom tools…</p></BuiltinColors>}>
       <CustomizationBoundary key={`${owner.lifetime}/${active.viewId}/${active.scope.hostId}/${active.scope.conversationId}`} fail={owner.fail} fallback={null}>
         <ConversationModules modules={owner.presentation.modules} active={active} actions={actions} enabled={enabled} agent={agent} />
       </CustomizationBoundary>

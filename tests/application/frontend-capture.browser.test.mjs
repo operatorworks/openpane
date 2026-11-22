@@ -113,9 +113,9 @@ test('committed production browser captures both actual send paths and retains o
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Composer capture');
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByLabel('Enable customizations', { exact: true }).uncheck();
+  await page.getByLabel('Enable executable UI customizations', { exact: true }).uncheck();
   assert.deepEqual(await page.evaluate(() => window.captureFixture.disposed), []);
-  await page.getByLabel('Enable customizations', { exact: true }).check();
+  await page.getByLabel('Enable executable UI customizations', { exact: true }).check();
   await (await tools(page)).getByText('Capture activation 2', { exact: true }).waitFor(); await chats(page);
   await page.getByRole('button', { name: 'Retry original command', exact: true }).click();
   await wait(() => page.getByRole('button', { name: 'New conversation', exact: true }).isEnabled(), 'original retry settled');
@@ -184,7 +184,7 @@ for (const phase of ['admission', 'release']) test(`production browser ${phase} 
   if (phase === 'admission') await page.getByRole('button', { name: 'Send', exact: true }).click();
   else await page.getByRole('button', { name: 'Release captured tools', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'Local storage unavailable. Commands are blocked.' }).waitFor();
-  await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.getByLabel('Enable customizations', { exact: true }).uncheck();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.getByLabel('Enable executable UI customizations', { exact: true }).uncheck();
   await wait(() => page.evaluate(() => window.captureFixture.disposed.length === 1), 'failed storage releases closure');
   assert.equal(f.operations.length, phase === 'release' ? 1 : 0); assert.equal(await page.evaluate(() => window.captureFixture.executions), 0);
 });

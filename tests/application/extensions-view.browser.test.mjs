@@ -169,7 +169,7 @@ test('a throwing workspace fails its row and leaves Chats usable; Restore defaul
   for (const namespace of ['fixture', 'ledger']) {
     assert.equal(await row(f.page, namespace).locator('.extension-state').textContent(), 'Disabled');
   }
-  assert.match(await row(f.page, 'ledger').textContent(), /Enable customizations in Settings/);
+  assert.match(await row(f.page, 'ledger').textContent(), /Enable this desktop UI in Settings/);
 });
 
 test('the real browser build bundles the in-repo Crew workspace, lists it Not configured and loads without CSP violations', { timeout: 60_000 }, async t => {

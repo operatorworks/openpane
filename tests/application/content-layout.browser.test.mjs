@@ -21,7 +21,7 @@ test('committed layout arranges selected transcript and nested action with prote
   const parentManifest = JSON.parse(await readFile(join(custom.repo, 'package.json'), 'utf8'));
   parentManifest.openpane.extensions = [{ repository: child.repo, commit: child.commit() }];
   custom.write('package.json', JSON.stringify(parentManifest));
-  const template = await readFile(join(custom.repo, 'desktop/index.tsx'), 'utf8');
+  const template = await readFile(join(root, 'tests/application/fixtures/global-layout.tsx'), 'utf8');
   custom.write('desktop/index.tsx', template.replace("import { createElement }", "import { createElement, useState }")
     .replace("function ReviewLayout({ transcript, modules }: ConversationContentLayoutProps) {", `function ReviewLayout({ transcript, modules }: ConversationContentLayoutProps) {
       const [broken, setBroken] = useState(false); if (broken) throw new Error('Committed layout failed');`)

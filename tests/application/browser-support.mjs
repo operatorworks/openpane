@@ -93,10 +93,10 @@ export async function revealRecovery(page) {
   if (await menu.getAttribute('open') === null) await menu.locator('summary').click();
 }
 
-export async function customRuntime(page, host, selection, breakDefault = false, extra = '') {
+export async function customRuntime(page, host, selection, breakDefault = false, extra = '', strict = false) {
   const bundled = await build({ stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client';
     import {BrowserApplication} from './apps/desktop/src/shell/BrowserApplication.tsx';
-    createRoot(document.getElementById('root')).render(<BrowserApplication />);`, resolveDir: root, loader: 'jsx' },
+    createRoot(document.getElementById('root')).render(${strict ? '<React.StrictMode><BrowserApplication /></React.StrictMode>' : '<BrowserApplication />'});`, resolveDir: root, loader: 'jsx' },
     bundle: true, write: false, outfile: 'custom.js', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' },
     plugins: [{ name: 'custom-runtime-fixture', setup(plugin) {
       if (breakDefault) plugin.onLoad({ filter: /ConversationView\.tsx$/ }, async () => ({

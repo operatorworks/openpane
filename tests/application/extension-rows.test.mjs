@@ -17,3 +17,10 @@ test('a bundled extension reads Loading, not Not configured, until the host repo
   assert.equal(rowOf(metadata([{ namespace, state: 'active', operations: [], installations: [] }])).state, 'Not configured');
   assert.equal(rowOf(metadata([{ namespace, state: 'active', operations: [], installations: [{ installationId: 'books', status: 'available' }] }])).state, 'Ready');
 });
+
+test('desktop disablement keeps an available host provider independently visible', () => {
+  const [row] = extensionRows({ customizations, activations: [], enabled: true, disabledNamespaces: ['ledger'], metadata: metadata([
+    { namespace, state: 'active', operations: [], installations: [{ installationId: 'books', status: 'available' }] },
+  ]) });
+  assert.equal(row.desktopState, 'Disabled'); assert.equal(row.hostState, 'Available'); assert.equal(openableRow(row), null);
+});

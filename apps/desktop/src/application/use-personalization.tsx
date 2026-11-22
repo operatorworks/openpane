@@ -118,8 +118,8 @@ function useSessionLifetime(session: PersonalizationSession | null): void {
     if (!session) return;
     sessionSubscribers.set(session, (sessionSubscribers.get(session) ?? 0) + 1);
     session.start();
-    const close = () => session.close();
-    globalThis.addEventListener('pagehide', close, { once: true });
+    const close = (event: PageTransitionEvent) => { if (!event.persisted) session.close(); };
+    globalThis.addEventListener('pagehide', close);
     return () => {
       globalThis.removeEventListener('pagehide', close);
       const remaining = (sessionSubscribers.get(session) ?? 1) - 1;
