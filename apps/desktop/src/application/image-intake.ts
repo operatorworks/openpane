@@ -14,7 +14,8 @@ export const IMAGE_SIZE = 'Choose an image of at most 4 MB.';
 
 /**
  * What a drag over the conversation would do, from what a drag exposes before the drop: item kinds and types, not
- * sizes or names. Text drags are not ours. An unknown or generic type is accepted here and decided on drop.
+ * sizes or names. Text drags are not ours. A generic type (empty, application/octet-stream) is accepted here and decided
+ * on drop by file name; any other type that is not PNG or JPEG is refused.
  */
 export function dragVerdict(types: readonly string[], items: DataTransferItemList | null, blocked: string | null): 'ignore' | DropVerdict {
   if (!types.includes('Files')) return 'ignore';

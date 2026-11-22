@@ -259,6 +259,7 @@ test('removing an image mid-upload frees the composer for the next drop, and gen
   const page = await quietConversation(t);
   const alert = page.locator('.composer [role="alert"]'), card = page.getByLabel('Attached image');
   assert.equal(await dragFiles(page, [['notes.pdf', 'application/pdf', 10]], { drop: false }), 'reject', 'known non-image types are refused on hover');
+  await page.waitForFunction(() => document.querySelector('.composer').getAttribute('data-drop') === null, null, { timeout: 2000 });
   await page.evaluate(() => { globalThis.holdUpload = new Promise(resolve => { globalThis.releaseUpload = resolve; }); });
   await dragFiles(page, [['first.png', 'image/png', [...png]]]);
   await card.getByRole('status').filter({ hasText: 'Uploading…' }).waitFor();

@@ -66,16 +66,17 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
   const [approving, setApproving] = useState<ReadonlySet<string>>(new Set());
   const [stopPending, setStopPending] = useState<typeof stopGuard.current>(null);
   const imageInput = useRef<HTMLInputElement>(null);
-  const intaking = useRef<OpenConversation['store'] | null>(null);
+  const intaking = useRef<{ readonly store: OpenConversation['store'] } | null>(null);
+  const hoverExpiry = useRef<ReturnType<typeof setTimeout> | null>(null);
   const removals = useRef(0);
   const dragDepth = useRef(0);
   const [drop, setDrop] = useState<DropVerdict | null>(null);
   useEffect(() => {
     // dragend fires on the drag source, not on the panel; a cancelled drag must not leave the outline behind.
-    const reset = () => { dragDepth.current = 0; setDrop(null); };
+    const reset = () => { dragDepth.current = 0; setDrop(null); if (hoverExpiry.current) clearTimeout(hoverExpiry.current); };
     document.addEventListener('dragend', reset);
     document.addEventListener('drop', reset);
-    return () => { document.removeEventListener('dragend', reset); document.removeEventListener('drop', reset); };
+    return () => { document.removeEventListener('dragend', reset); document.removeEventListener('drop', reset); if (hoverExpiry.current) clearTimeout(hoverExpiry.current); };
   }, []);
   const composer = useRef<HTMLTextAreaElement>(null);
   // The textarea grows with its text; CSS max-height caps it, then it scrolls. A hidden view has no layout, so skip it.
@@ -176,13 +177,14 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
     setImageError(null);
     const refuse = (message: string) => setImageError({ store, message });
     if (blocked) return refuse(blocked);
-    if (intaking.current === store) return refuse('Wait for the current image to finish.');
+    if (intaking.current?.store === store) return refuse('Wait for the current image to finish.');
     const result = intakeFile(files);
     if (result.kind === 'reject') return refuse(result.reason);
     const generation = removals.current;
     // The guard covers only the local file read; once the store has the bytes, its own upload state takes over.
-    intaking.current = store;
-    const release = () => { if (intaking.current === store) intaking.current = null; };
+    const token = { store };
+    intaking.current = token;
+    const release = () => { if (intaking.current === token) intaking.current = null; };
     void (async () => {
       try {
         const bytes = new Uint8Array(await result.file.arrayBuffer());
@@ -209,7 +211,14 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
   }
   const dropHandlers = {
     onDragEnter(event: DragEvent) { const verdict = dragging(event); if (verdict) { dragDepth.current++; hover(verdict); } },
-    onDragOver(event: DragEvent) { const verdict = dragging(event); if (verdict) hover(verdict); },
+    onDragOver(event: DragEvent) {
+      const verdict = dragging(event);
+      if (!verdict) return;
+      hover(verdict);
+      // dragover repeats while a drag stays over the panel; when it stops (some webviews send no usable leave), clear.
+      if (hoverExpiry.current) clearTimeout(hoverExpiry.current);
+      hoverExpiry.current = setTimeout(() => { dragDepth.current = 0; setDrop(null); }, 1000);
+    },
     onDragLeave(event: DragEvent) {
       if (!event.dataTransfer.types.includes('Files')) return;
       dragDepth.current = Math.max(0, dragDepth.current - 1);
