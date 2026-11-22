@@ -175,11 +175,13 @@ test('choosing another namespace layout preserves an unresolved module action ac
   await page.getByRole('button', { name: 'New recorded conversation' }).click(); await connected(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByLabel('Content layout owner', { exact: true }).selectOption({ label: 'Builtin' }); await chats(page);
-  await customRuntime(page, host, entry(`window.calls = 0; window.activations = { module: 1 }; window.disposals = 0;
+  await customRuntime(page, host, `load: async () => { await new Promise(resolve => setTimeout(resolve, 25)); return { default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+    window.calls ??= 0; window.activations ??= {}; window.activations.module = (window.activations.module ?? 0) + 1; window.disposals ??= 0;
     return { modules: [{ id: 'parent', label: 'Parent', component() { return null; }, children: [{ id: 'child', label: 'Child', component() { return null; },
       actions: [{ id: 'run', label: 'Deferred module action', run() { window.calls++; return new Promise(resolve => { window.finishAction = resolve; }); } }] }] }],
-      dispose() { window.disposals++; } };`), false,
-    `, { manifest: { ...manifest, namespace: 'layout' }, ${entry(`window.activations.layout = (window.activations.layout || 0) + 1;
+      dispose() { window.disposals++; } };
+  } } }; }`, false,
+    `, { manifest: { ...manifest, namespace: 'layout' }, ${entry(`window.activations ??= {}; window.disposals ??= 0; window.activations.layout = (window.activations.layout ?? 0) + 1;
       return { modules: [], contentLayout: ({ transcript, modules }) => <section aria-label="Chosen layout">{transcript}{modules}</section>, dispose() { window.disposals++; } };`)} }`);
   await tools(page); await page.getByRole('button', { name: 'Deferred module action', exact: true }).click();
   await status(page, 'Deferred module action').filter({ hasText: 'Submitting…' }).waitFor();

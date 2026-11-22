@@ -99,10 +99,11 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const personalization = usePersonalization();
   const { document: preferences, session: personalizationSession } = personalization;
   const customizationEnabled = personalization.readiness === 'ready' && preferences.ui.enabled;
+  const customizationsOn = children === undefined && customizationEnabled;
   const selectedPalette = preferences.palette;
   const paletteResource = selectedPalette.kind === 'imported' ? personalization.saved?.palettes.find(item => item.digest === selectedPalette.digest && item.kind === 'ready') : undefined;
   const contentPalette = paletteResource?.kind === 'ready' ? paletteResource.document.colors : palettes;
-  const custom = useDesktopCustomizations({ customizations: customization, sink: controller.frontendGenerations, enabled: children === undefined && customizationEnabled,
+  const custom = useDesktopCustomizations({ customizations: customization, sink: controller.frontendGenerations, enabled: customizationsOn,
     disabledNamespaces: preferences.ui.disabledNamespaces, slots: preferences.ui.slots, loading: personalization.readiness === 'loading' });
   const [recoveryChoice, setRecoveryChoice] = useState<{ scopeKey: string; agentId: string } | null>(null);
   const pendingScope = app.saved.pendingCreation?.scope;
@@ -163,7 +164,6 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   // Tools leave the conversation column: it keeps load notices, a claimed layout places everything, Extensions runs the rest.
   const layoutClaimed = custom.contentLayout.kind === 'claimed';
   const modules = moduleList(layoutClaimed ? 'all' : 'status');
-  const customizationsOn = children === undefined && customizationEnabled;
   const rows = extensionRows({ customizations: customization, activations: custom.namespaces, enabled: customizationsOn, disabledNamespaces: preferences.ui.disabledNamespaces, metadata });
   const workspaceRow = openableRow(rows.find(row => row.namespace === selectedExtension));
   const workspaceOpen = selectedView === 'extensions' && workspaceRow !== null;
@@ -208,19 +208,19 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     </select></label>}
     <button disabled={!enabled} onClick={() => void controller.recoverCreation(recoveryAgent ?? undefined)}>Recover creation</button>
   </div>;
-  const extensionsView = <div className="extensions-view" inert={suspended}>
-    {workspaceOpen
-      ? <ExtensionWorkspace contentPalette={contentPalette} row={workspaceRow} metadata={metadata} workspaces={app.workspaces} active={app.active} controller={controller}
-          conversation={workspaceConversation} status={<>{hostAlerts}{creationRecovery}</>} onBack={() => setSelectedExtension(null)} />
-      : <ExtensionsList rows={rows} enabled={!suspended} onOpen={setSelectedExtension}
-          tools={toolsEligible ? <ThemeScope palette={contentPalette} className="content-theme">{moduleList('tools')}</ThemeScope> : null} conversation={toolsTarget} />}
-  </div>;
   const personalizationNotice = <>{personalization.diagnostic && <p className="application-alert" role="alert">{personalization.diagnostic}</p>}
     {selectedPalette.kind === 'imported' && !paletteResource && <p role="alert">Selected palette is unavailable. Reimport it or choose builtin in Settings.</p>}
     {personalization.recovery.appearance === 'session' && <p role="alert">Default appearance restored for this session.</p>}
     {personalization.recovery.view === 'session' && <p role="alert">Default view restored for this session.</p>}</>;
+  const extensionsView = <div className="extensions-view" inert={suspended}>
+    {workspaceOpen
+      ? <ExtensionWorkspace contentPalette={contentPalette} row={workspaceRow} metadata={metadata} workspaces={app.workspaces} active={app.active} controller={controller}
+          conversation={workspaceConversation} status={<>{personalizationNotice}{hostAlerts}{creationRecovery}</>} onBack={() => setSelectedExtension(null)} />
+      : <ExtensionsList rows={rows} enabled={!suspended} onOpen={setSelectedExtension}
+          tools={toolsEligible ? <ThemeScope palette={contentPalette} className="content-theme">{moduleList('tools')}</ThemeScope> : null} conversation={toolsTarget} />}
+  </div>;
   const controls = <div className="application-controls">
-    {personalizationNotice}
+    {!workspaceOpen && personalizationNotice}
     <h2 className="sidebar-title">{selectedView === 'chats' ? 'Chats' : selectedView === 'extensions' ? 'Extensions' : 'Settings'}</h2>
     {app.capturedSends.length > 0 && <section aria-label="Captured tools"><h3>Captured tools</h3>
       <p>Tools are retained for these sends. Execution is not enabled.</p>

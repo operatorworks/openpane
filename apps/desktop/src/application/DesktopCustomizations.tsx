@@ -1,4 +1,4 @@
-import { Component, Suspense, createContext, useContext, useEffect, useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Component, Suspense, createContext, useContext, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { ExtensionManifest } from '@openpane/sdk';
 import type { ConversationActivityProps, ConversationModuleProps, UiExtensionPresentation } from '@openpane/sdk/react';
 import { DesktopExtensionLifecycle } from './desktop-extension-lifecycle.js';
@@ -93,13 +93,14 @@ export function useDesktopCustomizations({ customizations, enabled, sink, disabl
   const owner = provided ?? local;
   useLifecycleLifetime(provided ? null : local);
   const snapshot = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
-  const namespaces = snapshot.filter(activation => activation.kind === 'failed' || enabled && !loading
-    && !disabledNamespaces.includes(activation.namespace)
-    && customizations.some(entry => entry.manifest.namespace === activation.namespace));
+  const admitted = useMemo(() => enabled ? customizations.filter(entry => !disabledNamespaces.includes(entry.manifest.namespace)) : [],
+    [customizations, enabled, disabledNamespaces]);
+  const namespaces = snapshot.filter(activation => activation.kind === 'failed' || !loading
+    && admitted.some(entry => entry.manifest.namespace === activation.namespace));
   useLayoutEffect(() => {
-    if (!loading) owner.reconcile(enabled ? customizations.filter(item => !disabledNamespaces.includes(item.manifest.namespace)) : []);
+    if (!loading) owner.reconcile(admitted);
     if (sink) owner.attach(sink);
-  }, [owner, customizations, enabled, sink, disabledNamespaces, loading]);
+  }, [owner, admitted, sink, loading]);
   const effectiveSlots = enabled ? slots : BUILTIN_SLOTS;
   return { namespaces, transcript: selectSlot(namespaces, 'transcript', effectiveSlots?.transcript), activity: selectSlot(namespaces, 'activity', effectiveSlots?.activity),
     contentLayout: selectSlot(namespaces, 'contentLayout', effectiveSlots?.contentLayout), generations: namespaces.flatMap(item => item.kind === 'ready' ? [item.generation] : []) };

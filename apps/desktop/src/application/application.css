@@ -273,6 +273,8 @@
 .extension-status-strip .application-alert, .extension-status-strip .creation-recovery { margin: 0; flex-basis: 100%; }
 .extension-workspace { flex: 1; min-height: 0; display: flex; overflow: hidden; container-type: inline-size; }
 .extension-workspace > * { flex: 1; min-width: 0; }
+.workspace-theme { display: flex; min-height: 0; min-width: 0; }
+.workspace-theme > * { flex: 1; min-height: 0; min-width: 0; }
 .extension-loading { padding: 24px; color: var(--aui-color-muted); }
 .desktop-shell[data-workspace-open="true"] { grid-template-columns: 56px 0 minmax(0, 1fr); }
 .desktop-shell[data-workspace-open="true"] .application-controls { display: none; }

@@ -13,7 +13,7 @@ import { developmentPlan, previewHost, previewPort } from './lib/customization-d
 const root = fileURLToPath(new URL('../', import.meta.url));
 const assetTypes = { '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.woff': 'font/woff', '.woff2': 'font/woff2' };
-const html = '<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>OpenPane local preview</title></head><body><div id="root"></div><script type="module" src="/src/shell/customization-preview-main.tsx"></script></body></html>';
+const html = '<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>OpenPane local preview</title></head><body><div id="root"></div></body></html>';
 
 function previewRoutes(host, origin, plan) {
   // A document's full import graph is compiled together, including modules it has not requested yet.
@@ -22,14 +22,14 @@ function previewRoutes(host, origin, plan) {
   async function snapshot() {
     const config = desktopConfig('browser', plan, { development: true });
     const result = await build({ ...config, configFile: false, root: join(root, 'apps/desktop'), mode: 'browser', logLevel: 'error',
-      build: { ...config.build, write: false, copyPublicDir: false, assetsInlineLimit: 0,
-        rollupOptions: { input: join(root, 'apps/desktop/src/shell/customization-preview-main.tsx'),
-          output: { entryFileNames: 'assets/preview-[hash].js' } } } });
+      build: { ...config.build, copyPublicDir: false, assetsInlineLimit: 0,
+        rollupOptions: { ...config.build.rollupOptions,
+          output: { ...config.build.rollupOptions.output, entryFileNames: 'assets/preview-[hash].js' } } } });
     const outputs = (Array.isArray(result) ? result : [result]).flatMap(item => item.output);
     const entry = outputs.find(item => item.type === 'chunk' && item.isEntry);
     for (const output of outputs) assets.set('/' + output.fileName, output.type === 'chunk' ? output.code : output.source);
     const css = [...(entry.viteMetadata?.importedCss ?? [])].map(file => `<link rel="stylesheet" href="/${file}">`).join('');
-    return html.replace('</head>', css + '</head>').replace('/src/shell/customization-preview-main.tsx', '/' + entry.fileName);
+    return html.replace('</head>', css + '</head>').replace('</body>', `<script type="module" src="/${entry.fileName}"></script></body>`);
   }
   return { name: 'openpane-local-preview', closeBundle() { assets.clear(); }, configureServer(server) {
     server.middlewares.use((req, res, next) => {
@@ -64,13 +64,13 @@ function previewRoutes(host, origin, plan) {
         });
         return;
       }
-      if (path === '/' || path.endsWith('.html') || req.headers.accept?.includes('text/html')) return refuse(404, 'Use /preview.html for the labeled local preview.');
       if (assets.has(path)) {
         if (req.method !== 'GET' && req.method !== 'HEAD') return refuse(405, 'Preview assets require GET.');
         res.setHeader('Content-Type', assetTypes[extname(path)] ?? 'application/octet-stream');
         res.end(req.method === 'HEAD' ? '' : assets.get(path));
         return;
       }
+      if (path === '/' || path.endsWith('.html') || req.headers.accept?.includes('text/html')) return refuse(404, 'Use /preview.html for the labeled local preview.');
       next();
     });
   } };
@@ -87,8 +87,7 @@ export async function startCustomizationPreview({ source, hostUrl, port }) {
   const config = desktopConfig('browser', plan, { development: true });
   const server = await createServer({ ...config, configFile: false, root: join(root, 'apps/desktop'), mode: 'browser', appType: 'custom',
     plugins: [previewRoutes(host, origin, plan), ...config.plugins],
-    // Only installed browser-host dependencies are prebundled. Working-source dependencies must stay visible to the source policy.
-    optimizeDeps: { noDiscovery: true, include: ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-markdown', 'fast-sha256', '@ag-ui/core', '@cfworker/json-schema', '@tauri-apps/api/core'] },
+    optimizeDeps: { noDiscovery: true },
     server: { ...config.server, port: chosenPort, strictPort: true, preTransformRequests: false, hmr: false, ws: false, open: false,
       fs: { allow: [root, ...external.roots] } } });
   try { await server.listen(); }

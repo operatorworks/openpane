@@ -7,7 +7,7 @@ import { root, wait } from './browser-support.mjs';
 async function hookFixture(t) {
   const bundle = await build({ stdin: { resolveDir: root, loader: 'jsx', contents: `
     import React from 'react'; import { createRoot } from 'react-dom/client'; import { flushSync } from 'react-dom';
-    import { useDesktopCustomizations, CustomizationTranscript } from './apps/desktop/src/application/DesktopCustomizations.tsx';
+    import { DesktopCustomizationProvider, useDesktopCustomizations, CustomizationTranscript } from './apps/desktop/src/application/DesktopCustomizations.tsx';
     import { createGenerationSource, createFrontendSends } from './apps/desktop/src/application/frontend-sends.ts';
     const scope = { hostId: 'host', conversationId: 'conversation' }, source = createGenerationSource();
     window.events = { setups: 0, cleanups: 0, begins: 0, clears: 0, activations: 0, disposals: 0, globalMounts: 0, borrows: 0 };
@@ -48,7 +48,7 @@ async function hookFixture(t) {
     }
     const root = createRoot(document.getElementById('root'));
     window.closeFixture = async () => { root.unmount(); await sends.dispose(); };
-    root.render(<React.StrictMode><App /></React.StrictMode>);
+    root.render(<React.StrictMode><DesktopCustomizationProvider><App /></DesktopCustomizationProvider></React.StrictMode>);
   ` }, bundle: true, write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"development"' } });
   const browser = await chromium.launch(); t.after(() => browser.close());
   const page = await browser.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
@@ -71,7 +71,9 @@ test('actual StrictMode replay retains sink token and ready capture eligibility 
   assert.equal(await page.evaluate(() => window.admission()), 'ready');
   await page.evaluate(() => window.finishBeta());
   await wait(() => page.evaluate(() => window.states.every(kind => kind === 'ready')), 'second generation ready');
-  await page.evaluate(() => window.closeFixture()); assert.deepEqual(errors, []);
+  await page.evaluate(() => window.closeFixture());
+  await wait(() => page.evaluate(() => window.events.disposals === 1 && window.events.clears === 1), 'orderly production-provider disposal');
+  assert.deepEqual(errors, []);
 });
 
 for (const namespaceOnly of [false, true]) test(`restoring from workspace suppresses withdrawn global transcript before layout effects (${namespaceOnly ? 'namespace' : 'global'})`, async t => {

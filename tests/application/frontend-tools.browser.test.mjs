@@ -92,7 +92,10 @@ test('committed tool and module artifact loads in the actual application alongsi
   await page.getByRole('heading', { name: 'Approval required', exact: true }).waitFor();
   await unchanged(page, previous); assert.equal((await host.entries()).length, 1);
   await revealRecovery(page); await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
-  assert.equal(await page.getByRole('button', { name: 'Committed tool module 1', exact: true }).count(), 0);
+  await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Extensions', exact: true }).click();
+  await page.getByRole('heading', { name: 'Extensions', level: 1, exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: /^Committed tool module /, exact: true }).count(), 0);
+  await chats(page);
   await unchanged(page, previous); assert.deepEqual(errors, []);
 });
 
@@ -275,8 +278,9 @@ test('in-process only: actual hook retains A before a run exists and drains its 
   assert.equal(await page.getByRole('textbox', { name: 'Persistent draft' }).inputValue(),'Keep tool draft'); assert.deepEqual(errors,[]);
 });
 
-for (const failure of ['presentation', 'malformed', 'duplicate']) for (const [replace, rejectCleanup] of [[false, false], [true, false], [true, true]]) {
-  test(`in-process only: rejected ${failure} is never eligible and cleanup ${replace ? rejectCleanup ? 'rejection blocks replacement until restart' : 'completion admits the queued replacement' : 'keeps sibling eligible'}`, { timeout: 45_000 }, async t => {
+for (const failure of ['presentation', 'malformed', 'duplicate']) for (const outcome of ['sibling-only', 'replacement-ready', 'cleanup-failed']) {
+  const label = { 'sibling-only': 'keeps sibling eligible', 'replacement-ready': 'completion admits the queued replacement', 'cleanup-failed': 'rejection blocks replacement until restart' }[outcome];
+  test(`in-process only: rejected ${failure} is never eligible and cleanup ${label}`, { timeout: 45_000 }, async t => {
     const bundle = await build({ stdin: { resolveDir: root, loader: 'jsx', contents: `
       import React from 'react'; import {createRoot} from 'react-dom/client'; import {flushSync} from 'react-dom';
       import {useDesktopCustomizations} from './apps/desktop/src/application/DesktopCustomizations.tsx';
@@ -311,13 +315,13 @@ for (const failure of ['presentation', 'malformed', 'duplicate']) for (const [re
     assert.deepEqual(await page.evaluate(() => window.custom.generations.map(g => g.namespace)), ['sibling']);
     assert.equal(await page.evaluate(() => window.eligibility.some(snapshot => snapshot.some(g => g.namespace === 'fixture'))), false);
     const siblingGeneration = await page.evaluate(() => window.custom.generations.find(g => g.namespace === 'sibling').activationId);
-    if (replace) {
+    if (outcome !== 'sibling-only') {
       await page.evaluate(() => window.replace());
       assert.deepEqual(await page.evaluate(() => window.custom.generations.map(g => g.namespace)), ['sibling']);
       assert.equal(await page.evaluate(() => window.replacementActivations || 0), 0, 'replacement waits for pending cleanup');
     }
-    await page.evaluate(reject => reject ? window.rejectCleanup() : window.resolveCleanup(), rejectCleanup);
-    if (replace && !rejectCleanup) {
+    await page.evaluate(reject => reject ? window.rejectCleanup() : window.resolveCleanup(), outcome === 'cleanup-failed');
+    if (outcome === 'replacement-ready') {
       await wait(() => page.evaluate(() => window.custom.generations.length === 2), 'replacement after successful cleanup');
       assert.deepEqual(await page.evaluate(() => window.custom.generations.map(g => g.namespace)), ['fixture', 'sibling']);
       assert.equal(await page.evaluate(() => window.custom.namespaces.find(owner => owner.namespace === 'fixture').kind), 'ready');
@@ -327,7 +331,7 @@ for (const failure of ['presentation', 'malformed', 'duplicate']) for (const [re
       await wait(() => page.evaluate(() => window.custom.namespaces.some(owner => owner.namespace === 'fixture' && owner.kind === 'failed')), 'failed owner remains visible');
       assert.deepEqual(await page.evaluate(() => window.custom.generations.map(g => g.namespace)), ['sibling']);
       assert.equal(await page.evaluate(() => window.eligibility.some(snapshot => snapshot.some(g => g.namespace === 'fixture'))), false);
-      if (rejectCleanup) {
+      if (outcome === 'cleanup-failed') {
         await wait(() => page.evaluate(() => window.custom.namespaces.some(owner => owner.kind === 'failed' && /Restart the app/.test(owner.message))), 'sticky cleanup failure');
         await page.evaluate(() => window.replace());
         assert.equal(await page.evaluate(() => window.replacementActivations || 0), 0);

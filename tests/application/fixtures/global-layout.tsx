@@ -1,15 +1,17 @@
-import { createElement } from 'react';
+import { createElement, useState } from 'react';
 import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import type { ConversationContentLayoutProps, ConversationModuleProps, UiExtensionEntry } from '@openpane/sdk/react';
 import { Surface, Text } from '@openpane/ui-primitives/desktop';
 import { reviewPrompt } from '../shared/prompts.js';
 
 function ReviewLayout({ transcript, modules }: ConversationContentLayoutProps) {
+  const [broken, setBroken] = useState(false);
+  if (broken) throw new Error('Committed layout failed');
   return createElement('div', { className: 'review-layout' },
     createElement('style', null, `.review-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; }
       .review-layout > * { min-width: 0; }
       @container (max-width: 640px) { .review-layout { grid-template-columns: minmax(0, 1fr); } }`),
-    createElement('div', { className: 'review-transcript' }, transcript), createElement('aside', null, modules));
+    createElement('div', { className: 'review-transcript' }, createElement('button', { onClick: () => setBroken(true) }, 'Fail committed layout'), transcript), createElement('aside', null, modules));
 }
 
 function ReviewPlan() {

@@ -1,4 +1,4 @@
-import { readFile, realpath } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkCustomizationSource, isWorkerRequest, sourcePolicies } from './customization-source-policy.mjs';
@@ -68,6 +68,11 @@ export function customizationPlugin(plan) {
     config: () => ({ tsconfig, resolve: { dedupe: Object.keys(SHARED) }, css: { postcss: { plugins: cssRoots.map(roots => customizationCssPolicy(roots)) } },
       oxc: { jsx: { runtime: 'automatic', importSource: 'react' } } }),
     async resolveId(specifier, importer, options) {
+      if (plan.kind === 'development' && importer?.split('?')[0] === selection && plan.entries.some(entry => entry.source === specifier && within(plan.workingRoot, entry.source))) {
+        const path = await realpath(specifier);
+        if (!within(plan.workingRoot, path) || !(await stat(path)).isFile()) throw new Error('Preview desktop entry must remain a contained regular file inside the selected working package.');
+        return path;
+      }
       if (!importer || !contained(importer.split('?')[0])) return;
       if (specifier.startsWith('\0')) return;
       if (sharedImport(specifier)) {

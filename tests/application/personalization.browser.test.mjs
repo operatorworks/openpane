@@ -27,6 +27,14 @@ async function fixture(t) {
       await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onabort = () => reject(tx.error); });
       database.close();
     };
+    globalThis.holdDigests = (limit = 1) => {
+      const original = crypto.subtle.digest.bind(crypto.subtle), releases = [];
+      crypto.subtle.digest = async (...args) => {
+        if (releases.length < limit) await new Promise(resolve => releases.push(resolve));
+        return original(...args);
+      };
+      return { get entered() { return releases.length; }, release(index = 0) { releases[index](); }, restore() { crypto.subtle.digest = original; } };
+    };
     globalThis.until = async predicate => {
       const deadline = Date.now() + 6000;
       while (!predicate()) { if (Date.now() > deadline) throw new Error('Timed out'); await new Promise(resolve => setTimeout(resolve, 10)); }
@@ -533,4 +541,124 @@ test('explicit saved Enable resumes failed view recovery while retaining an unre
   assert.equal(result.resumed.saved.preferences.document.appearance, 'dark');
   assert.deepEqual(result.resumed.document.ui.disabledNamespaces, ['other']);
   assert.deepEqual(result.resumed.document.ui.slots.transcript, { kind: 'extension', namespace: 'example' });
+});
+
+test('view-only Enable preserves failed appearance recovery even when saved colors already match', async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const session = new PersonalizationSession(); session.start(); await until(() => session.getSnapshot().readiness === 'ready');
+    await session.patchPreferences({ kind: 'ui-enabled', enabled: false });
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function() { throw new DOMException('Quota failure', 'QuotaExceededError'); };
+    await session.resetAppearance(); IDBObjectStore.prototype.put = original;
+    await session.patchPreferences({ kind: 'ui-enabled', enabled: true });
+    const afterEnable = session.getSnapshot();
+    const peer = new PersonalizationStorage(); await peer.patchPreferences({ kind: 'appearance', appearance: 'dark' });
+    await until(() => session.getSnapshot().saved.preferences.document.appearance === 'dark');
+    const afterPeer = session.getSnapshot(); session.close(); peer.close(); return { afterEnable, afterPeer };
+  });
+  assert.equal(result.afterEnable.document.ui.enabled, true);
+  assert.equal(result.afterEnable.recovery.appearance, 'session');
+  assert.equal(result.afterPeer.document.appearance, 'system');
+  assert.equal(result.afterPeer.saved.preferences.document.appearance, 'dark');
+});
+
+for (const next of ['palette import', 'appearance patch', 'view restore']) test(`pending Enable survives independent ${next} and respects newer view intent`, async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async next => {
+    const session = new PersonalizationSession(); session.start(); await until(() => session.getSnapshot().readiness === 'ready');
+    await session.importPalette(JSON.stringify(starterPalette()));
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function() { throw new DOMException('Quota failure', 'QuotaExceededError'); };
+    await session.restoreDefaultView(); IDBObjectStore.prototype.put = original;
+    const gate = holdDigests(); const enabling = session.patchPreferences({ kind: 'ui-enabled', enabled: true });
+    await until(() => gate.entered === 1);
+    if (next === 'palette import') await session.importPalette(JSON.stringify({ ...starterPalette(), label: 'Another resource' }));
+    else if (next === 'appearance patch') await session.patchPreferences({ kind: 'appearance', appearance: 'dark' });
+    else await session.restoreDefaultView();
+    gate.release(); const enabled = await enabling;
+    const snapshot = session.getSnapshot(); gate.restore(); session.close(); return { enabled, snapshot };
+  }, next);
+  assert.equal(result.enabled.kind, 'committed');
+  assert.equal(result.snapshot.document.ui.enabled, next !== 'view restore');
+  assert.equal(result.snapshot.saved.preferences.document.ui.enabled, next !== 'view restore');
+  assert.notEqual(result.snapshot.recovery.view, 'session');
+  if (next === 'appearance patch') assert.equal(result.snapshot.document.appearance, 'dark');
+});
+
+for (const scope of ['appearance', 'view']) test(`older ${scope} recovery confirmation preserves the latest refused-edit diagnostic`, async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async scope => {
+    const session = new PersonalizationSession(); session.start(); await until(() => session.getSnapshot().readiness === 'ready');
+    await session.importPalette(JSON.stringify(starterPalette())); const base = session.getSnapshot().saved.preferences;
+    const gate = holdDigests(); const recovering = scope === 'appearance' ? session.resetAppearance() : session.restoreDefaultView();
+    await until(() => gate.entered === 1);
+    const rejected = await session.replacePreferences({ expectedEpoch: base.epoch, expectedRevision: base.revision, document: defaultDesktopPreferences });
+    const diagnostic = session.getSnapshot().diagnostic;
+    gate.release(); await recovering;
+    const snapshot = session.getSnapshot(); gate.restore(); session.close(); return { rejected, diagnostic, snapshot };
+  }, scope);
+  assert.equal(result.rejected.kind, 'refused');
+  assert.match(result.diagnostic, /preferences changed/);
+  assert.equal(result.snapshot.diagnostic, result.diagnostic);
+  assert.equal(result.snapshot.recovery[scope], 'saved');
+});
+
+for (const scope of ['appearance', 'view']) test(`${scope} recovery waits for the newer authoritative read without reporting a failed write`, async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async scope => {
+    const session = new PersonalizationSession(); session.start(); await until(() => session.getSnapshot().readiness === 'ready');
+    await session.importPalette(JSON.stringify(starterPalette()));
+    const gate = holdDigests(2); const recovering = scope === 'appearance' ? session.resetAppearance() : session.restoreDefaultView();
+    await until(() => gate.entered === 1); dispatchEvent(new Event('focus')); await until(() => gate.entered === 2);
+    gate.release(0); const written = await recovering; const pending = session.getSnapshot();
+    gate.release(1); await until(() => session.getSnapshot().recovery[scope] === 'saved');
+    const confirmed = session.getSnapshot(); gate.restore();
+    await session.patchPreferences({ kind: 'appearance', appearance: 'dark' }); const changed = session.getSnapshot();
+    session.close(); return { written, pending, confirmed, changed };
+  }, scope);
+  assert.equal(result.written.kind, 'committed');
+  assert.doesNotMatch(result.pending.diagnostic ?? '', /Could not save/);
+  assert.equal(result.confirmed.recovery[scope], 'saved');
+  assert.equal(result.changed.document.appearance, 'dark');
+});
+
+test('committed UI disable invalidates the peer before the writer verifies unrelated palette digests', async t => {
+  const page = await fixture(t), peer = await page.context().newPage(); await peer.goto('http://127.0.0.1/peer');
+  await peer.addScriptTag({ content: (await bundle).outputFiles[0].text });
+  await page.evaluate(async () => { globalThis.session = new PersonalizationSession(); session.start(); await until(() => session.getSnapshot().readiness === 'ready'); await session.importPalette(JSON.stringify(starterPalette())); });
+  await peer.evaluate(async () => { globalThis.session = new PersonalizationSession(); session.start(); await new Promise(resolve => { if (session.getSnapshot().readiness === 'ready') resolve(); else { const done = session.subscribe(() => { if (session.getSnapshot().readiness === 'ready') { done(); resolve(); } }); } }); });
+  await page.evaluate(async () => { globalThis.gate = holdDigests(); globalThis.disabling = session.patchPreferences({ kind: 'ui-enabled', enabled: false }); await until(() => gate.entered === 1); });
+  await peer.waitForFunction(() => !globalThis.session.getSnapshot().document.ui.enabled, undefined, { timeout: 5000 });
+  assert.equal(await peer.evaluate(() => session.getSnapshot().document.ui.enabled), false);
+  await page.evaluate(async () => { gate.release(); await disabling; gate.restore(); session.close(); });
+  await peer.evaluate(() => session.close());
+});
+
+for (const next of ['stale replacement', 'aborted replacement', 'unrelated removal', 'candidate removal', 'committed replacement', 'new builtin choice']) test(`pending palette selection respects committed intent after ${next}`, async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async next => {
+    const owner = new PersonalizationStorage(); const base = (await owner.readSnapshot()).preferences;
+    const first = await owner.importPalette(JSON.stringify(starterPalette())); const digest = first.snapshot.palettes[0].digest;
+    const second = await owner.importPalette(JSON.stringify({ ...starterPalette(), label: 'Other palette' })); const other = second.snapshot.palettes.find(row => row.digest !== digest).key;
+    await owner.patchPreferences({ kind: 'appearance', appearance: 'dark' }); const current = (await owner.readSnapshot()).preferences;
+    const gate = holdDigests(); const selecting = owner.selectPalette(digest); await until(() => gate.entered === 1);
+    let intervening;
+    if (next === 'stale replacement') intervening = await owner.replacePreferences({ expectedEpoch: base.epoch, expectedRevision: base.revision, document: defaultDesktopPreferences });
+    else if (next === 'aborted replacement') {
+      const put = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function() { throw new DOMException('Quota failure', 'QuotaExceededError'); };
+      intervening = await owner.replacePreferences({ expectedEpoch: current.epoch, expectedRevision: current.revision, document: defaultDesktopPreferences });
+      IDBObjectStore.prototype.put = put;
+    } else if (next === 'committed replacement') intervening = await owner.replacePreferences({ expectedEpoch: current.epoch, expectedRevision: current.revision, document: defaultDesktopPreferences });
+    else if (next === 'new builtin choice') intervening = await owner.selectPalette(null);
+    else intervening = await owner.removePalette(next === 'unrelated removal' ? other : digest);
+    gate.release(); const selected = await selecting; gate.restore(); const saved = await owner.readSnapshot(); owner.close();
+    return { intervening, selected, saved };
+  }, next);
+  const retained = next === 'stale replacement' || next === 'aborted replacement' || next === 'unrelated removal';
+  assert.equal(result.selected.kind, retained ? 'committed' : 'refused');
+  assert.equal(result.saved.preferences.document.palette.kind, retained ? 'imported' : 'builtin');
+  if (next === 'stale replacement') assert.equal(result.intervening.kind, 'refused');
+  if (next === 'aborted replacement') assert.equal(result.intervening.kind, 'unavailable');
 });

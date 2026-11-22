@@ -41,7 +41,7 @@ function ReviewWorkspace(props: WorkspaceViewProps) {
       {props.conversations.hasMore && <button disabled={busy || props.conversations.loading} onClick={() => props.conversations.more()}>More reviews</button>}
       <button disabled={busy} onClick={() => void perform(() => props.refresh())}>Refresh reviews</button>
     </nav>
-    {props.conversation ?? <p>Select a review, or start one with an available agent. This workspace needs a provider configured under its own namespace.</p>}
+    <div className="review-conversation">{props.conversation ?? <p>Select a review, or start one with an available agent. This workspace needs a provider configured under its own namespace.</p>}</div>
   </section>;
 }
 function ReviewPlan(props: ConversationModuleProps) {

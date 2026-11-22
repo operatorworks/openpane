@@ -144,3 +144,65 @@ test('Copy JSON explains the selectable fallback when clipboard capability is ab
   assert.match((await page.getByRole('status').allTextContents()).join('\n'), /Select and copy the exported JSON\./);
   assert.equal(await exported.inputValue(), text);
 });
+
+test('a reopened JSON editor cannot inherit a prior editor save base while readback is pending', async t => {
+  const host = await fixture(t), page = await host.page(); await settings(page);
+  await page.getByRole('textbox', { name: 'Palette JSON', exact: true }).fill(JSON.stringify(starterPalette()));
+  await page.getByRole('button', { name: 'Preview palette', exact: true }).click(); await page.getByRole('button', { name: 'Import palette', exact: true }).click();
+  await page.getByRole('button', { name: /^Select My palette / }).waitFor();
+  await page.getByRole('button', { name: 'Edit preferences JSON', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Preferences JSON', exact: true });
+  const original = JSON.parse(await editor.inputValue());
+  await editor.fill(JSON.stringify({ ...original, appearance: 'dark' }));
+  await page.evaluate(() => {
+    const original = crypto.subtle.digest.bind(crypto.subtle); let first = true;
+    globalThis.digestHeld = false; globalThis.priorSaveReadbackComplete = false;
+    crypto.subtle.digest = async (...args) => {
+      if (!first) return original(...args);
+      first = false; globalThis.digestHeld = true; await new Promise(resolve => { globalThis.releaseDigest = resolve; });
+      const result = await original(...args); globalThis.priorSaveReadbackComplete = true; return result;
+    };
+  });
+  await page.getByRole('button', { name: 'Save JSON', exact: true }).click(); await page.waitForFunction(() => globalThis.digestHeld);
+  await page.getByRole('button', { name: 'Close editor', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit preferences JSON', exact: true }).click();
+  assert.equal(JSON.parse(await editor.inputValue()).appearance, original.appearance);
+  await page.evaluate(() => globalThis.releaseDigest()); await page.waitForFunction(() => globalThis.priorSaveReadbackComplete);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await wait(async () => await rootAppearance(page) === 'dark', 'prior editor save confirmed');
+  const reopened = JSON.parse(await editor.inputValue());
+  await editor.fill(JSON.stringify({ ...reopened, ui: { ...reopened.ui, slots: { ...reopened.ui.slots, activity: { kind: 'builtin' } } } }));
+  await page.getByRole('button', { name: 'Save JSON', exact: true }).click();
+  await wait(async () => /preferences changed/.test((await page.getByRole('status').allTextContents()).join(' ')), 'reopened stale editor refusal');
+  assert.equal(await rootAppearance(page), 'dark');
+  assert.equal(JSON.parse(await editor.inputValue()).appearance, original.appearance);
+});
+
+test('an older JSON save acknowledgment cannot overwrite a newer refused draft status', async t => {
+  const host = await fixture(t), page = await host.page(); await settings(page);
+  await page.getByRole('textbox', { name: 'Palette JSON', exact: true }).fill(JSON.stringify(starterPalette()));
+  await page.getByRole('button', { name: 'Preview palette', exact: true }).click(); await page.getByRole('button', { name: 'Import palette', exact: true }).click();
+  await page.getByRole('button', { name: /^Select My palette / }).waitFor();
+  await page.getByRole('button', { name: 'Edit preferences JSON', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Preferences JSON', exact: true }), original = JSON.parse(await editor.inputValue());
+  await editor.fill(JSON.stringify({ ...original, appearance: 'dark' }));
+  await page.evaluate(() => {
+    const digest = crypto.subtle.digest.bind(crypto.subtle); let first = true;
+    globalThis.firstSaveReadbackComplete = false;
+    crypto.subtle.digest = async (...args) => {
+      if (!first) return digest(...args);
+      first = false; globalThis.firstSaveHeld = true;
+      await new Promise(resolve => { globalThis.releaseFirstSave = resolve; });
+      const result = await digest(...args); globalThis.firstSaveReadbackComplete = true; return result;
+    };
+  });
+  await page.getByRole('button', { name: 'Save JSON', exact: true }).click(); await page.waitForFunction(() => globalThis.firstSaveHeld);
+  const newestDraft = JSON.stringify({ ...original, appearance: 'light' }); await editor.fill(newestDraft);
+  await page.getByRole('button', { name: 'Save JSON', exact: true }).click();
+  await wait(async () => /preferences changed/.test((await page.getByRole('status').allTextContents()).join(' ')), 'newest draft refusal shown');
+  await page.evaluate(() => globalThis.releaseFirstSave()); await page.waitForFunction(() => globalThis.firstSaveReadbackComplete);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.match((await page.getByRole('status').allTextContents()).join(' '), /preferences changed/);
+  assert.equal(await editor.inputValue(), newestDraft);
+  assert.equal(await rootAppearance(page), 'dark');
+});

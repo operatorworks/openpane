@@ -4,9 +4,10 @@ import { defaultDesktopPreferences, safeDesktopPreferences, parseDesktopPreferen
 
 export const MAX_PALETTE_BYTES = 64 * 1024;
 export const MAX_PALETTES = 64;
+export const PALETTE_SIZE_DIAGNOSTIC = 'Palette JSON must be at most 64 KiB.';
 export type SavedPreferences =
   | { readonly kind: 'valid'; readonly epoch: number; readonly revision: number; readonly document: DesktopPreferencesV1 }
-  | { readonly kind: 'invalid'; readonly epoch: number; readonly revision: number | null; readonly repairable: boolean; readonly diagnostic: string }
+  | { readonly kind: 'invalid'; readonly epoch: number; readonly revision: number | null; readonly diagnostic: string }
   | { readonly kind: 'unavailable'; readonly diagnostic: string };
 export type PaletteResource = { readonly key: IDBValidKey } & (
   | { readonly kind: 'ready'; readonly digest: PaletteDigest; readonly document: PaletteDocumentV1; readonly text: string }
@@ -18,7 +19,7 @@ export type PersonalizationOutcome =
 type StoredRow = { readonly kind: 'absent' } | { readonly kind: 'present'; readonly value: unknown };
 interface RawSnapshot { readonly preferences: StoredRow; readonly epoch: StoredRow; readonly palettes: readonly { readonly key: IDBValidKey; readonly value: unknown }[] }
 interface Envelope { readonly storageVersion: 1; readonly revision: number; readonly document: DesktopPreferencesV1 }
-type WriteDecision = { readonly kind: 'write'; readonly preferences?: Envelope; readonly epoch?: number; readonly put?: { readonly digest: PaletteDigest; readonly text: string }; readonly remove?: IDBValidKey }
+type WriteDecision = { readonly kind: 'write'; readonly preferences?: Envelope; readonly epoch?: number; readonly supersedesPalette?: true; readonly put?: { readonly digest: PaletteDigest; readonly text: string }; readonly remove?: IDBValidKey }
   | { readonly kind: 'refused'; readonly diagnostic: string };
 const SAVE_FAILURE = 'Could not save this change.';
 const STORAGE_UNAVAILABLE = 'Saved personalization is unavailable. Retry to read it again.';
@@ -44,7 +45,7 @@ function classify(raw: RawSnapshot): SavedPreferences {
     try { return { kind: 'valid', epoch, revision: base, document: parseDesktopPreferences(value.document) }; }
     catch { /* An explicit reset or revision-checked replacement may repair this document. */ }
   }
-  return { kind: 'invalid', epoch, revision: base, repairable: true, diagnostic: 'Saved preferences are invalid and have been preserved. Reset saved preferences to recover.' };
+  return { kind: 'invalid', epoch, revision: base, diagnostic: 'Saved preferences are invalid and have been preserved. Reset saved preferences to recover.' };
 }
 function unavailable(diagnostic = STORAGE_UNAVAILABLE): PersonalizationSnapshot { return { preferences: { kind: 'unavailable', diagnostic }, palettes: [] }; }
 function envelope(current: Extract<SavedPreferences, { kind: 'valid' }>, document: DesktopPreferencesV1): Envelope {
@@ -162,8 +163,9 @@ export class PersonalizationStorage {
     try {
       const { raw, decision } = await this.transaction('readwrite', write);
       if (decision?.kind === 'refused') { await this.readSnapshot(); return decision; }
-      const snapshot = await this.readSnapshot();
+      if (decision?.kind === 'write' && decision.supersedesPalette) this.paletteIntent++;
       try { this.channel?.postMessage('invalidate'); } catch { /* Focus rereads remain available. */ }
+      const snapshot = await this.readSnapshot();
       return { kind: 'committed', epoch: decision?.kind === 'write' && decision.preferences ? decision.epoch ?? classifyEpoch(raw.epoch) : null, revision: decision?.kind === 'write' ? decision.preferences?.revision ?? null : null, snapshot };
     } catch { await this.readSnapshot(); return { kind: 'unavailable', diagnostic: SAVE_FAILURE }; }
   }
@@ -175,7 +177,6 @@ export class PersonalizationStorage {
     });
   }
   replacePreferences({ expectedEpoch, expectedRevision, document }: { readonly expectedEpoch: number; readonly expectedRevision: number; readonly document: DesktopPreferencesV1 }): Promise<PersonalizationOutcome> {
-    this.paletteIntent++;
     let parsed: DesktopPreferencesV1;
     try { parsed = parseDesktopPreferences(document); } catch (error) { return Promise.resolve({ kind: 'refused', diagnostic: error instanceof Error ? error.message : 'Invalid preferences.' }); }
     return this.mutate(raw => {
@@ -183,11 +184,11 @@ export class PersonalizationStorage {
       if (current.kind === 'unavailable') return refusal(current.diagnostic);
       if (current.epoch !== expectedEpoch || current.revision === null || current.revision !== expectedRevision) return refusal('Saved preferences changed. Review the latest saved JSON before replacing it. Your draft is retained.');
       if (current.revision >= Number.MAX_SAFE_INTEGER) return refusal(SAVE_FAILURE);
-      return { kind: 'write', preferences: { storageVersion: 1, revision: current.revision + 1, document: parsed } };
+      return { kind: 'write', supersedesPalette: true, preferences: { storageVersion: 1, revision: current.revision + 1, document: parsed } };
     });
   }
   async importPalette(text: string): Promise<PersonalizationOutcome> {
-    if (new TextEncoder().encode(text).byteLength > MAX_PALETTE_BYTES) return { kind: 'refused', diagnostic: 'Palette JSON must be at most 64 KiB.' };
+    if (new TextEncoder().encode(text).byteLength > MAX_PALETTE_BYTES) return { kind: 'refused', diagnostic: PALETTE_SIZE_DIAGNOSTIC };
     let canonical: string, digest: PaletteDigest;
     try { canonical = canonicalPaletteText(parsePaletteDocument(JSON.parse(text))); }
     catch (error) { return { kind: 'refused', diagnostic: error instanceof Error ? error.message : 'Invalid palette JSON.' }; }
@@ -217,7 +218,6 @@ export class PersonalizationStorage {
     });
   }
   removePalette(key: IDBValidKey): Promise<PersonalizationOutcome> {
-    this.paletteIntent++;
     return this.mutate(raw => {
       const current = classify(raw);
       if (current.kind === 'valid' && current.document.palette.kind === 'imported' && current.document.palette.digest === key) {

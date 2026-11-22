@@ -495,7 +495,7 @@ The generation label is captured for diagnostics and owner correlation; the SDK 
 Disposal runs once after all pins and calls drain.
 Its failure rejects every retirement caller.
 Always observe the retirement promise.
-A replacement generation can activate before the previous generation disposes, so extensions must tolerate overlapping activations.
+Independent SDK generation owners can activate a replacement before the previous generation disposes and must tolerate that overlap. The desktop application serializes each namespace. Disabling and re-enabling waits for that namespace's earlier activation and retirement, including held tool pins.
 A disposer must not await its own generation's retirement, since retirement waits for that disposer.
 - **Pins.** Existing pins and calls remain usable until released or settled.
 Release every pin on every run outcome, including cancellation and failure.

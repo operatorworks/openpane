@@ -1,3 +1,4 @@
+import { saveUiEnable } from './retirement-support.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, rmSync, mkdtempSync } from 'node:fs';
@@ -60,16 +61,18 @@ async function setup(t) {
   await wait(() => page.getByRole('button', { name: 'New recorded conversation', exact: true }).isEnabled(), 'connected host');
   const inspect = action => { const db = new DatabaseSync(join(directory, 'host.sqlite')); try { return action(db); } finally { db.close(); } };
   const create = async (target = page) => {
-    const previous = (await records(target)).find(row => row.route)?.route.conversationId;
     await target.getByRole('button', { name: 'Chats', exact: true }).click();
+    const displayed = target.locator('.chat-view .scope-label');
+    const previous = await displayed.count() ? await displayed.textContent() : null;
     if (await target.getByRole('button', { name: 'New conversation', exact: true }).count()) await target.getByRole('button', { name: 'New conversation', exact: true }).click();
     else {
       await target.getByRole('button', { name: 'Harness, Recorded', exact: true }).click();
       await target.getByRole('button', { name: 'Provider', exact: true }).click();
       await target.getByRole('button', { name: 'Start new chat with Crew researcher', exact: true }).click();
     }
-    await wait(async () => (await records(target)).some(row => row.route && row.route.conversationId !== previous), 'new conversation route');
+    await wait(async () => await displayed.count() === 1 && await displayed.textContent() !== previous, 'new displayed conversation');
     await connected(target);
+    return displayed.textContent();
   };
   return { page, context, browser, host, inputs, operations, confirmed, inspect, create, translations: () => translations };
 }
@@ -115,7 +118,9 @@ test('committed production browser captures both actual send paths and retains o
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByLabel('Enable executable UI customizations', { exact: true }).uncheck();
   assert.deepEqual(await page.evaluate(() => window.captureFixture.disposed), []);
-  await page.getByLabel('Enable executable UI customizations', { exact: true }).check();
+  await saveUiEnable(page);
+  await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Extensions', exact: true }).click();
+  await page.locator('[data-extension="personal"]').getByText('Loading', { exact: true }).waitFor();
   // A is retired for new admission, but its retained original send keeps the namespace's barrier closed.
   assert.equal(await page.evaluate(() => window.captureFixture.activations), 1);
   await tools(page);
@@ -141,9 +146,12 @@ test('committed production browser captures both actual send paths and retains o
   await (await tools(page)).getByText('Capture activation 2', { exact: true }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.captureFixture.disposed), [1]);
   await chats(page);
-  await f.create(); await (await tools(page)).getByRole('button', { name: 'Send captured extension message', exact: true }).click(); await chats(page);
+  const nextConversation = await f.create();
+  assert.notEqual(nextConversation, original.command.scope.conversationId);
+  await (await tools(page)).getByRole('button', { name: 'Send captured extension message', exact: true }).click(); await chats(page);
   await wait(() => f.inputs.length === 2, 'actual extension HTTP input');
   const extension = (await records(page)).flatMap(row => row.frontendSends ?? []).find(entry => entry.command.body.text === 'Extension capture');
+  assert.equal(extension.command.scope.conversationId, nextConversation);
   assert.notEqual(extension.command.body.frontend.tools[0].activationId, original.command.body.frontend.tools[0].activationId);
   assert.deepEqual(f.inputs[1].tools.slice(1), extension.command.body.frontend.tools.map(tool => tool.definition));
   assert.deepEqual(f.inspect(db => JSON.parse(db.prepare('SELECT target FROM commands WHERE id=?').get(extension.command.clientCommandId).target).operation.request), f.inputs[1]);

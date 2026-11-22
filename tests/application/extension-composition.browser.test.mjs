@@ -132,6 +132,9 @@ test('selected canvas paints content while every host control and failed-namespa
   await page.emulateMedia({ colorScheme: 'dark' }); await settings(page); await page.getByLabel('Appearance mode', { exact: true }).selectOption('system'); await chats(page);
   await wait(async () => (await roleStyle(page.locator('.composer'))).canvas === palettes.dark.canvas, 'dark protected controls');
   await assertBuiltinScopes([...controls, notice], 'dark');
+  assert.equal(await page.locator('.conversation-panel').evaluate(node => getComputedStyle(node).colorScheme), 'dark', 'native controls inherit the selected dark appearance');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await wait(async () => await page.locator('.conversation-panel').getAttribute('data-reduced-motion') === 'true', 'protected conversation follows reduced motion');
   assert.equal((await paintedStyle(notice)).background, 'rgb(21, 23, 28)');
 });
 
@@ -140,7 +143,7 @@ test('unreadable workspace palette leaves navigation and uncertain creation reco
   const host = await extensionFixture(t, { extensions: [extension.value] }), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
   await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
-    function Workspace(props) { return <section aria-label="Palette workspace" style={{ background: 'var(--aui-color-canvas)', color: 'var(--aui-color-text)' }}>
+    function Workspace(props) { return <section aria-label="Palette workspace">
       <p>Authored workspace colors</p>{props.agents.map(agent => <button key={agent.id} onClick={() => props.create(agent.id)}>Start palette workspace</button>)}{props.conversation}</section>; }
     return { modules: [], workspace: { label: 'Palette workspace', component: Workspace }, dispose() {} };
   } } })`);
@@ -150,6 +153,8 @@ test('unreadable workspace palette leaves navigation and uncertain creation reco
   await page.getByRole('button', { name: 'Open Palette workspace', exact: true }).click();
   const workspace = page.getByRole('region', { name: 'Palette workspace', exact: true }); await workspace.waitFor();
   assert.deepEqual(await roleStyle(workspace), unreadable);
+  const bodyWidth = (await workspace.boundingBox()).width, viewportWidth = (await page.locator('.extension-workspace').boundingBox()).width;
+  assert.ok(Math.abs(bodyWidth - viewportWidth) < 1, 'an unstyled authored workspace fills the host viewport');
   assert.equal((await paintedStyle(workspace)).background, 'rgb(1, 1, 1)');
   service.loseRepliesTo('/open'); await workspace.getByRole('button', { name: 'Start palette workspace', exact: true }).click();
   const back = page.getByRole('button', { name: 'All extensions', exact: true }), recover = page.locator('.extension-status-strip').getByRole('button', { name: 'Recover creation', exact: true });
@@ -158,4 +163,34 @@ test('unreadable workspace palette leaves navigation and uncertain creation reco
   assert.notEqual((await paintedStyle(recover)).color, 'rgb(1, 1, 1)');
   assert.notEqual((await paintedStyle(recover)).background, 'rgb(1, 1, 1)');
   assert.deepEqual(await roleStyle(workspace), unreadable);
+});
+
+
+test('failed appearance recovery stays visible in the protected workspace surface', { timeout: 45_000 }, async t => {
+  const service = await ledgerService(t), extension = ledgerExtension({ service: service.origin, key: service.key, namespace: 'fixture', supports: { cancel: true, decide: true } });
+  const host = await extensionFixture(t, { extensions: [extension.value] }), page = await host.page();
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+    return { modules: [], workspace: { label: 'Recovery workspace', component: () => <section aria-label="Recovery workspace">Workspace remains open</section> }, dispose() {} };
+  } } })`);
+  await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Extensions', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Recovery workspace', exact: true }).click();
+  await page.getByRole('region', { name: 'Recovery workspace', exact: true }).waitFor();
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function(...args) {
+      if (this.transaction.db.name === 'openpane-personalization' && this.name === 'preferences') {
+        window.failedRecoveryWrites = (window.failedRecoveryWrites || 0) + 1;
+        throw new DOMException('Injected write failure', 'QuotaExceededError');
+      }
+      return Reflect.apply(put, this, args);
+    };
+  });
+  await page.locator('.recovery-menu summary').click();
+  await page.locator('.recovery-menu').getByRole('button', { name: 'Restore default appearance', exact: true }).click();
+  await wait(() => page.evaluate(() => window.failedRecoveryWrites === 1), 'failed recovery persistence');
+  const notice = page.getByText('Default appearance restored for this session.', { exact: true });
+  assert.equal(await notice.isVisible(), true, 'the current workspace must report that recovery was only session-local');
+  await assertBuiltinScopes([notice]);
+  assert.equal(await page.getByRole('region', { name: 'Recovery workspace', exact: true }).isVisible(), true);
 });

@@ -6,6 +6,7 @@ import type { FrontendToolGeneration } from '@openpane/sdk/tools';
 import type { DesktopCustomization, NamespaceActivation } from './DesktopCustomizations.js';
 import type { GenerationSink, GenerationSnapshot } from './frontend-sends.js';
 
+type Retirement = { readonly kind: 'pending'; readonly completion: Promise<void> } | { readonly kind: 'settled' };
 type Lifetime = {
   readonly entry: DesktopCustomization;
   readonly id: number;
@@ -13,7 +14,7 @@ type Lifetime = {
   state: NamespaceActivation;
   generation: FrontendToolGeneration | undefined;
   activation: Promise<void>;
-  retirement: Promise<void> | undefined;
+  retirement: Retirement | undefined;
 };
 
 /** Document-owned reconciliation; subscriptions never own activation or sink tokens. */
@@ -79,28 +80,30 @@ export class DesktopExtensionLifecycle {
       } catch (error) {
         // The SDK rethrows the primary failure unchanged when cleanup succeeds.
         // A distinct rejection after our nonthrowing observer means acquired cleanup failed.
-        if (primaryFailure && !Object.is(error, primaryFailure.error)) this.cleanupFailures.add(namespace);
-        fail(error);
+        if (primaryFailure && !Object.is(error, primaryFailure.error)) this.recordCleanupFailure(owner, error);
+        else fail(error);
       }
       this.publish();
     })();
   }
 
+  private recordCleanupFailure(owner: Lifetime, error: unknown): void {
+    const namespace = owner.entry.manifest.namespace;
+    this.cleanupFailures.add(namespace);
+    owner.state = { kind: 'failed', namespace, message: `Executable UI cleanup failed. ${customizationMessage(error)} Restart the app before enabling this namespace.` };
+  }
+
   private retire(owner: Lifetime): void {
-    if (owner.retirement) { void owner.retirement.then(() => this.releaseRemoved(owner)); return; }
+    if (owner.retirement?.kind === 'pending') return;
+    if (owner.retirement?.kind === 'settled') { this.releaseRemoved(owner); return; }
     // Close retention immediately for a published generation; only pending acquisition waits.
     const retiring = owner.generation ? owner.generation.retire() : owner.activation.then(() => owner.generation?.retire());
-    owner.retirement = retiring.catch(error => {
-      owner.state = { kind: 'failed', namespace: owner.entry.manifest.namespace, message: `Executable UI cleanup failed. ${customizationMessage(error)} Restart the app before enabling this namespace.` };
-      this.cleanupFailures.add(owner.entry.manifest.namespace);
-    }).then(() => {
-      const namespace = owner.entry.manifest.namespace;
-      if (owner.wanted && owner.state.kind !== 'failed') {
-        owner.state = { kind: 'failed', namespace, message: 'Executable UI failed. Disable and re-enable this namespace to retry.' };
-      }
+    const completion = retiring.catch(error => this.recordCleanupFailure(owner, error)).then(() => {
+      owner.retirement = { kind: 'settled' };
       this.releaseRemoved(owner);
       this.publish();
     });
+    owner.retirement = { kind: 'pending', completion };
   }
 
   private releaseRemoved(owner: Lifetime): void {
@@ -137,7 +140,7 @@ export class DesktopExtensionLifecycle {
     this.desired.clear();
     for (const owner of this.owners.values()) { owner.wanted = false; this.retire(owner); }
     this.publish();
-    await Promise.all([...this.owners.values()].map(owner => owner.retirement));
+    await Promise.all([...this.owners.values()].flatMap(owner => owner.retirement?.kind === 'pending' ? [owner.retirement.completion] : []));
     if (this.attachment) this.attachment.sink.clear(this.attachment.token);
     this.attachment = undefined;
     this.listeners.clear();

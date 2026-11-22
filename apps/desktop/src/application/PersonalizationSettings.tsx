@@ -1,8 +1,8 @@
-import { useState, type ChangeEvent, type ReactNode } from 'react';
+import { useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { canonicalPaletteText, parsePaletteDocument, starterPalette, type PaletteDocumentV1 } from '@openpane/theme';
 import { ThemeScope } from '@openpane/ui-primitives/desktop';
 import { parseDesktopPreferences, parseNamespace, type GlobalSlot, type SlotPreference } from './personalization.js';
-import type { PersonalizationOutcome } from './personalization-storage.js';
+import { MAX_PALETTE_BYTES, PALETTE_SIZE_DIAGNOSTIC, type PersonalizationOutcome } from './personalization-storage.js';
 import type { usePersonalization } from './use-personalization.js';
 import type { DesktopCustomization, NamespaceActivation } from './DesktopCustomizations.js';
 
@@ -27,32 +27,36 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
   const [paletteText, setPaletteText] = useState('');
   const [preview, setPreview] = useState<PaletteDocumentV1 | null>(null);
   const [exported, setExported] = useState('');
-  const [editor, setEditor] = useState<{ text: string; epoch: number; revision: number } | null>(null);
+  const [editor, setEditor] = useState<{ id: number; text: string; epoch: number; revision: number } | null>(null);
+  const nextEditorId = useRef(0);
+  const feedbackRequest = useRef(0);
+  function report(message: string) { feedbackRequest.current++; setMessage(message); }
   async function perform(operation: Promise<PersonalizationOutcome>) {
+    const request = ++feedbackRequest.current;
     const result = await operation;
-    setMessage(result.kind === 'committed' ? result.diagnostic ?? 'Saved locally.' : result.diagnostic ?? 'Could not save this change.');
+    if (request === feedbackRequest.current) setMessage(result.kind === 'committed' ? result.diagnostic ?? 'Saved locally.' : result.diagnostic ?? 'Could not save this change.');
     return result;
   }
   function previewPalette() {
     try {
-      if (new TextEncoder().encode(paletteText).length > 65536) throw new TypeError('Palette exceeds 64 KiB.');
+      if (new TextEncoder().encode(paletteText).length > MAX_PALETTE_BYTES) throw new TypeError(PALETTE_SIZE_DIAGNOSTIC);
       setPreview(parsePaletteDocument(JSON.parse(paletteText)));
-      setMessage('Preview ready. Import saves this palette without selecting it.');
-    } catch (error) { setPreview(null); setMessage(error instanceof Error ? error.message : 'Invalid palette JSON.'); }
+      report('Preview ready. Import saves this palette without selecting it.');
+    } catch (error) { setPreview(null); report(error instanceof Error ? error.message : 'Invalid palette JSON.'); }
   }
   async function readFile(event: ChangeEvent<HTMLInputElement>, kind: 'palette' | 'preferences') {
     const file = event.target.files?.[0];
     if (!file) return;
     event.target.value = '';
-    if (kind === 'palette' && file.size > 65536) { setMessage('File exceeds 64 KiB.'); return; }
+    if (kind === 'palette' && file.size > MAX_PALETTE_BYTES) { report(PALETTE_SIZE_DIAGNOSTIC); return; }
     try {
       const text = await file.text();
       if (kind === 'palette') { setPaletteText(text); setPreview(null); }
       else if (saved && (saved.preferences.kind === 'valid' || saved.preferences.kind === 'invalid') && saved.preferences.revision !== null) {
-        setEditor({ text, epoch: saved.preferences.epoch, revision: saved.preferences.revision });
-        setMessage('Review the imported preferences, then save JSON to replace your choices.');
-      } else setMessage('Reset or retry saved preferences before importing JSON.');
-    } catch { setMessage('Could not read this file.'); }
+        setEditor({ id: ++nextEditorId.current, text, epoch: saved.preferences.epoch, revision: saved.preferences.revision });
+        report('Review the imported preferences, then save JSON to replace your choices.');
+      } else report('Reset or retry saved preferences before importing JSON.');
+    } catch { report('Could not read this file.'); }
   }
   const nativeExport = location.protocol === 'tauri:' || '__TAURI_INTERNALS__' in window;
   function download() {
@@ -116,13 +120,13 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
       <div className="personalization-controls">
         <button onClick={() => {
           const preferences = saved?.preferences;
-          if (preferences?.kind === 'valid') setEditor({ text: JSON.stringify(preferences.document, null, 2), epoch: preferences.epoch, revision: preferences.revision });
-          else if (preferences?.kind === 'invalid' && preferences.revision !== null && preferences.repairable) setEditor({ text: JSON.stringify(document, null, 2), epoch: preferences.epoch, revision: preferences.revision });
-          else setMessage('Reset or retry saved preferences before editing JSON.');
+          if (preferences?.kind === 'valid') setEditor({ id: ++nextEditorId.current, text: JSON.stringify(preferences.document, null, 2), epoch: preferences.epoch, revision: preferences.revision });
+          else if (preferences?.kind === 'invalid' && preferences.revision !== null) setEditor({ id: ++nextEditorId.current, text: JSON.stringify(document, null, 2), epoch: preferences.epoch, revision: preferences.revision });
+          else report('Reset or retry saved preferences before editing JSON.');
         }}>Edit preferences JSON</button>
         <button onClick={() => {
           if (saved?.preferences.kind === 'valid') setExported(JSON.stringify(saved.preferences.document, null, 2));
-          else setMessage('Saved preferences are unavailable.');
+          else report('Saved preferences are unavailable.');
         }}>Export preferences</button>
         <label>Import preferences file<input type="file" accept="application/json,.json" onChange={event => void readFile(event, 'preferences')} /></label>
       </div>
@@ -131,19 +135,19 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
           try { void perform(session.replacePreferences({ expectedEpoch: editor.epoch, expectedRevision: editor.revision, document: parseDesktopPreferences(JSON.parse(editor.text)) })).then(result => {
             if (result.kind === 'committed' && result.epoch !== null && result.revision !== null) {
               const revision = result.revision, epoch = result.epoch;
-              setEditor(current => current?.epoch === editor.epoch && current.revision === editor.revision ? { ...current, epoch, revision } : current);
+              setEditor(current => current?.id === editor.id && current.epoch === editor.epoch && current.revision === editor.revision ? { ...current, epoch, revision } : current);
             }
           }); }
-          catch (error) { setMessage(error instanceof Error ? error.message : 'Invalid preferences JSON.'); }
+          catch (error) { report(error instanceof Error ? error.message : 'Invalid preferences JSON.'); }
         }}>Save JSON</button><button onClick={() => setEditor(null)}>Close editor</button></>}
-      <button onClick={() => void session.retry().then(() => setMessage('Saved preferences checked.'))}>Retry saved preferences</button>
-      <button disabled={saved?.preferences.kind === 'unavailable' || saved?.preferences.kind === 'invalid' && !saved.preferences.repairable} onClick={() => void perform(session.resetPersonalization())}>Reset saved preferences</button>
+      <button onClick={() => void session.retry().then(() => report('Saved preferences checked.'))}>Retry saved preferences</button>
+      <button disabled={saved?.preferences.kind === 'unavailable'} onClick={() => void perform(session.resetPersonalization())}>Reset saved preferences</button>
       <p>Reset keeps palettes, conversations and drafts, and saves executable UI disabled.</p>
     </section>
     {message && <p role="status">{message}</p>}
     {exported && <section aria-label="JSON export"><label>Exported JSON<textarea aria-label="Exported JSON" className="personalization-json" readOnly value={exported} /></label>{nativeExport ? <p>Select and copy the JSON to save it in a text file. File downloads are available in a browser.</p> : <button onClick={download}>Download JSON</button>}<button onClick={() => {
-      if (!navigator.clipboard) { setMessage('Select and copy the exported JSON.'); return; }
-      void navigator.clipboard.writeText(exported).then(() => setMessage('Copied JSON.'), () => setMessage('Select and copy the exported JSON.'));
+      if (!navigator.clipboard) { report('Select and copy the exported JSON.'); return; }
+      void navigator.clipboard.writeText(exported).then(() => report('Copied JSON.'), () => report('Select and copy the exported JSON.'));
     }}>Copy JSON</button></section>}
   </>;
 }

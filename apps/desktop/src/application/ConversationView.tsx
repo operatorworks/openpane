@@ -253,7 +253,7 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
 
   const inherited = useTheme();
   const builtin = createTheme({ colors: palettes[inherited.appearance] }, inherited);
-  return <ThemeProvider colors={palettes[inherited.appearance]}><section style={toCssVariables(builtin)} className="aui-theme conversation-panel" aria-label="Conversation" data-empty={empty ? 'true' : undefined} {...dropHandlers}>
+  return <ThemeProvider colors={palettes[inherited.appearance]}><section style={toCssVariables(builtin)} className="aui-theme conversation-panel" data-appearance={builtin.appearance} data-reduced-motion={builtin.reducedMotion} aria-label="Conversation" data-empty={empty ? 'true' : undefined} {...dropHandlers}>
     <header className="visually-hidden"><p className="eyebrow">{agent === 'recorded' ? 'RECORDED CONVERSATION' : 'CONVERSATION'}</p><h1>Your conversation</h1><p className="agent-label">{active.agent.label}</p><p className="scope-label">{active.scope.conversationId}</p></header>
     {active.agent.availability.kind === 'unavailable' && <p role="status">{active.agent.availability.reason} Saved history remains available.</p>}
     {observationStatus?.kind === 'unknown' && <p role="status">Observation status unavailable. Reconnect to check for updates.</p>}

@@ -197,7 +197,7 @@ export function ExtensionWorkspace({ contentPalette = palettes, row, metadata, w
     <div className="extension-workspace" data-extension-workspace={namespace}>
       <Suspense fallback={<p role="status" className="extension-loading">Loading {row.label}…</p>}>
         <CustomizationBoundary key={row.owner.lifetime} fail={row.owner.fail} fallback={<p role="alert">{row.label} could not load.</p>}>
-          <ThemeScope palette={contentPalette} className="content-theme"><View {...props} /></ThemeScope>
+          <ThemeScope palette={contentPalette} className="workspace-theme"><View {...props} /></ThemeScope>
         </CustomizationBoundary>
       </Suspense>
     </div>

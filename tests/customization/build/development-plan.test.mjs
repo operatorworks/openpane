@@ -30,7 +30,8 @@ test('development selects real working files without Git identity and packaging 
   assert.equal(previewConfig.server.port, 1420);
   assert.equal(previewConfig.build.write, false);
   assert.match(previewConfig.build.rollupOptions.input, /customization-preview-main\.tsx$/);
-  assert.equal(previewPort(plan.roots[0], 'http://127.0.0.1:7140'), previewPort(plan.roots[0], 'http://127.0.0.1:7140'));
+  assert.notEqual(previewPort('/example/first', 'http://127.0.0.1:7140'), previewPort('/example/second', 'http://127.0.0.1:7140'));
+  assert.notEqual(previewPort('/example/first', 'http://127.0.0.1:7140'), previewPort('/example/first', 'http://127.0.0.1:7141'));
   assert.throws(() => mergePlans(plan, plan), /both bundled and external/);
 });
 for (const [label, mutate] of [

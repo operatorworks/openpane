@@ -45,6 +45,7 @@ Use the supported Node/npm versions in [.node-version](../../.node-version) and 
 
 ```sh
 npm ci
+npm run setup:browser
 npm run build
 cp -R templates/customization /absolute/my-extension
 npm run host:browser-dev -- --data-dir /absolute/private-preview-host --port 7140

@@ -97,7 +97,27 @@ test('presentation failure with rejected acquired cleanup remains unavailable af
   });
   owner.reconcile([a]); await tick();
   assert.equal(owner.getSnapshot()[0].kind, 'failed');
+  assert.match(owner.getSnapshot()[0].message, /Restart/, 'acquired cleanup failure requires restart immediately');
   owner.reconcile([]); await tick(); owner.reconcile([a]); await tick();
   assert.equal(attempts, 1); assert.equal(disposals, 1); assert.match(owner.getSnapshot()[0].message, /Restart/);
   await owner.close();
+});
+
+test('repeated withdrawal does not accumulate retirement followers while an original pin drains', async t => {
+  const owner = new DesktopExtensionLifecycle(), source = createGenerationSource(); let disposals = 0;
+  const a = fixture('alpha', ({ frontendTools }) => {
+    frontendTools.add({ definition: { name: 'hold', description: 'Hold' }, decodeInput: value => value, execute: async () => 'original' });
+    return { modules: [], dispose() { disposals++; } };
+  });
+  owner.attach(source); owner.reconcile([a]); await tick();
+  const pin = pinFrontendTools({ generations: source.snapshot().generations, platform: 'desktop', run, capabilities: { tools: { clientProvided: true } } });
+  owner.reconcile([]);
+  const then = Promise.prototype.then; let observers = 0;
+  t.mock.method(Promise.prototype, 'then', function(...args) { observers++; return Reflect.apply(then, this, args); });
+  try {
+    for (let index = 0; index < 200; index++) owner.reconcile([]);
+  } finally { t.mock.restoreAll(); }
+  pin.release(); await owner.close();
+  assert.equal(observers, 0, 'unchanged pending retirement needs no new completion observers');
+  assert.equal(disposals, 1);
 });

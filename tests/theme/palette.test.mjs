@@ -39,3 +39,11 @@ for (const namespace of ['a', 'example-123', 'a'.repeat(32), '', 'A', '-bad', 'b
 test('palette JSON fields must be present rather than inherited', () => {
   assert.throws(() => parsePaletteDocument(Object.create(starterPalette())), /required field/);
 });
+
+
+test('V1 canonical UTF-8 bytes and digest match the independent identity vector', () => {
+  const expectedText = '{"kind":"openpane-palette","version":1,"namespace":"example","name":"fixed","label":"Stable V1","colors":{"light":{"canvas":"#123456","surface":"#123456","raised":"#123456","text":"#123456","muted":"#123456","border":"#123456","controlBorder":"#123456","accent":"#123456","onAccent":"#123456","danger":"#123456","onDanger":"#123456","focus":"#123456"},"dark":{"canvas":"#abcdef","surface":"#abcdef","raised":"#abcdef","text":"#abcdef","muted":"#abcdef","border":"#abcdef","controlBorder":"#abcdef","accent":"#abcdef","onAccent":"#abcdef","danger":"#abcdef","onDanger":"#abcdef","focus":"#abcdef"}}}';
+  const text = canonicalPaletteText(parsePaletteDocument(JSON.parse(expectedText)));
+  assert.equal(text, expectedText);
+  assert.equal(createHash('sha256').update(text, 'utf8').digest('hex'), 'f6401f8ce78bbd47f2fb3cacbed665ff9bcb94e502ac444503b604a5720a248b');
+});
