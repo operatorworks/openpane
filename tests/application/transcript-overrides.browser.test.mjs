@@ -46,7 +46,8 @@ test('committed artifact replaces transcript, updates activity and retains indep
   const transcript = page.getByRole('region', { name: 'Committed transcript' });
   await transcript.waitFor(); assert.equal(await page.getByLabel('Messages', { exact: true }).count(), 0);
   await draft(page, 'Artifact draft'); const previous = await editor(page).elementHandle();
-  await page.getByRole('button', { name: 'Review the plan', exact: true }).click();
+  await tools(page);
+  await page.getByRole('button', { name: 'Review the plan', exact: true }).click(); await chats(page);
   await transcript.getByText('Review our current plan. Identify the next useful step and any unresolved decision.', { exact: true }).waitFor();
   await page.getByRole('heading', { name: 'Approval required', exact: true }).waitFor();
   await unchanged(page, previous, 'Artifact draft'); assert.equal((await host.entries()).length, 1);
@@ -163,12 +164,18 @@ test('override receives each conversation and refuses retained commands after na
 
 test('restore before activation takes a late override disposer once and never mounts its transcript', { timeout: 45_000 }, async t => {
   const { host, page } = await open(t);
-  await customRuntime(page, host, entry(`return new Promise(resolve => { window.finish = () => { ${override}
+  await customRuntime(page, host, entry(`window.activations = (window.activations || 0) + 1; return new Promise(resolve => { window.finish = () => { ${override}
     resolve({ modules: [], overrides: { transcript: Transcript }, dispose() { window.disposals = (window.disposals || 0) + 1; return Promise.reject(new Error('Late rejected cleanup')); } }); }; });`));
   await wait(() => page.evaluate(() => typeof window.finish === 'function'), 'late override activation');
   await draft(page, 'Late draft'); const previous = await editor(page).elementHandle(), errors = []; page.on('pageerror', error => errors.push(error.message));
   await revealRecovery(page); await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   await page.evaluate(() => window.finish()); await wait(() => page.evaluate(() => window.disposals === 1), 'late override cleanup');
+  const cleanupFailure = page.getByRole('alert').filter({ hasText: 'Executable UI cleanup failed.' });
+  await chats(page); await cleanupFailure.waitFor();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Enable executable UI customizations', exact: true }).check();
+  await chats(page); await cleanupFailure.waitFor();
+  assert.equal(await page.evaluate(() => window.activations), 1, 'late cleanup rejection prevents reactivation until restart');
   assert.equal(await page.getByRole('region', { name: 'Fixture transcript' }).count(), 0); await unchanged(page, previous, 'Late draft'); assert.deepEqual(errors, []);
 });
 
@@ -289,18 +296,22 @@ test('nested module and action capture survives author mutation through real she
   await unchanged(page, previous, 'Mutation draft');
 });
 
-test('StrictMode delayed same-array reactivation never remounts an obsolete transcript and disposes late malformed results', { timeout: 45_000 }, async t => {
+test('StrictMode transcript activation waits for complete retirement and keeps late cleanup failures sticky', { timeout: 45_000 }, async t => {
   const { build } = await import('esbuild'), { chromium } = await import('playwright');
   const bundle = await build({ stdin: { contents: `import React from 'react'; import { createRoot } from 'react-dom/client'; import { flushSync } from 'react-dom';
     import { CustomizationTranscript, useDesktopCustomizations } from './apps/desktop/src/application/DesktopCustomizations.tsx';
-    window.activations = 0; window.loads = 0; window.disposals = []; window.mounts = []; window.finish = {};
+    window.activations = 0; window.loads = 0; window.disposals = []; window.mounts = []; window.finish = {}; window.finishCleanup = {};
     const customizations = [{ manifest: { namespace: 'strict', sdkVersion: '0.13.0', entries: [{ kind: 'desktop', module: './desktop.js' }] },
       load: async () => { window.loads++; return { default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
         const id = ++window.activations; let disposed = false;
         function Transcript() { React.useLayoutEffect(() => { window.mounts.push({ id, disposed }); }, []); return <p>Owner {id}</p>; }
         return new Promise(resolve => { window.finish[id] = malformed => resolve({ modules: [],
           get overrides() { if (malformed) throw new Error('Late malformed presentation'); return { transcript: Transcript }; },
-          dispose() { disposed = true; window.disposals.push(id); if (id === 3) return Promise.reject(new Error('Late cleanup rejection')); } }); });
+          dispose() { disposed = true; window.disposals.push(id);
+            if (id === 3 || id === 5) return new Promise((resolve, reject) => {
+              window.finishCleanup[id] = () => id === 5 ? reject(new Error('Late cleanup rejection')) : resolve();
+            });
+          } }); });
       } } }; } }];
     function App() { const [enabled, setEnabled] = React.useState(true);
       window.disable = () => flushSync(() => setEnabled(false)); window.enable = () => flushSync(() => setEnabled(true));
@@ -316,7 +327,7 @@ test('StrictMode delayed same-array reactivation never remounts an obsolete tran
   await page.route('http://localhost/fixture', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }));
   await page.goto('http://localhost/fixture'); await page.addScriptTag({ content: bundle.outputFiles[0].text });
   await wait(() => page.evaluate(() => window.activations === 1), 'StrictMode activation');
-  assert.equal(await page.evaluate(() => window.loads), 2);
+  assert.equal(await page.evaluate(() => window.loads), 1);
   await page.evaluate(() => window.finish[1](false)); await page.getByText('Owner 1', { exact: true }).waitFor();
   const previous = await page.getByRole('textbox', { name: 'Persistent draft' }).elementHandle();
   const mounts = await page.evaluate(() => window.mounts);
@@ -329,14 +340,34 @@ test('StrictMode delayed same-array reactivation never remounts an obsolete tran
   await page.evaluate(() => { window.disable(); window.enable(); });
   await wait(() => page.evaluate(() => window.activations === 3), 'pending obsolete activation');
   await page.evaluate(() => { window.disable(); window.enable(); });
-  await wait(() => page.evaluate(() => window.activations === 4), 'replacement activation');
+  await page.getByText('Default transcript', { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.activations), 3, 'replacement waits for unresolved activation');
+  await page.evaluate(() => window.finish[3](false));
+  await wait(() => page.evaluate(() => typeof window.finishCleanup[3] === 'function'), 'late generation retirement');
+  assert.equal(await page.evaluate(() => window.activations), 3, 'replacement waits for acquired generation cleanup');
+  assert.equal(await page.getByText('Owner 3', { exact: true }).count(), 0);
+  await page.evaluate(() => window.finishCleanup[3]());
+  await wait(() => page.evaluate(() => window.activations === 4), 'replacement after complete retirement');
   await page.evaluate(() => window.finish[4](false)); await page.getByText('Owner 4', { exact: true }).waitFor();
-  await page.evaluate(() => window.finish[3](true));
-  await wait(() => page.evaluate(() => window.disposals.includes(3)), 'late malformed cleanup');
-  await page.getByText('Owner 4', { exact: true }).waitFor(); assert.equal(await page.getByRole('alert').count(), 0);
+  assert.deepEqual(await page.evaluate(() => window.disposals), [1, 2, 3]);
+  await page.evaluate(() => { window.disable(); window.enable(); });
+  await wait(() => page.evaluate(() => window.activations === 5), 'pending malformed activation');
+  await page.evaluate(() => { window.disable(); window.enable(); });
+  assert.equal(await page.evaluate(() => window.activations), 5);
+  await page.evaluate(() => window.finish[5](true));
+  await wait(() => page.evaluate(() => typeof window.finishCleanup[5] === 'function'), 'late malformed cleanup');
+  assert.equal(await page.evaluate(() => window.activations), 5, 'malformed lifetime still owns its retirement barrier');
+  await page.evaluate(() => window.finishCleanup[5]());
+  const cleanupFailure = page.getByRole('alert').filter({ hasText: 'Executable UI cleanup failed.' });
+  await cleanupFailure.waitFor();
+  await page.evaluate(() => { window.disable(); window.enable(); });
+  await cleanupFailure.waitFor();
+  assert.equal(await page.evaluate(() => window.activations), 5, 'cleanup failure requires restart instead of another activation');
+  assert.equal(await page.evaluate(() => window.loads), 5, 'StrictMode replay and failed retry never reload a namespace');
   await page.evaluate(() => window.disable()); await page.getByText('Default transcript', { exact: true }).waitFor();
-  assert.deepEqual(await page.evaluate(() => window.disposals), [1, 2, 3, 4]);
-  assert.equal(await page.evaluate(() => window.mounts.every(mount => !mount.disposed && mount.id !== 3)), true);
+  await cleanupFailure.waitFor();
+  assert.deepEqual(await page.evaluate(() => window.disposals), [1, 2, 3, 4, 5]);
+  assert.equal(await page.evaluate(() => window.mounts.every(mount => !mount.disposed && ![3, 5].includes(mount.id))), true);
   assert.equal(await page.getByRole('textbox', { name: 'Persistent draft' }).evaluate((node, old) => node === old, previous), true);
   assert.equal(await page.getByRole('textbox', { name: 'Persistent draft' }).inputValue(), 'Strict draft'); assert.deepEqual(errors, []);
 });
