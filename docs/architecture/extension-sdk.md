@@ -1,5 +1,7 @@
 # Author an extension
 
+See the [customization guide](../extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview.
+
 The existing `@openpane/sdk` package exposes server contracts at its root and UI contracts at `@openpane/sdk/react`.
 The `@openpane/sdk/react-tools` entry combines UI presentation capture with frontend tool generations.
 Installed server code runs with host process privileges.
@@ -321,7 +323,7 @@ Every command and contributed action returns `Promise<SubmitResult>`.
 Preserve rejected admission and uncertain receipt states for the caller.
 Resolving an action does not establish native execution success.
 
-The desktop customization host renders nested modules as labeled sections after the transcript, before approvals and the composer.
+The desktop customization host renders nested modules as labeled sections under Conversation tools in Extensions; an explicitly selected content layout may place them with the transcript. Approvals and the composer remain host-owned.
 Transcript and modules share one content scrollbar by default.
 It renders declarative actions as labeled buttons, suppresses duplicate clicks while an action is pending, and reports the returned submission state.
 The host reports rejected admission, rejected receipts, not-dispatched receipts, uncertain receipts, abandoned receipts, and thrown errors.
@@ -414,7 +416,7 @@ function ReviewLayout({ transcript, modules }: ConversationContentLayoutProps) {
 return { contentLayout: ReviewLayout, modules, dispose() {} };
 ```
 
-The [Plan review template](../../templates/customization/desktop/index.tsx) includes responsive CSS for this arrangement.
+This arrangement is opt-in. The [Plan review template](../../templates/customization/desktop/index.tsx) uses a namespace workspace and scoped transcript without claiming a global content layout.
 The host supplies one scroll viewport and an inline-size container. The template stacks its columns at or below 640px of available content width.
 Permissions, approvals, the composer, Stop, command recovery, and navigation remain outside the layout.
 Activation, failure, suspension, and restore preserve those controls for the same selected conversation.

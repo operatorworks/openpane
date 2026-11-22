@@ -1,5 +1,7 @@
 # Default theme and primitives
 
+See the [customization guide](../extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview.
+
 The theme packages give desktop and iOS modules the same semantic colors, spacing, typography, and motion durations.
 Desktop uses DOM elements. Native uses React Native controls.
 Neither package depends on the host or an agent adapter.

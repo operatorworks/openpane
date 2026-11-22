@@ -1,5 +1,7 @@
 # Server customization artifacts
 
+See the [customization guide](../extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview.
+
 Build a pinned committed source graph into a fresh directory with Node >=24.22.3 <25 and npm 11.19.1. The builder checks Node before creating output directories, including graphs without npm dependencies. Source preparation checks npm when an installation is required.
 
 First run `npm ci` and `npm run build` from the OpenPane checkout. The CLI imports the built host and SDK workspace exports.

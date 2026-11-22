@@ -9,7 +9,8 @@ import { bundledPlan } from '../../scripts/bundled-extensions.mjs';
  * default. scripts/build-local-customization.mjs passes the bundled plan already merged with its external plan, so the
  * plan it builds is the one it qualifies.
  */
-export function desktopConfig(mode, plan = bundledPlan()) {
+export function desktopConfig(mode, plan = bundledPlan(), { development = false } = {}) {
+  if (plan.kind === 'development' && !development) throw new Error('Development customization plans cannot be packaged; use an immutable committed source build.');
   return {
     base: './',
     plugins: [cssUrlExpressions(), customizationPlugin(plan)],

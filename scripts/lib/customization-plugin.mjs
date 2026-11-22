@@ -31,7 +31,7 @@ export function mergePlans(bundled, external) {
   for (const entry of external.entries) {
     if (names.has(entry.manifest.namespace)) throw new Error(`Customization namespace ${entry.manifest.namespace} is both bundled and external`);
   }
-  return { roots: [...new Set([...bundled.roots, ...external.roots])], entries: [...bundled.entries, ...external.entries], identity: external.identity };
+  return { ...(external.kind === 'development' ? { kind: 'development' } : {}), roots: [...new Set([...bundled.roots, ...external.roots])], entries: [...bundled.entries, ...external.entries], identity: external.identity };
 }
 
 function checkSource(code, id, label) {
