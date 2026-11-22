@@ -13,7 +13,7 @@ import { ConversationSearch } from '../application/ConversationSearch.js';
 import { ComposerAgentControls } from '../application/ComposerAgentControls.js';
 import { continuationAnnouncement } from '../application/continuation-copy.js';
 import { ExtensionsList, ExtensionWorkspace, conversationSlots, extensionRows, openableRow } from '../application/ExtensionsView.js';
-import { conversationLabel } from '@agentui/contracts/conversation';
+import { conversationLabel } from '@openpane/contracts/conversation';
 import type { ApplicationController } from '../application/application-controller.js';
 
 type ConnectionPresentation =
@@ -109,7 +109,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     {selectedView === 'extensions' && !workspaceOpen && creationRecovery}
     <div className="chat-navigation" hidden={selectedView !== 'chats'}>
       <div className="action-row">
-        <button disabled={!enabled || app.saved.pendingCreation !== null || selected?.availability.kind !== 'ready'} onClick={() => void controller.create(selected?.id)}>{selected && 'runtime' in selected && selected.runtime.engine === 'agentui-recorded' ? 'New recorded conversation' : 'New conversation'}</button>
+        <button disabled={!enabled || app.saved.pendingCreation !== null || selected?.availability.kind !== 'ready'} onClick={() => void controller.create(selected?.id)}>{selected && 'runtime' in selected && selected.runtime.engine === 'openpane-recorded' ? 'New recorded conversation' : 'New conversation'}</button>
       </div>
       {creationRecovery}
       <ConversationSearch controller={controller} connectionKey={searchConnection} enabled={enabled} active={app.active?.scope ?? null}>
@@ -144,13 +144,13 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
         <button disabled={suspended || app.busy || Boolean(app.storageFailure)} onClick={() => connection.kind === 'native' ? connection.reconnect() : void controller.reconnect()}>Reconnect</button>
       </section>
       <section className="settings-section" aria-label="Pi and OpenCode Go"><h2>Pi and OpenCode Go</h2>
-        <p>AgentUI includes a compatible Pi runtime. Your installed Pi command is separate and is not required for this chat.</p>
+        <p>OpenPane includes a compatible Pi runtime. Your installed Pi command is separate and is not required for this chat.</p>
         <p role="status">{pi?.availability.kind === 'ready' ? 'Pi is configured for GLM 5.3 through OpenCode Go.'
           : pi?.availability.kind === 'unavailable' ? pi.availability.reason
-          : 'This host does not offer Pi. Start AgentUI with ./agentui to include Pi, or ./agentui --agent pi for Pi only.'}</p>
+          : 'This host does not offer Pi. Start OpenPane with ./openpane to include Pi, or ./openpane --agent pi for Pi only.'}</p>
         {pi && <><a className="settings-link" href="/setup/pi">Open secure Pi setup</a>
           <p>In the Mac app, setup opens a separate protected window. Your API key is saved in macOS Keychain. Return here and select Reconnect after setup.</p>
-          <p>In a browser, reopen this host with the AgentUI Mac app to use protected setup. You can also supply OPENCODE_GO_API_KEY in the host environment.</p></>}
+          <p>In a browser, reopen this host with the OpenPane Mac app to use protected setup. You can also supply OPENCODE_GO_API_KEY in the host environment.</p></>}
         <p>Pi supports text chat, saved conversations, and Stop. Tools and file access are unavailable in this integration.</p>
       </section>
       <section className="settings-section"><h2>Appearance</h2><p>Follows system light or dark appearance.</p><label><input type="checkbox" checked={customizationEnabled} onChange={event => setCustomizationEnabled(event.target.checked)} />Enable customizations</label></section>

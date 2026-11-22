@@ -2,7 +2,7 @@
   "task": "agentui-4wpa",
   "assessmentDate": "2026-11-14",
   "result": "controlled-contract-evidence-with-explicit-live-blockers",
-  "agentuiRevision": "85ad5e423d231c628cb60e9a11908ccec3bb2239",
+  "openpaneRevision": "85ad5e423d231c628cb60e9a11908ccec3bb2239",
   "crewRevision": "37c596577b4998fba67b09451ddb16ac0695c08d",
   "crewSourceTree": "304b892eccc22d1f6a7d4e3a70a30e840bc1d856",
   "crewClientSourceTree": "7968b05bf317f9036ca2cb6d7a998d2856025099",
@@ -29,12 +29,12 @@
       ]
     },
     {
-      "command": "npm run build --workspace=@agentui/contracts --workspace=@agentui/example-crew",
+      "command": "npm run build --workspace=@openpane/contracts --workspace=@openpane/example-crew",
       "exitCode": 0,
       "log": ".audit/mvp/crew/build.log"
     },
     {
-      "command": "npm run check --workspace=@agentui/example-crew",
+      "command": "npm run check --workspace=@openpane/example-crew",
       "exitCode": 0,
       "log": ".audit/mvp/crew/check.log"
     },
@@ -69,7 +69,7 @@
       "status": "open",
       "statusSource": "observed local hub state via --no-fetch during the dated assessment; not current delivery proof",
       "readCommand": "bn request show switchboard-r-3rkv --no-fetch",
-      "agentuiGate": "agentui-9xfk"
+      "openpaneGate": "agentui-9xfk"
     },
     {
       "id": "crew-r-xndc",
@@ -77,7 +77,7 @@
       "statusSource": "observed local hub state via --no-fetch during the dated assessment; not current delivery proof",
       "readCommand": "bn request show crew-r-xndc --no-fetch",
       "requires": "switchboard-r-3rkv",
-      "agentuiGate": "agentui-b3aj"
+      "openpaneGate": "agentui-b3aj"
     }
   ],
   "knownContractGaps": [
@@ -86,7 +86,7 @@
   "notRun": [
     "live endpoint, installed revision, credential, owner or member/profile assessment",
     "Crew PostgreSQL, Temporal namespace, workers or native execution",
-    "AgentUI-owned remote conversation creation and creation-response loss recovery",
+    "OpenPane-owned remote conversation creation and creation-response loss recovery",
     "full pagination or two-installation discovery qualification",
     "AG-UI observation, reconnect, cursor expiry or disposal behavior",
     "real approvals, decision reconciliation, cancellation or process replacement recovery",

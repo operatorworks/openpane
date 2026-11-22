@@ -6,14 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { createBrowserConnection } from '@agentui/client/service';
-import { createMacConnection } from '@agentui/client/mac';
-import { IMAGE_MAX_BYTES, IMAGE_TRANSFER_MAX_BYTES, IMAGE_BODY_TIMEOUT_MS } from '@agentui/contracts/image';
-import { SERVICE_MAX_REQUEST_BYTES } from '@agentui/contracts/service';
-import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
-import { recordedInstallation } from '@agentui/host/recorded';
-import { openLocalHost, createRecordedDriver } from '@agentui/host';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { createBrowserConnection } from '@openpane/client/service';
+import { createMacConnection } from '@openpane/client/mac';
+import { IMAGE_MAX_BYTES, IMAGE_TRANSFER_MAX_BYTES, IMAGE_BODY_TIMEOUT_MS } from '@openpane/contracts/image';
+import { SERVICE_MAX_REQUEST_BYTES } from '@openpane/contracts/service';
+import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
+import { recordedInstallation } from '@openpane/host/recorded';
+import { openLocalHost, createRecordedDriver } from '@openpane/host';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { openAccessDatabase } from '../../apps/host/build/tsc/access-database.js';
 import { createApi } from '../../apps/host/build/tsc/api.js';
 import { FeedRegistry } from '../../apps/host/build/tsc/feed-registry.js';
@@ -22,7 +22,7 @@ import { serviceEndpoint } from '../../apps/host/build/tsc/service-endpoint.js';
 import { png, chunk, screenshotPng, screenshotJpeg } from '../host/image-fixtures.mjs';
 
 async function fixture(t, { imageInput = true, model } = {}) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-images-')), path = join(directory, 'host.sqlite');
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-images-')), path = join(directory, 'host.sqlite');
   const access = openAccessDatabase(path), feeds = new FeedRegistry();
   const driver = { ...createRecordedDriver({ installation: recordedInstallation, backendPath: join(directory, 'recorded.jsonl'),
     decodeEvent: transcriptProjection.decodeEvent, resolve: async command => ({ kind: 'completed', output: {

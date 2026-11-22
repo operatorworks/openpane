@@ -21,5 +21,5 @@ const running = await startBrowserHost({ directory: resolve(config.directory), p
   extensions: { kind: 'transient', entries: [{ ...extension, installations: [{ id: 'member', instance, service: config.service,
     expectedAuthority: 'remote-provider', authentication: { kind: 'secret', revision: config.credentialRevision,
       resolve: async () => (await readFile(resolve(config.tokenFile), 'utf8')).trim() } }] }] } });
-process.stdout.write(`AgentUI with Crew is ready at ${running.origin}/browser.html\n`);
+process.stdout.write(`OpenPane with Crew is ready at ${running.origin}/browser.html\n`);
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { void running.close().catch(() => { process.exitCode = 1; }); });

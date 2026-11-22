@@ -3,9 +3,9 @@ import test from 'node:test';
 import { readFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createCodexDriver, openLocalHost } from '@agentui/host';
-import { createConversationStore } from '@agentui/client';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { createCodexDriver, openLocalHost } from '@openpane/host';
+import { createConversationStore } from '@openpane/client';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { budgets } from '../../packages/host/dist/durable-model.js';
 import { until } from '../host/fixture.mjs';
 import { fileURLToPath } from 'node:url';
@@ -214,7 +214,7 @@ test('command disclosure keeps its identity and escaped retained output through 
 
 test('Codex file observations reach saved default disclosures through host and client with a retained draft', async t => {
   const { page, requests } = await fixture(t, 360);
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-file-view-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-file-view-'));
   const log = join(directory, 'rpc.jsonl'), scope = { hostId: 'host', conversationId: 'reply' };
   let host, client, submission, saved = null;
   const driver = createCodexDriver({ cwd: directory, version: '0.167.2', executable: process.execPath,

@@ -11,7 +11,7 @@ node ../../../scripts/check-toolchain.mjs
 mkdir -p .work
 rm -f .work/prepared-inputs.sha256
 npm --prefix ../../.. ci --no-audit --no-fund
-npm --prefix ../../.. run build --workspace=@agentui/theme --workspace=@agentui/ui-primitives
+npm --prefix ../../.. run build --workspace=@openpane/theme --workspace=@openpane/ui-primitives
 npm ci --no-audit --no-fund
 node normalize-hermes.cjs
 cp ios/Podfile.lock ios/Podfile.lock.expected

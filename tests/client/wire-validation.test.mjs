@@ -78,7 +78,7 @@ test('only the latest 256 sequence identities can be recognized as duplicates', 
 });
 
 test('extension-call requests and every result kind round-trip with exact keys and patterns', async () => {
-  const { parseServiceRequest, parseServiceResponse, EXTENSION_CALL_FAILURES } = await import('@agentui/contracts/service');
+  const { parseServiceRequest, parseServiceResponse, EXTENSION_CALL_FAILURES } = await import('@openpane/contracts/service');
   const request = { op: 'extension-call', namespace: 'fixture', installationId: 'personal', operation: 'members.list', input: { nested: [1, 'two', null] } };
   assert.deepEqual(parseServiceRequest(request), request);
   for (const changed of [{ extra: true }, { operation: 'Members' }, { operation: '.list' }, { operation: 'o'.repeat(65) }, { namespace: 'Fixture' },
@@ -97,8 +97,8 @@ test('extension-call requests and every result kind round-trip with exact keys a
 });
 
 test('metadata requires sorted extension descriptors without origins or credentials', async () => {
-  const { parseServiceResponse } = await import('@agentui/contracts/service');
-  const { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION } = await import('@agentui/contracts/compatibility');
+  const { parseServiceResponse } = await import('@openpane/contracts/service');
+  const { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION } = await import('@openpane/contracts/compatibility');
   const metadata = extensions => ({ hostId: 'host', principalId: 'principal', agents: [], defaultAgentId: null, extensions,
     compatibility: { wireVersion: SERVICE_WIRE_VERSION, extensionSdkVersion: EXTENSION_SDK_VERSION, nativeRuntime: null,
       desiredGitRevision: 'r', appliedArtifact: { artifactId: 'a', gitRevision: 'r' } } });
@@ -115,7 +115,7 @@ test('metadata requires sorted extension descriptors without origins or credenti
 
 test('the client keeps an over-limit extension input local and refuses malformed calls without sending', async () => {
   const { createServiceConnection } = await import('../../packages/client/dist/service-engine.js');
-  const { transcriptProjection } = await import('@agentui/contracts/conversation');
+  const { transcriptProjection } = await import('@openpane/contracts/conversation');
   let sent = 0;
   const connection = createServiceConnection(async () => { sent++; return new Response(JSON.stringify({ ok: true, value: { kind: 'ok', output: 1 } }), { headers: { 'content-type': 'application/json' } }); }, transcriptProjection);
   assert.deepEqual(await connection.extensionCall({ namespace: 'fixture', installationId: 'i', operation: 'echo', input: 'x'.repeat(64_000) }), { kind: 'failed', cause: 'too-large' });
@@ -128,7 +128,7 @@ test('the client keeps an over-limit extension input local and refuses malformed
 const nest = depth => { let value = 0; for (let index = 0; index < depth; index++) value = [value]; return value; };
 
 test('TypeScript and Rust share the extension-call and catalog-filter request golden cases', async () => {
-  const { parseServiceRequest } = await import('@agentui/contracts/service');
+  const { parseServiceRequest } = await import('@openpane/contracts/service');
   const cases = JSON.parse(readFileSync(new URL('./fixtures/extension-requests.json', import.meta.url)));
   assert.ok(cases.some(row => row.valid) && cases.some(row => !row.valid));
   for (const row of cases) {
@@ -138,10 +138,10 @@ test('TypeScript and Rust share the extension-call and catalog-filter request go
 });
 
 test('an extension call resolves too-large exactly where the request envelope would exceed its structural limit', async () => {
-  const { canonicalJson } = await import('@agentui/contracts');
-  const { parseServiceRequest, parseServiceResponse, parseExtensionCallValue, ExtensionCallTooLarge } = await import('@agentui/contracts/service');
+  const { canonicalJson } = await import('@openpane/contracts');
+  const { parseServiceRequest, parseServiceResponse, parseExtensionCallValue, ExtensionCallTooLarge } = await import('@openpane/contracts/service');
   const { createServiceConnection } = await import('../../packages/client/dist/service-engine.js');
-  const { transcriptProjection } = await import('@agentui/contracts/conversation');
+  const { transcriptProjection } = await import('@openpane/contracts/conversation');
   const bodies = [];
   const connection = createServiceConnection(async body => { bodies.push(body); return new Response(JSON.stringify({ ok: true, value: { kind: 'ok', output: 1 } }), { headers: { 'content-type': 'application/json' } }); }, transcriptProjection);
   const call = input => ({ namespace: 'fixture', installationId: 'i', operation: 'echo', input });
@@ -164,7 +164,7 @@ test('an extension call resolves too-large exactly where the request envelope wo
 });
 
 test('catalog filters and provider identities round-trip; unknown filter kinds and missing fields are rejected', async () => {
-  const { parseServiceRequest, parseServiceResponse } = await import('@agentui/contracts/service');
+  const { parseServiceRequest, parseServiceResponse } = await import('@openpane/contracts/service');
   const filters = [{ kind: 'namespace', namespace: 'crew-like' }, { kind: 'provider-agent', namespace: 'ns', installationId: 'personal', providerAgentId: 'agent-1' }];
   for (const filter of filters) {
     const request = { op: 'catalog', after: null, limit: 10, filter };

@@ -1,10 +1,10 @@
-import { canonicalJson, parseFrontendBinding, sameScope } from '@agentui/contracts';
-import type { ConversationScope, FrontendBinding, FrontendEligibility, OfferedCommand } from '@agentui/contracts';
-import type { ServiceConnection, ServiceMetadata } from '@agentui/contracts/service';
-import type { FrontendAdmission, FrontendJournal, FrontendRecoveryReference } from '@agentui/client';
+import { canonicalJson, parseFrontendBinding, sameScope } from '@openpane/contracts';
+import type { ConversationScope, FrontendBinding, FrontendEligibility, OfferedCommand } from '@openpane/contracts';
+import type { ServiceConnection, ServiceMetadata } from '@openpane/contracts/service';
+import type { FrontendAdmission, FrontendJournal, FrontendRecoveryReference } from '@openpane/client';
 import type { CaptureBorrow, CaptureStore } from './view-leases.js';
-import { retainFrontendTools } from '@agentui/sdk/tools';
-import type { FrontendToolGeneration, RetainedFrontendTools } from '@agentui/sdk/tools';
+import { retainFrontendTools } from '@openpane/sdk/tools';
+import type { FrontendToolGeneration, RetainedFrontendTools } from '@openpane/sdk/tools';
 
 export type GenerationSnapshot = { readonly kind: 'transitioning' } | { readonly kind: 'ready'; readonly generations: readonly FrontendToolGeneration[] };
 export interface GenerationSink {

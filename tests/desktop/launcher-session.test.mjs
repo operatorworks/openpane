@@ -6,11 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { CODEX_RUNTIME } from '@agentui/contracts/compatibility';
-import { parseLaunchArgs, assertPortAvailable } from '../../scripts/agentui-launch.mjs';
-import { bootstrapScript, distribution, profileFor, shellQuote } from '../../scripts/agentui-runtime.mjs';
+import { CODEX_RUNTIME } from '@openpane/contracts/compatibility';
+import { parseLaunchArgs, assertPortAvailable } from '../../scripts/openpane-launch.mjs';
+import { bootstrapScript, distribution, profileFor, shellQuote } from '../../scripts/openpane-runtime.mjs';
 
-const helper = fileURLToPath(new URL('../../scripts/agentui-launch-session.mjs', import.meta.url));
+const helper = fileURLToPath(new URL('../../scripts/openpane-launch-session.mjs', import.meta.url));
 
 test('local and SSH configurations retain their workspace and provider choices', () => {
   assert.deepEqual(parseLaunchArgs(['--agent', 'pi', '--no-open', '--skip-build'], '/work/project'),
@@ -81,7 +81,7 @@ function alive(pid) {
 }
 
 async function session(t, { ownKey, descendant = false } = {}) {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-lease-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-lease-'));
   const main = join(directory, 'host.mjs');
   await writeFile(main, `import {spawn} from 'node:child_process';
 const report = extra => process.stdout.write(JSON.stringify({pid:process.pid,key:process.env.OPENCODE_GO_API_KEY,...extra})+'\\n');
@@ -138,11 +138,11 @@ test('session cleanup closes inherited stdio and stops a surviving host descenda
 });
 
 for (const signal of ['SIGTERM', 'SIGHUP']) test(`${signal} during SSH setup ends owned processes and never starts a host`, { timeout: 10_000 }, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-cancel-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-cancel-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const fakeSsh = join(directory, 'ssh');
   await writeFile(fakeSsh, `#!/bin/sh\nexec ${shellQuote(process.execPath)} -e 'process.stderr.write("SETUP_PID="+process.pid+"\\n"); setInterval(()=>{},1000);'\n`, { mode: 0o755 });
-  const entry = fileURLToPath(new URL('../../scripts/agentui-launch.mjs', import.meta.url));
+  const entry = fileURLToPath(new URL('../../scripts/openpane-launch.mjs', import.meta.url));
   const child = spawn(process.execPath, [entry, '--skip-build', '--no-open', '--agent', 'pi', '--ssh', 'test-only'],
     { env: { ...process.env, PATH: `${directory}:${process.env.PATH}` }, stdio: ['ignore', 'pipe', 'pipe'] });
   let pid;
@@ -167,14 +167,14 @@ for (const signal of ['SIGTERM', 'SIGHUP']) test(`${signal} during SSH setup end
 });
 
 test('cancellation cleans an exited setup leader and its inherited-stdio descendant', { timeout: 5000 }, async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-exited-setup-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-exited-setup-'));
   const main = join(directory, 'setup.mjs');
   await writeFile(main, `import {spawn} from 'node:child_process';
 const child=spawn(process.execPath,['-e','process.send("ready");setInterval(()=>{},1000);'],{stdio:['ignore','inherit','inherit','ipc']});
 child.once('message',()=>{process.stderr.write('SETUP_TREE='+JSON.stringify({leader:process.pid,descendant:child.pid})+'\\n');process.exit(0);});
 `);
   await writeFile(join(directory, 'ssh'), `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(main)}\n`, { mode: 0o755 });
-  const entry = fileURLToPath(new URL('../../scripts/agentui-launch.mjs', import.meta.url));
+  const entry = fileURLToPath(new URL('../../scripts/openpane-launch.mjs', import.meta.url));
   const child = spawn(process.execPath, [entry, '--skip-build', '--no-open', '--agent', 'pi', '--ssh', 'test-only'],
     { env: { ...process.env, PATH: `${directory}:${process.env.PATH}` }, stdio: ['ignore', 'pipe', 'pipe'] });
   let tree;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ServiceError } from '@agentui/contracts/service';
+import { ServiceError } from '@openpane/contracts/service';
 import { scope, empty, fixture } from './controller-fixture.mjs';
 import { continuationNotice, earlierLabel } from '../../apps/desktop/src/application/continuation-copy.ts';
 
@@ -199,7 +199,7 @@ test('a move that keeps failing stops after three tries though reads succeed; Ch
   assert.equal(actions.length, reads);
   const stalled = f.app.getSnapshot().continuation;
   assert.equal(stalled.stalled, true);
-  assert.deepEqual(continuationNotice(stalled), { status: 'AgentUI could not confirm this continuation yet.', disclosure: false, choices: ['Check again', 'Start a new chat'] });
+  assert.deepEqual(continuationNotice(stalled), { status: 'OpenPane could not confirm this continuation yet.', disclosure: false, choices: ['Check again', 'Start a new chat'] });
   await f.app.conversationActions(f.app.getSnapshot().active).checkContinuation();
   assert.deepEqual(actions.slice(reads), ['check']);
   assert.equal(lookups, 4);
@@ -231,7 +231,7 @@ test('a Check again that fails after a move gave up keeps Check again and Start 
     await eventually(() => lookups === move && !f.app.getSnapshot().busy && f.app.getSnapshot().continuation.action === null);
   }
   assert.equal(f.app.getSnapshot().continuation.stalled, true);
-  const giveUp = { status: 'AgentUI could not confirm this continuation yet.', disclosure: false, choices: ['Check again', 'Start a new chat'] };
+  const giveUp = { status: 'OpenPane could not confirm this continuation yet.', disclosure: false, choices: ['Check again', 'Start a new chat'] };
   failing = true;
   await f.app.conversationActions(f.app.getSnapshot().active).checkContinuation();
   assert.equal(f.app.getSnapshot().continuation.view.successor.kind, 'confirmed');
@@ -258,7 +258,7 @@ test('failing reads on a closed chat stop after six tries and leave Check again 
   t.mock.timers.tick(60_000); await turn(); await turn();
   // One read by the walk to the newest segment, then six by the closed chat's record.
   assert.equal(actions.length, 7);
-  const giveUp = { status: 'AgentUI could not confirm this continuation yet.', disclosure: false, choices: ['Check again', 'Start a new chat'] };
+  const giveUp = { status: 'OpenPane could not confirm this continuation yet.', disclosure: false, choices: ['Check again', 'Start a new chat'] };
   assert.equal(f.app.getSnapshot().continuation.view, null);
   assert.deepEqual(continuationNotice(f.app.getSnapshot().continuation), giveUp);
   const actionsFor = f.app.conversationActions(f.app.getSnapshot().active);

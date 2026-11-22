@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createBrowserConnection } from '@agentui/client/service';
+import { createBrowserConnection } from '@openpane/client/service';
 import { fixture, scope, storage } from './support.mjs';
 
 for (const [label, text] of [['characters', 'x'.repeat(64001)], ['UTF-8 bytes', '🙂'.repeat(20000)], ['JSON escape bytes', '\0'.repeat(12000)]]) {

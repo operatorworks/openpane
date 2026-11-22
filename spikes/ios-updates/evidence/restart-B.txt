@@ -4,4 +4,4 @@ Installed bundle:
 1fe9fe31209350fa01122d9d1f133aebbd32720ec30c2f342e639c59099c89f0  main.jsbundle
 Checking Metro port 8081:
 lsof exit 1: no listener
-org.reactjs.native.example.AgentUIUpdateProbe: 28324
+org.reactjs.native.example.OpenPaneUpdateProbe: 28324

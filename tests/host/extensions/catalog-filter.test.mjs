@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { createBrowserConnection } from '@agentui/client/service';
+import { createBrowserConnection } from '@openpane/client/service';
 import { entry, options, startBrowserHost } from './fixtures.mjs';
 
 const confirmed = (operation, fixture) => fixture.confirmed(operation);

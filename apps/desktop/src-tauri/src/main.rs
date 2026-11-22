@@ -77,7 +77,7 @@ fn open_provider_setup(app: &tauri::AppHandle) -> tauri::Result<()> {
         "provider-setup",
         tauri::WebviewUrl::App("provider-setup.html".into()),
     )
-    .title("Set up Pi · AgentUI")
+    .title("Set up Pi · OpenPane")
     .inner_size(520.0, 650.0)
     .min_inner_size(360.0, 480.0)
     .on_navigation(|url| provider_setup::admitted("provider-setup", url))
@@ -113,7 +113,7 @@ fn parse_host_args(args: &[String]) -> Result<Option<tauri::Url>, Box<dyn std::e
 
 fn main() {
     let host_url = local_host_url().unwrap_or_else(|error| {
-        eprintln!("Cannot connect to AgentUI host: {error}");
+        eprintln!("Cannot connect to OpenPane host: {error}");
         None
     });
     let setup = provider_setup::Configuration::from_environment(host_url.as_ref());
@@ -164,7 +164,7 @@ fn main() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("failed to run AgentUI desktop");
+        .expect("failed to run OpenPane desktop");
 }
 
 #[cfg(test)]

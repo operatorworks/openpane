@@ -26,7 +26,7 @@ Prerequisite state: `main` at or after `e5db45f`. No other work package.
 ### SDK (`packages/sdk/src/extensions.ts`)
 
 - `ServerExtensionContext.installations` (new field): `readonly ServerExtensionInstallation[]`.
-- `ServerExtensionInstallation` (new): `{ id: string; instance: ProviderInstance<string>; service: string; expectedAuthority: 'agentui-host' | 'remote-provider' }`. It holds no secret. `id` is the grant `id` from the host configuration.
+- `ServerExtensionInstallation` (new): `{ id: string; instance: ProviderInstance<string>; service: string; expectedAuthority: 'openpane-host' | 'remote-provider' }`. It holds no secret. `id` is the grant `id` from the host configuration.
 - Rule, stated in the SDK documentation: a provider contribution ID must equal the grant `id` of the installation it serves. An entry that serves every configured installation registers one provider per installation with `providers.add(installation.id, …)`.
 - `ServerExtensionContext.operations` (new field) of type `OperationContributions` (new).
 - `OperationContributions.add(id, operation)` (new). `id` matches `^[a-z][a-z0-9.-]{0,63}$`. A duplicate `id` in one namespace throws. Registration after activation throws, as provider registration does.

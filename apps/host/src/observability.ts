@@ -2,7 +2,7 @@ import { validateHeaderName, validateHeaderValue } from 'node:http';
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { AlwaysOnSampler, BatchSpanProcessor, TracerProvider } from '@opentelemetry/sdk-trace';
-import type { ServiceFailureKind, ServiceRequest } from '@agentui/contracts/service';
+import type { ServiceFailureKind, ServiceRequest } from '@openpane/contracts/service';
 import { createAgentObservations } from './agent-observations.js';
 import type { AgentObservations } from './agent-observations.js';
 import { createOtlpExporter } from './otlp-exporter.js';
@@ -59,10 +59,10 @@ export function readObservabilityConfiguration(env: NodeJS.ProcessEnv): Observab
       }
     }
   } catch { throw new Error('Provide valid URL-encoded OTLP headers as comma-separated name=value pairs'); }
-  const serviceName = env.OTEL_SERVICE_NAME?.trim() ?? 'agentui-host';
+  const serviceName = env.OTEL_SERVICE_NAME?.trim() ?? 'openpane-host';
   if (!serviceName || serviceName.length > 128 || Array.from(serviceName).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) throw new Error('Provide OTEL_SERVICE_NAME with 1 to 128 printable characters');
-  const datadog = env.AGENTUI_DATADOG_LLMOBS;
-  if (datadog !== undefined && datadog !== 'true' && datadog !== 'false') throw new Error('Set AGENTUI_DATADOG_LLMOBS to true or false');
+  const datadog = env.OPENPANE_DATADOG_LLMOBS;
+  if (datadog !== undefined && datadog !== 'true' && datadog !== 'false') throw new Error('Set OPENPANE_DATADOG_LLMOBS to true or false');
   return { kind: 'otlp', endpoint: endpoint.href, headers: Object.fromEntries(headers), serviceName, datadogLlmObservability: datadog === 'true' };
 }
 
@@ -77,16 +77,16 @@ export function createHostObservability(configuration: ObservabilityConfiguratio
     spanProcessors: [new BatchSpanProcessor({ exporter, maxQueueSize: OBSERVABILITY_BOUNDS.maxQueueSize, maxExportBatchSize: OBSERVABILITY_BOUNDS.maxBatchSize,
       scheduledDelayMillis: OBSERVABILITY_BOUNDS.flushIntervalMs, exportTimeoutMillis: OBSERVABILITY_BOUNDS.batchTimeoutMs })],
   });
-  const tracer = provider.getTracer('agentui.host');
+  const tracer = provider.getTracer('openpane.host');
   const agents = createAgentObservations(provider);
   let closed = false, closePromise: Promise<void> | undefined;
   return {
     recordOutput: agents.recordOutput,
     record(observation) {
       if (closed) return;
-      const span = tracer.startSpan('agentui.host.request', { kind: SpanKind.SERVER, startTime: observation.startTime,
-        attributes: { 'agentui.operation': observation.operation, 'agentui.credential_class': observation.client,
-          'agentui.outcome': observation.outcome, ...(observation.statusCode === null ? {} : { 'http.response.status_code': observation.statusCode }) } }, ROOT_CONTEXT);
+      const span = tracer.startSpan('openpane.host.request', { kind: SpanKind.SERVER, startTime: observation.startTime,
+        attributes: { 'openpane.operation': observation.operation, 'openpane.credential_class': observation.client,
+          'openpane.outcome': observation.outcome, ...(observation.statusCode === null ? {} : { 'http.response.status_code': observation.statusCode }) } }, ROOT_CONTEXT);
       if (observation.outcome !== 'ok') span.setStatus({ code: SpanStatusCode.ERROR });
       span.end(performance.timeOrigin + performance.now());
     },

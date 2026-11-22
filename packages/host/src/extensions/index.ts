@@ -1,4 +1,4 @@
-import type { ExtensionCallRequest, ExtensionCallValue, ExtensionDescriptor } from '@agentui/contracts/service';
+import type { ExtensionCallRequest, ExtensionCallValue, ExtensionDescriptor } from '@openpane/contracts/service';
 import { createProviderRegistry } from '../providers.js';
 import type { ProviderStatus, ProviderConversationOperations, ProviderCreationOperations, ProviderExtension } from '../providers.js';
 

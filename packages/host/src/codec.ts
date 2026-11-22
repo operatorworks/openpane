@@ -1,5 +1,5 @@
-import { canonicalJson } from '@agentui/contracts';
-import type { Json } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
+import type { Json } from '@openpane/contracts';
 
 export function copyCanonicalJson(value: unknown): Json { return JSON.parse(canonicalJson(value)); }
 export function integer(value: unknown): number {

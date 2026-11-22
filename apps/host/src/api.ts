@@ -1,18 +1,18 @@
-import { frontendToolsFor } from '@agentui/host/frontend-tools';
-import { ContinuationRefused, imageFailure, providerUnavailableReasons } from '@agentui/host';
-import type { ConversationScope } from '@agentui/contracts';
-import type { HostCompatibility } from '@agentui/contracts/compatibility';
-import { conversationPreview } from '@agentui/contracts/conversation';
-import type { Transcript, TranscriptEvent } from '@agentui/contracts/conversation';
-import type { ExtensionCallRequest, ExtensionCallValue, ExtensionDescriptor, ServiceRequest, ServiceValueMap } from '@agentui/contracts/service';
-import type { Installation, LocalHost, ConversationInstallation, ProviderInstallation, ProviderStatus, DiscoveredProvider, ProviderCreationOperations, UnavailableProvider } from '@agentui/host';
+import { frontendToolsFor } from '@openpane/host/frontend-tools';
+import { ContinuationRefused, imageFailure, providerUnavailableReasons } from '@openpane/host';
+import type { ConversationScope } from '@openpane/contracts';
+import type { HostCompatibility } from '@openpane/contracts/compatibility';
+import { conversationPreview } from '@openpane/contracts/conversation';
+import type { Transcript, TranscriptEvent } from '@openpane/contracts/conversation';
+import type { ExtensionCallRequest, ExtensionCallValue, ExtensionDescriptor, ServiceRequest, ServiceValueMap } from '@openpane/contracts/service';
+import type { Installation, LocalHost, ConversationInstallation, ProviderInstallation, ProviderStatus, DiscoveredProvider, ProviderCreationOperations, UnavailableProvider } from '@openpane/host';
 import type { Principal } from './principal.js';
-import { ServiceError } from '@agentui/contracts/service';
+import { ServiceError } from '@openpane/contracts/service';
 import type { FeedRegistry } from './feed-registry.js';
 import { searchConversations } from './conversation-search.js';
 import { conversationProvider, describeAgent, describeProviderAgent, describeUnavailableProvider } from './agents.js';
 import type { InstalledAgent } from './agents.js';
-import { canonicalJson } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
 
 type ApiAgentSelection =
   | { readonly kind: 'native'; readonly agents: readonly InstalledAgent[]; readonly defaultInstallation: Installation }

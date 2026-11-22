@@ -1,2 +1,2 @@
-export { createGenAiObserver, instrumentationScope } from '@mattsp1290/switchboard/observability';
-export type { AgentHandle, GenAiObserver, TerminalOutcome } from '@mattsp1290/switchboard/observability';
+export { createGenAiObserver, instrumentationScope } from '@operatorworks/switchboard/observability';
+export type { AgentHandle, GenAiObserver, TerminalOutcome } from '@operatorworks/switchboard/observability';

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { requestReceiptResponseSchema } from '@birbcrew/client/contract';
-import type { ProviderConversation, ProviderInstance, ProviderModel, ProviderPresentation, ConversationRef } from '@agentui/sdk';
+import type { ProviderConversation, ProviderInstance, ProviderModel, ProviderPresentation, ConversationRef } from '@openpane/sdk';
 
 export const uncertain = () => ({ kind: 'uncertain', reason: 'Crew outcome is unresolved. Recover the original operation.', evidence: null } as const);
 const id = z.string().min(1).max(512);
@@ -19,7 +19,7 @@ export const runSchema = z.strictObject({ requestId: z.uuid(), status: z.enum([
 const instanceSchema = z.strictObject({ namespace: id, installationId: id, generation: id, protocolVersion: id });
 const scopeSchema = z.strictObject({ hostId: id, conversationId: id });
 const sessionSchema = z.strictObject({ namespace: id, installationId: id, opaqueSessionId: z.uuid() });
-export const bindingSchema = z.strictObject({ kind: z.literal('agentui-created'),
+export const bindingSchema = z.strictObject({ kind: z.literal('openpane-created'),
   creation: z.strictObject({ kind: z.literal('create'), operationId: z.uuid(), scope: scopeSchema,
     agent: z.strictObject({ instance: instanceSchema, kind: z.literal('agent'), opaqueId: z.uuid() }),
     from: z.strictObject({ scope: scopeSchema, binding: sessionSchema }).exactOptional() }),

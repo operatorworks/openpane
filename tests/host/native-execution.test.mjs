@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { canonicalJson } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
 import { fixture, scope, installed, command, completed, empty, note, run, question, snapshot } from './fixture.mjs';
 
 function persisted(path) {

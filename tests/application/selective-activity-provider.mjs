@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { EXTENSION_SDK_VERSION, backendProviderContractVersion } from '@agentui/sdk';
-import { parseTranscript, transcriptProjection } from '@agentui/contracts/conversation';
+import { EXTENSION_SDK_VERSION, backendProviderContractVersion } from '@openpane/sdk';
+import { parseTranscript, transcriptProjection } from '@openpane/contracts/conversation';
 
 export async function activityProvider(t) {
   const instance = { namespace: 'activity-feed', installationId: 'activity-install', generation: 'one', protocolVersion: '1' };
@@ -22,7 +22,7 @@ export async function activityProvider(t) {
     const input = JSON.parse(body); requests.push({ path: request.url, input });
     response.setHeader('content-type', 'application/json');
     if (request.url === '/create') {
-      const binding = { kind: 'agentui-created', creation: input, authority: { kind: 'remote-provider', binding: {
+      const binding = { kind: 'openpane-created', creation: input, authority: { kind: 'remote-provider', binding: {
         namespace: instance.namespace, installationId: instance.installationId, opaqueSessionId: input.scope.conversationId } } };
       saved.set(input.scope.conversationId, { binding, cursor: cursor(binding), projectionVersion: 1,
         state: { run: null, transcript: transcriptProjection.initial() }, decisions: [] });

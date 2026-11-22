@@ -1,8 +1,8 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
-import { conversationLabel } from '@agentui/contracts/conversation';
-import type { ConversationScope } from '@agentui/contracts';
-import { SERVICE_SEARCH_QUERY_LENGTH } from '@agentui/contracts/service';
-import type { ConversationSearchEntry } from '@agentui/contracts/service';
+import { conversationLabel } from '@openpane/contracts/conversation';
+import type { ConversationScope } from '@openpane/contracts';
+import { SERVICE_SEARCH_QUERY_LENGTH } from '@openpane/contracts/service';
+import type { ConversationSearchEntry } from '@openpane/contracts/service';
 import type { ApplicationController } from './application-controller.js';
 
 type SearchResult = { readonly query: string; readonly items: readonly ConversationSearchEntry[] } & (

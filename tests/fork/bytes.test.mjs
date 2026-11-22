@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { forkFile } from '../../scripts/lib/agui-fork/bytes.mjs';
 
-const folder = join(tmpdir(), 'agentui-fork-paths');
+const folder = join(tmpdir(), 'openpane-fork-paths');
 for (const [label, file] of [
   ['absolute', join(tmpdir(), 'outside')], ['parent', '..'], ['escape', '../outside'],
   ['nested escape', 'a/../../outside'], ['self', '.'], ['empty', ''],

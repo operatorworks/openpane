@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXTENSION_SDK_VERSION, parseExtensionManifest } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION, parseExtensionManifest } from '@openpane/sdk';
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
 
@@ -18,12 +18,12 @@ export function bundledPlan(root = repository) {
     const directory = realpathSync(join(base, name)), file = join(directory, 'package.json');
     if (!existsSync(file)) continue;
     const metadata = JSON.parse(readFileSync(file, 'utf8'));
-    if (!metadata.agentui?.extension) continue;
-    const manifest = parseExtensionManifest(metadata.agentui.extension);
+    if (!metadata.openpane?.extension) continue;
+    const manifest = parseExtensionManifest(metadata.openpane.extension);
     if (manifest.sdkVersion !== EXTENSION_SDK_VERSION) throw new Error(`Bundled extension ${manifest.namespace} targets SDK ${manifest.sdkVersion}, not ${EXTENSION_SDK_VERSION}`);
     const desktop = manifest.entries.find(entry => entry.kind === 'desktop');
     if (!desktop) continue;
-    const mapped = metadata.agentui.sources?.[desktop.module];
+    const mapped = metadata.openpane.sources?.[desktop.module];
     if (typeof mapped !== 'string') throw new Error(`Bundled extension ${manifest.namespace} has no source for ${desktop.module}`);
     // Check containment on the real path: a symlink inside the package must not point the entry outside `roots`,
     // where the customization plugin would not apply the source policy.

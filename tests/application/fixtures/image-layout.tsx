@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { ConversationContentLayoutProps, UiExtensionEntry } from '@agentui/sdk/react';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { ConversationContentLayoutProps, UiExtensionEntry } from '@openpane/sdk/react';
 
 let pending: Promise<void> | null = null;
 function ImageLayout({ transcript, modules }: ConversationContentLayoutProps) {

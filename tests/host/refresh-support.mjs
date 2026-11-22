@@ -19,7 +19,7 @@ export function deferred() {
 }
 export function databaseFixture(t, builder = { kind: 'unavailable' }) {
   const database = new DatabaseSync(':memory:'), owners = [];
-  const artifactRoot = '/tmp/agentui-refresh-' + randomUUID();
+  const artifactRoot = '/tmp/openpane-refresh-' + randomUUID();
   let stops = 0, replacements = 0;
   const selection = { entries: [], runtime: () => ({ kind: 'empty' }), isClosing: () => false,
     replace: async () => { replacements++; return { kind: 'replaced', generation: null }; }, stopRuntime: () => { stops++; } };
@@ -37,14 +37,14 @@ export function databaseFixture(t, builder = { kind: 'unavailable' }) {
 }
 export async function realFixture(t) {
   const files = await fixture(t), repo = await files.repository('refresh-source');
-  await write(repo.directory, 'server/package.json', { type: 'module', agentui: extension('refresh-test') });
+  await write(repo.directory, 'server/package.json', { type: 'module', openpane: extension('refresh-test') });
   await write(repo.directory, 'server/index.ts', validSource);
   const first = { ...repo.reference(repo.commit()), subdirectory: 'server' };
   await write(repo.directory, 'server/index.ts', validSource.replace('dispose(){}', 'dispose(){} , value: "new"'));
   const second = { ...repo.reference(repo.commit()), subdirectory: 'server' };
   await write(repo.directory, 'server/index.ts', 'dirty bytes cannot compile');
   const seed = await buildServerCustomization({ reference: first, out: join(files.root, 'identity') });
-  globalThis.AGENTUI_SERVER_CUSTOMIZATION_ABI = (await serverCustomizationAbi()).identity;
+  globalThis.OPENPANE_SERVER_CUSTOMIZATION_ABI = (await serverCustomizationAbi()).identity;
   const hash = async path => createHash('sha256').update(await fs.readFile(path)).digest('hex');
   const identity = { kind: 'ready', node: process.execPath,
     entrySha256: await hash(new URL('../../scripts/build-server-customization.mjs', import.meta.url)),

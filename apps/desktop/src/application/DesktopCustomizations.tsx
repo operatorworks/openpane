@@ -1,9 +1,9 @@
 import { Component, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
-import { checkExtensionEntrypoint, type ExtensionManifest } from '@agentui/sdk';
-import type { ConversationActivityProps, ConversationModuleProps, UiExtensionPresentation, UiExtensionEntry } from '@agentui/sdk/react';
-import { createUiExtensionGeneration } from '@agentui/sdk/react-tools';
+import { checkExtensionEntrypoint, type ExtensionManifest } from '@openpane/sdk';
+import type { ConversationActivityProps, ConversationModuleProps, UiExtensionPresentation, UiExtensionEntry } from '@openpane/sdk/react';
+import { createUiExtensionGeneration } from '@openpane/sdk/react-tools';
 import type { GenerationSink } from './frontend-sends.js';
-import type { FrontendToolGeneration } from '@agentui/sdk/tools';
+import type { FrontendToolGeneration } from '@openpane/sdk/tools';
 
 export interface DesktopCustomization {
   readonly manifest: ExtensionManifest;

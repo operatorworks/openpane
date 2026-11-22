@@ -1,8 +1,8 @@
 import { createElement } from 'react';
-import { Text } from '@agentui/ui-primitives/desktop';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { ExtensionLifetime, ExtensionManifest, ServerExtensionEntry } from '@agentui/sdk';
-import type { ConversationModule, ModuleAction, UiExtensionContributions, ConversationModuleProps, FrontendToolContribution, UiExtensionEntry } from '@agentui/sdk/react';
+import { Text } from '@openpane/ui-primitives/desktop';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { ExtensionLifetime, ExtensionManifest, ServerExtensionEntry } from '@openpane/sdk';
+import type { ConversationModule, ModuleAction, UiExtensionContributions, ConversationModuleProps, FrontendToolContribution, UiExtensionEntry } from '@openpane/sdk/react';
 
 export const manifest = {
   namespace: 'notes', trust: 'full', sdkVersion: EXTENSION_SDK_VERSION,

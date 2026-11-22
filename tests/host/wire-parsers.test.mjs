@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseDecision, parseHostEvent, parseReceipt } from '@agentui/contracts';
-import { parseServiceRequest, parseServiceResponse } from '@agentui/contracts/service';
+import { parseDecision, parseHostEvent, parseReceipt } from '@openpane/contracts';
+import { parseServiceRequest, parseServiceResponse } from '@openpane/contracts/service';
 import { connected, snapshot as clientSnapshot } from '../client/support.mjs';
 import { empty, fixture, installed, question, run, scope } from './fixture.mjs';
 

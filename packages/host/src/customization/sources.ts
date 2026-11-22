@@ -5,6 +5,7 @@ import { selectPackage, type NpmInputs } from './packages.js';
 import { SourceBudget } from './budget.js';
 import { readCommittedRepository, type CommittedInputs, type RepositoryTree } from './repository.js';
 
+// Hash domain tag predates the OpenPane rename; changing it would change every recorded artifact identity.
 export function packageIdentity(treeId: string, subdirectory: string): string { return identity(['agentui-package-v1', treeId, subdirectory]); }
 
 export interface ResolvedCustomizationPackage {
@@ -41,7 +42,7 @@ export async function resolveCustomizationSources(input: {
   let nodes = 0;
   let edges = 0;
   await mkdir(scratchParent, { recursive: true, mode: 0o700 });
-  const owner = await mkdtemp(join(scratchParent, 'agentui-sources-'));
+  const owner = await mkdtemp(join(scratchParent, 'openpane-sources-'));
   const dispose = () => rm(owner, { recursive: true, force: true });
   const visit = async (reference: GitExtensionReference, depth: number, external: boolean): Promise<ResolvedCustomizationPackage> => {
     budget.check();

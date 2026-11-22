@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { CODEX_RUNTIME } from '@agentui/contracts/compatibility';
+import { CODEX_RUNTIME } from '@openpane/contracts/compatibility';
 
 const root = new URL('../../', import.meta.url);
 async function until(predicate) {
@@ -23,7 +23,7 @@ function alive(pid) {
 }
 
 test('Codex startup gives browser and native conversations the same runtime and workspace installation', { timeout: 20_000 }, async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-native-codex-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-native-codex-'));
   const workspace = join(directory, 'workspace'), bin = join(directory, 'bin');
   mkdirSync(workspace); mkdirSync(bin);
   const pidPath = join(directory, 'codex-pids.jsonl'), logPath = join(directory, 'rpc.jsonl');

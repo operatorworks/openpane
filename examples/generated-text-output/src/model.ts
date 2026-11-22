@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { canonicalJson, OUTPUT_MAX_BYTES, OUTPUT_MAX_COUNT, OUTPUT_MAX_LIST_BYTES } from '@agentui/contracts';
-import type { TextMetadata } from '@agentui/contracts';
-import type { CreationIntent, ProviderCommandEffect, ProviderConversation, ProviderOutcome } from '@agentui/sdk';
+import { canonicalJson, OUTPUT_MAX_BYTES, OUTPUT_MAX_COUNT, OUTPUT_MAX_LIST_BYTES } from '@openpane/contracts';
+import type { TextMetadata } from '@openpane/contracts';
+import type { CreationIntent, ProviderCommandEffect, ProviderConversation, ProviderOutcome } from '@openpane/sdk';
 
 export const instance = Object.freeze({ namespace: 'reports', installationId: 'reports', generation: '1', protocolVersion: '1' } as const);
 const identity = z.strictObject({ namespace: z.literal('reports'), installationId: z.literal('reports'), generation: z.literal('1'), protocolVersion: z.literal('1') });
@@ -10,7 +10,7 @@ const creation = z.strictObject({ kind: z.literal('create'), operationId: z.uuid
   scope: z.strictObject({ hostId: z.string().min(1).max(1024), conversationId: z.string().min(1).max(1024) }),
   agent: z.strictObject({ instance: identity, kind: z.literal('agent'), opaqueId: z.literal('writer') }) });
 export function binding(intent: CreationIntent<'reports'>): ProviderConversation<'reports'> {
-  return { kind: 'agentui-created', creation: intent, authority: { kind: 'remote-provider', binding: {
+  return { kind: 'openpane-created', creation: intent, authority: { kind: 'remote-provider', binding: {
     namespace: instance.namespace, installationId: instance.installationId, opaqueSessionId: intent.operationId,
   } } };
 }
@@ -26,7 +26,7 @@ export function supportsOutputs(value: ProviderConversation<'reports'>): boolean
   const output = { opaqueId: value.creation.operationId, metadata: reportMetadata(OUTPUT_MAX_BYTES, 'f'.repeat(64)) };
   return Buffer.byteLength(canonicalJson(outputListing(value, Array.from({ length: OUTPUT_MAX_COUNT }, () => output)))) <= OUTPUT_MAX_LIST_BYTES;
 }
-export const conversation = z.strictObject({ kind: z.literal('agentui-created'), creation,
+export const conversation = z.strictObject({ kind: z.literal('openpane-created'), creation,
   authority: z.strictObject({ kind: z.literal('remote-provider'), binding: z.strictObject({ namespace: z.literal('reports'),
     installationId: z.literal('reports'), opaqueSessionId: z.uuidv4() }) }),
 }).refine(value => canonicalJson(value) === canonicalJson(binding(value.creation)) && Buffer.byteLength(canonicalJson(value)) <= 8192 && supportsOutputs(value));

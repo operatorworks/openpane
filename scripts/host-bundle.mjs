@@ -12,7 +12,7 @@ export async function buildHostBundle({ abi, entryPoint = 'apps/host/src/main.ts
     outdir,
     splitting: true,
     chunkNames: 'chunks/[name]-[hash]',
-    define: { AGENTUI_SERVER_CUSTOMIZATION_ABI: JSON.stringify(abi.identity) },
+    define: { OPENPANE_SERVER_CUSTOMIZATION_ABI: JSON.stringify(abi.identity) },
     bundle: true,
     platform: 'node',
     format: 'esm',

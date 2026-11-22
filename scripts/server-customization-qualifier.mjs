@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { CustomizationError, serverCatalog } from '@agentui/host/customization';
+import { CustomizationError, serverCatalog } from '@openpane/host/customization';
 
 import { serverCatalogLinkage } from './server-catalog-loader.mjs';
 
@@ -18,6 +18,6 @@ export async function qualifyServerCatalog({ directory, manifest, abi }) {
     });
     pending.child.stdin.end(JSON.stringify({ ...linkage, manifests }));
     const { stdout } = await pending;
-    if (!stdout.endsWith('agentui-catalog-qualified')) throw new Error();
+    if (!stdout.endsWith('openpane-catalog-qualified')) throw new Error();
   } catch { throw CustomizationError.fixed('entry-validation'); }
 }

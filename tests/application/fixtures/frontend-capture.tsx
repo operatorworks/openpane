@@ -1,5 +1,5 @@
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { UiExtensionEntry } from '@agentui/sdk/react';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { UiExtensionEntry } from '@openpane/sdk/react';
 
 const disposed: number[] = [];
 const fixture = { activations: 0, disposed, executions: 0 };

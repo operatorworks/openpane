@@ -1,6 +1,6 @@
 # Coworkers extension qualification
 
-The `extensions/coworkers` extension connects AgentUI to a crabber-coworkers service through its v1 HTTP API, pinned at upstream revision `44ed2ad8326a4822a67a3eeca4087cfc98f03df8` (`extensions/coworkers/openapi/REVISION`). It lists the configured coworkers, creates AgentUI-owned conversations with them and receives replies by polling, because upstream has no event stream yet.
+The `extensions/coworkers` extension connects OpenPane to a crabber-coworkers service through its v1 HTTP API, pinned at upstream revision `44ed2ad8326a4822a67a3eeca4087cfc98f03df8` (`extensions/coworkers/openapi/REVISION`). It lists the configured coworkers, creates OpenPane-owned conversations with them and receives replies by polling, because upstream has no event stream yet.
 
 ## Controlled evidence
 

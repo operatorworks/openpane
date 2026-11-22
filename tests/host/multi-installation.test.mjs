@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { join } from 'node:path';
-import { createRecordedDriver } from '@agentui/host';
+import { createRecordedDriver } from '@openpane/host';
 import { fixture, scope, other, installed, command, completed, note, run, projection } from './fixture.mjs';
 
 for (const changedBinding of ['authorizedScope', 'account']) {

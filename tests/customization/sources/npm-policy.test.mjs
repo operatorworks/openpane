@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdir } from 'node:fs/promises';
 import { test } from 'node:test';
-import { CustomizationError } from '@agentui/host/customization';
+import { CustomizationError } from '@openpane/host/customization';
 import { manager, write, fixture, shared, reference, lockFor, registry } from './source-support.mjs';
 
 test('lock drift, missing entries, malformed entries and unsupported npm sources reject as a unit', async t => {
@@ -76,7 +76,7 @@ test('manifest and lock filename aliases cannot establish a locked npm context',
     const f = await fixture(t);
     const repo = await f.repository('control-alias');
     const pkg = { name: 'root', version: '1.0.0', packageManager: manager,
-      dependencies: { value: '1.0.0' }, agentui: { shared: './source.ts' } };
+      dependencies: { value: '1.0.0' }, openpane: { shared: './source.ts' } };
     const manifestAlias = name.toLowerCase() === 'package.json';
     await write(repo.directory, manifestAlias ? name : 'package.json', pkg);
     await write(repo.directory, manifestAlias ? 'package-lock.json' : name, lockFor(pkg, { 'node_modules/value': registry }));

@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { createBrowserConnection } from '@agentui/client/service';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { createBrowserConnection } from '@openpane/client/service';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { crew, crewBackend, crewPresentation } from '../extensions/providers/contracts/crew.ts';
 import { local, localBackend, localPresentation } from '../extensions/providers/contracts/local.ts';
 
@@ -31,8 +31,8 @@ function extension({ agui = false, native = false, create, lookup, submit, recon
   presentation.request = (text, binding) => { calls.translations++; return request ? request(text, binding) : originalRequest(text, binding); };
   if (decode) presentation.decodeRequest = decode;
   let context, credential;
-  const binding = operation => ({ kind: 'agentui-created', creation: operation, authority: {
-    kind: native ? 'agentui-host' : 'remote-provider', ...(native ? { hostId: operation.scope.hostId } : {}),
+  const binding = operation => ({ kind: 'openpane-created', creation: operation, authority: {
+    kind: native ? 'openpane-host' : 'remote-provider', ...(native ? { hostId: operation.scope.hostId } : {}),
     binding: { namespace: presentation.instance.namespace, installationId: presentation.instance.installationId, opaqueSessionId: 'same-session' },
   } });
   const confirmed = operation => ({ kind: 'confirmed', value: binding(operation), evidence: { operationId: operation.operationId } });
@@ -53,12 +53,12 @@ function extension({ agui = false, native = false, create, lookup, submit, recon
       value.providers[agui ? 'addAgui' : 'add']('service', { ...provider, async connect(request) { credential = request.credential; return { kind: 'connected', backend: connected }; } }, presentation);
       return { async dispose() { calls.dispose++; } };
     } },
-    installations: [{ id: 'service', instance: presentation.instance, service, expectedAuthority: native ? 'agentui-host' : 'remote-provider',
+    installations: [{ id: 'service', instance: presentation.instance, service, expectedAuthority: native ? 'openpane-host' : 'remote-provider',
       authentication: { kind: 'secret', revision, resolve: async () => secret } }],
   } };
 }
 async function fixture(t, extensions) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-provider-send-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-provider-send-'));
   let running;
   const lost = new Set();
   const client = createBrowserConnection({ fetch: async (url, init) => {

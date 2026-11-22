@@ -1,4 +1,4 @@
-import * as SDK from '@agentui/sdk';
+import * as SDK from '@openpane/sdk';
 
 export type LocalModel = {
   request: { input: readonly { role: 'user'; content: string }[] };
@@ -19,8 +19,8 @@ export const localCreation: SDK.CreationIntent<'native-work'> = {
   kind: 'create', operationId: 'local-create', scope: { hostId: 'host', conversationId: 'local' }, agent: localAgent,
 };
 export const localBinding: SDK.ProviderConversation<'native-work'> = {
-  kind: 'agentui-created', creation: localCreation,
-  authority: { kind: 'agentui-host', hostId: 'host', binding: {
+  kind: 'openpane-created', creation: localCreation,
+  authority: { kind: 'openpane-host', hostId: 'host', binding: {
     namespace: localInstance.namespace, installationId: localInstance.installationId, opaqueSessionId: 'same-session',
   } },
 };

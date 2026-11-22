@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createBrowserConnection } from '@agentui/client/service';
+import { createBrowserConnection } from '@openpane/client/service';
 import { options, startBrowserHost } from '../../../tests/host/extensions/fixtures.mjs';
 import { crewService } from './support/crew-service.mjs';
 import { listedMembers } from '../dist/operations.js';
@@ -12,7 +12,7 @@ import { listedMembers } from '../dist/operations.js';
 const directory = fileURLToPath(new URL('../', import.meta.url));
 const token = 'PRIVATE_CREW_OPERATION_TOKEN_77';
 const instance = { namespace: 'crew', installationId: 'personal', generation: '1', protocolVersion: '1' };
-const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).agentui.extension;
+const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).openpane.extension;
 
 /** The built extension through an installed entry and the host's real credential authority. */
 async function open(t, service, { operationDeadlineMs } = {}) {

@@ -1,7 +1,7 @@
 {
   "sources": {
     "switchboard": {
-      "repository": "https://github.com/mattsp1290/switchboard",
+      "repository": "https://github.com/operatorworks/switchboard",
       "revision": "58c7922d8fade3617cc86fedcf41677f897025ef",
       "license": "SWITCHBOARD-LICENSE"
     },

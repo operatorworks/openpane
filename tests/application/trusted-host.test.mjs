@@ -11,7 +11,7 @@ import { hostRequest } from './support/host-process.mjs';
 const root = new URL('../../', import.meta.url);
 
 async function fixture(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-trusted-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-trusted-'));
   const processes = [];
   const f = { directory, origin: '', hostId: '' };
   f.start = async () => {
@@ -95,7 +95,7 @@ test('direct access still rejects foreign Host, Origin, content type and native 
   await rejected('/api/v1', { Origin: f.origin, 'Content-Type': 'text/plain' });
   await rejected('/native/v1', { Host: `evil.example:${port}` });
   await rejected('/native/v1', { Origin: f.origin });
-  await rejected('/native/v1', { Cookie: 'agentui=1' });
+  await rejected('/native/v1', { Cookie: 'openpane=1' });
   await rejected('/native/v1', { 'Content-Type': 'text/plain' });
 });
 
@@ -103,7 +103,7 @@ test('default host creates and resumes a chat without an invitation, cookie or c
   const f = await fixture(t);
   assert.equal((await fetch(`${f.origin}/browser.html`)).status, 200);
   const metadata = await f.ok({ op: 'metadata' });
-  const staleCookie = await f.call({ op: 'metadata' }, { Cookie: `agentui_device_${metadata.hostId}=expired-pairing` });
+  const staleCookie = await f.call({ op: 'metadata' }, { Cookie: `openpane_device_${metadata.hostId}=expired-pairing` });
   assert.equal(staleCookie.status, 200);
   assert.equal(staleCookie.body.value.principalId, metadata.principalId);
   for (const command of ['invite', 'invite-native', 'devices', 'revoke']) {

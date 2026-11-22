@@ -18,7 +18,7 @@ export const wait = async (predicate, label) => {
   }
 };
 export async function fixture(t, assets) {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-browser-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-browser-'));
   const browser = await chromium.launch();
   let child, stderr = '';
   const start = async (port = 0) => {
@@ -68,7 +68,7 @@ export async function connected(page) { await page.getByRole('status').filter({ 
 export async function draft(page, text) {
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill(text);
   await wait(() => page.evaluate(async expected => {
-    const request = indexedDB.open('agentui-browser-views', 1);
+    const request = indexedDB.open('openpane-browser-views', 1);
     const db = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
     const read = db.transaction('records').objectStore('records').getAll();
     const rows = await new Promise((resolve, reject) => { read.onsuccess = () => resolve(read.result); read.onerror = () => reject(read.error); });
@@ -111,7 +111,7 @@ export async function customRuntime(page, host, selection, breakDefault = false,
  */
 export async function extensionFixture(t, { extensions = [], agentStartup = { kind: 'recorded' }, operationDeadlineMs } = {}) {
   const { startBrowserHost } = await import('../host/extensions/fixtures.mjs');
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-extension-browser-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-extension-browser-'));
   const browser = await chromium.launch();
   let running = await startBrowserHost({ agentStartup, directory, port: 0, assetsDirectory: join(root, 'apps/desktop/web-dist-browser'),
     extensions: { kind: 'transient', entries: extensions }, ...(operationDeadlineMs ? { operationDeadlineMs } : {}) });

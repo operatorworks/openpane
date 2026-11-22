@@ -6,7 +6,7 @@ const markers = /(\\*)(__VITE_CSS_URL__[\da-f]+__)/gu;
 // Vite replaces CSS markers inside double-quoted strings with concatenations.
 // Group their entire expression before replacement to preserve operator precedence.
 export function cssUrlExpressions() {
-  return { name: 'agentui-css-url-expressions', enforce: 'pre', renderChunk: { order: 'pre', handler(code) {
+  return { name: 'openpane-css-url-expressions', enforce: 'pre', renderChunk: { order: 'pre', handler(code) {
     if (!marker.test(code)) return;
     const output = new MagicString(code);
     let changed = false;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import axe from 'axe-core';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { customRuntime, draft, extensionFixture, fixture, revealRecovery, wait } from './browser-support.mjs';
 import { ledgerExtension, ledgerService } from '../extensions/providers/conformance/ledger.mjs';
 

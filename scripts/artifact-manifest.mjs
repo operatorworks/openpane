@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
-import { canonicalJson } from '@agentui/contracts';
-import { RECORDED_RUNTIME, SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION } from '@agentui/contracts/compatibility';
-import { BROWSER_RUNTIME, manifestPayload, parseArtifactManifest } from '@agentui/contracts/artifact';
+import { canonicalJson } from '@openpane/contracts';
+import { RECORDED_RUNTIME, SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION } from '@openpane/contracts/compatibility';
+import { BROWSER_RUNTIME, manifestPayload, parseArtifactManifest } from '@openpane/contracts/artifact';
 
 const targets = {
   host: { directory: 'apps/host/dist', nativeRuntime: { engine: 'node', version: process.versions.node, format: 'esm' } },

@@ -18,7 +18,7 @@ U2 answered ─► U-Coworkers ─► [G3] ─► WP10 (after WP8)
 | WP2 | Provider identity on agents and catalog entries; catalog provider filter; wire 16; no schema change | [02](02-agent-identity-and-catalog.md) | `packages/contracts/src/service.ts`, `apps/host/src/agents.ts`, `apps/host/src/api.ts`, `packages/host/src/sqlite-store.ts`, `wire.rs` | WP1 |
 | WP3 | `workspace` contribution; Extensions rail item and view; SDK 0.13.0 | [03](03-workspace-views-and-navigation.md) | `packages/sdk/src/react.ts`, `apps/desktop/src/shell/BrowserApplication.tsx`, `apps/desktop/src/shell/Shell.tsx`, `apps/desktop/src/application/application-controller.ts`, `apps/desktop/src/application/ExtensionsView.tsx` (new), `application.css`, `tests/application/browser-support.mjs` | G1 |
 | WP4a | `examples/crew` moved to `extensions/crew` | [04](04-bundled-extensions-and-launch.md) | move plus reference updates | WP3 |
-| WP4b | Canonical manifests; desktop bundling; `desktop --extensions`; launcher discovery | [04](04-bundled-extensions-and-launch.md) | `extensions/crew/package.json`, `scripts/bundled-extensions.mjs` (new), `scripts/local-customization.mjs`, `scripts/build-local-customization.mjs`, `apps/desktop/vite.config.mjs`, `apps/host/src/main.ts`, `scripts/agentui-launch.mjs` | WP4a |
+| WP4b | Canonical manifests; desktop bundling; `desktop --extensions`; launcher discovery | [04](04-bundled-extensions-and-launch.md) | `extensions/crew/package.json`, `scripts/bundled-extensions.mjs` (new), `scripts/local-customization.mjs`, `scripts/build-local-customization.mjs`, `apps/desktop/vite.config.mjs`, `apps/host/src/main.ts`, `scripts/openpane-launch.mjs` | WP4a |
 | WP5 | Crew server entry, multi-member discovery, `members.list`, `members.create` | [05](05-crew-extension.md) | `extensions/crew/src` | WP4b |
 | WP6 | Crew Slack-style view with create, list and chat | [05](05-crew-extension.md) | `extensions/crew/src/desktop` | WP5 |
 | WP7 | Coworkers provider, server entry, `coworkers.list` | [06](06-coworkers-extension.md) | `extensions/coworkers` (new) | WP6 |
@@ -59,10 +59,10 @@ npm test
 
 - WP1, WP2: also run `cargo test` in `apps/desktop/src-tauri`.
 - WP3, WP4b, WP6, WP8: browser tests need `npm run setup:browser` once and a completed `npm run build`.
-- WP3, WP6, WP8: also start the app (`./agentui` or `npm run host:browser-dev` after a build) and exercise the view by hand. Report what was observed. Compile success is not evidence that the view works.
+- WP3, WP6, WP8: also start the app (`./openpane` or `npm run host:browser-dev` after a build) and exercise the view by hand. Report what was observed. Compile success is not evidence that the view works.
 - WP4b, WP6, WP8, native mode: open the bundled Mac app against a local host started with `--extensions`, open each workspace, and create and chat. The native path has its own CSP and a Rust-owned transport that only `cargo test` covers otherwise. If the Mac app cannot be built or run in the implementing environment, state that the native check did not happen.
 - WP5, WP7: run the live qualification, or state that it was not run.
-- WP4b: run `node scripts/verify-agentui-launch.mjs` and confirm the four new cases pass. Run `npm run clean` and then `npm run desktop:build` as separate commands.
+- WP4b: run `node scripts/verify-openpane-launch.mjs` and confirm the four new cases pass. Run `npm run clean` and then `npm run desktop:build` as separate commands.
 - WP9, WP10: also run the live qualification procedure, or state that it was not run.
 - Every package: `git grep -n -i crew -- apps packages scripts templates` shows no new match.
 
@@ -106,7 +106,7 @@ Full outcome:
 - iOS navigation and workspace rendering.
 - Coworkers reply streaming, after upstream ships its AG-UI route.
 - A Continue control for concluded Crew conversations in the workspace.
-- Importing Crew or Coworkers conversations that were created outside AgentUI.
+- Importing Crew or Coworkers conversations that were created outside OpenPane.
 - Human-decision surfaces specific to Crew inside the workspace beyond the host's existing approvals.
 - Mutable Crew member rename (U1).
 - Conversation activity times and recency ordering in the host catalog.

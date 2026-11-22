@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { parseDocument, parseHostEvent, parseScope, sameScope } from '@agentui/contracts';
-import { count, record } from '@agentui/contracts/decode';
-import { parseTranscript, parseTranscriptEvent } from '@agentui/contracts/conversation';
+import { parseDocument, parseHostEvent, parseScope, sameScope } from '@openpane/contracts';
+import { count, record } from '@openpane/contracts/decode';
+import { parseTranscript, parseTranscriptEvent } from '@openpane/contracts/conversation';
 
 export function migrateTranscriptDatabase(db: DatabaseSync): void {
   if (!db.prepare('SELECT 1 FROM conversations WHERE version<>4 LIMIT 1').get()) return;

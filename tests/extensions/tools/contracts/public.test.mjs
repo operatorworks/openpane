@@ -14,7 +14,7 @@ function run(command, args, cwd) {
   return result.stdout;
 }
 test('packed tools consumer resolves its dependency and types without DOM', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'agentui-tools-consumer-'));
+  const dir = await mkdtemp(join(tmpdir(), 'openpane-tools-consumer-'));
   try {
     const packs = JSON.parse(
       run(
@@ -45,7 +45,7 @@ test('packed tools consumer resolves its dependency and types without DOM', asyn
       for (const dependency of Object.keys(manifest.dependencies ?? {})) {
         assert.ok(names.has(dependency), `${pack.name} needs ${dependency}`);
       }
-      if (pack.name === '@agentui/sdk') assert.equal(manifest.dependencies['@cfworker/json-schema'], '4.1.6');
+      if (pack.name === '@openpane/sdk') assert.equal(manifest.dependencies['@cfworker/json-schema'], '4.1.6');
     }
     await writeFile(join(dir, 'package.json'), '{"type":"module"}');
     await writeFile(
@@ -55,10 +55,10 @@ test('packed tools consumer resolves its dependency and types without DOM', asyn
     await assertCompileCases({
       config: join(dir, 'tsconfig.json'),
       prefix:
-        "import { createFrontendToolGeneration, pinFrontendTools, retainFrontendTools, type RetainedFrontendTools, type FrontendToolRetentionOptions, type FrontendToolContribution, type FrontendToolOutcome } from '@agentui/sdk/tools';\nexport { createFrontendToolGeneration, pinFrontendTools, retainFrontendTools }; export type { RetainedFrontendTools, FrontendToolRetentionOptions, FrontendToolContribution, FrontendToolOutcome };\n",
+        "import { createFrontendToolGeneration, pinFrontendTools, retainFrontendTools, type RetainedFrontendTools, type FrontendToolRetentionOptions, type FrontendToolContribution, type FrontendToolOutcome } from '@openpane/sdk/tools';\nexport { createFrontendToolGeneration, pinFrontendTools, retainFrontendTools }; export type { RetainedFrontendTools, FrontendToolRetentionOptions, FrontendToolContribution, FrontendToolOutcome };\n",
       cases: [
         [
-          "const t: FrontendToolContribution<string> = { definition: { name: 'x', description: 'x' }, decodeInput() { return 'x'; }, async execute(x) { return x; } }; void createFrontendToolGeneration; void t; declare const g: import('@agentui/sdk/tools').FrontendToolGeneration; declare const run: import('@agentui/contracts').RunIdentity; const p = pinFrontendTools({ generations: [g], platform: 'ios', run, capabilities: { tools: { clientProvided: true } } }); const o: Promise<FrontendToolOutcome> = p.invoke('a__b', {}, 'activation'); void o;",
+          "const t: FrontendToolContribution<string> = { definition: { name: 'x', description: 'x' }, decodeInput() { return 'x'; }, async execute(x) { return x; } }; void createFrontendToolGeneration; void t; declare const g: import('@openpane/sdk/tools').FrontendToolGeneration; declare const run: import('@openpane/contracts').RunIdentity; const p = pinFrontendTools({ generations: [g], platform: 'ios', run, capabilities: { tools: { clientProvided: true } } }); const o: Promise<FrontendToolOutcome> = p.invoke('a__b', {}, 'activation'); void o;",
           null,
         ],
         [
@@ -82,7 +82,7 @@ test('packed tools consumer resolves its dependency and types without DOM', asyn
           /Property 'dispose' does not exist/u,
         ],
         [
-          "const result = await createFrontendToolGeneration({ namespace: 'demo', generation: '1', platform: 'desktop', async capture() { return { modules: ['async'] }; }, activate(context) { const namespace: string = context.namespace; const tools: import('@agentui/sdk/tools').FrontendToolContributions = context.frontendTools; void namespace; void tools; return {}; } }); const modules: string[] = result.contributions.modules; void modules; void pinFrontendTools; declare const tool: FrontendToolContribution<string>; declare const outcome: FrontendToolOutcome; void tool; void outcome;",
+          "const result = await createFrontendToolGeneration({ namespace: 'demo', generation: '1', platform: 'desktop', async capture() { return { modules: ['async'] }; }, activate(context) { const namespace: string = context.namespace; const tools: import('@openpane/sdk/tools').FrontendToolContributions = context.frontendTools; void namespace; void tools; return {}; } }); const modules: string[] = result.contributions.modules; void modules; void pinFrontendTools; declare const tool: FrontendToolContribution<string>; declare const outcome: FrontendToolOutcome; void tool; void outcome;",
           null,
         ],
         [
@@ -101,21 +101,21 @@ test('packed tools consumer resolves its dependency and types without DOM', asyn
           "void createFrontendToolGeneration({ namespace: 'demo', generation: '1', platform: 'desktop', capture: false, activate() { return {}; } });",
           /not assignable/u,
         ],
-        ["declare const options: FrontendToolRetentionOptions; declare const run: import('@agentui/contracts').RunIdentity; const retained: RetainedFrontendTools = retainFrontendTools(options); const pin: import('@agentui/sdk/tools').FrontendToolPin = retained.bind(run); void pin;", null],
+        ["declare const options: FrontendToolRetentionOptions; declare const run: import('@openpane/contracts').RunIdentity; const retained: RetainedFrontendTools = retainFrontendTools(options); const pin: import('@openpane/sdk/tools').FrontendToolPin = retained.bind(run); void pin;", null],
         ["declare const retained: RetainedFrontendTools; retained.invoke('demo__x', {}, 'activation');", /Property 'invoke' does not exist/u],
         ["declare const retained: RetainedFrontendTools; retained.definitions.push({ name: 'x', description: '' });", /Property 'push' does not exist/u],
         ["declare const retained: RetainedFrontendTools; retained.definitions[0].name = 'changed';", /read-only property/u],
         ["declare const retained: RetainedFrontendTools; retained.bindings[0].activationId = 'changed';", /read-only property/u],
         ["declare const retained: RetainedFrontendTools; retained.bindings.push({ name: 'x', activationId: 'changed' });", /Property 'push' does not exist/u],
-        ["declare const p: import('@agentui/sdk/tools').FrontendToolPin; p.definitions[0].name = 'changed';", /read-only property/u],
-        ["declare const p: import('@agentui/sdk/tools').FrontendToolPin; p.invoke('demo__x', {});", /Expected 3 arguments/u],
-        ["import type { RunAgentInput } from '@ag-ui/core'; import type { FrontendDefinition, FrontendOffer } from '@agentui/contracts'; type Tool = NonNullable<RunAgentInput['tools']>[number]; function wire<T extends Tool>(value: T): FrontendDefinition { return value; } declare const retained: RetainedFrontendTools; const offer: FrontendOffer = { platform: 'desktop', tools: retained.definitions.map(definition => ({ definition, activationId: 'activation' })) }; void wire; void offer;", null],
-        ["const definition: import('@agentui/contracts').FrontendDefinition = { name: 'demo__tool', description: 'Tool', parameters: { properties: { flag: true } }, metadata: { label: 'Tool' } }; const absent: import('@agentui/contracts').FrontendDefinition = { name: 'demo__tool', description: 'Tool' }; void definition; void absent;", null],
-        ["const definition: import('@agentui/contracts').FrontendDefinition = { name: 'demo__tool', description: 'Tool', parameters: true }; void definition;", /not assignable/u],
-        ["const definition: import('@agentui/contracts').FrontendDefinition = { name: 'demo__tool', description: 'Tool', parameters: [] }; void definition;", /not assignable/u],
-        ["const definition: import('@agentui/contracts').FrontendDefinition = { name: 'demo__tool', description: 'Tool', parameters: null }; void definition;", /not assignable/u],
-        ["const definition: import('@agentui/contracts').FrontendDefinition = { name: 'demo__tool', description: 'Tool', parameters: undefined }; void definition;", /not assignable/u],
-        ["declare const definition: import('@agentui/contracts').FrontendDefinition; const label: string = definition.metadata?.label; void label;", /not assignable/u],
+        ["declare const p: import('@openpane/sdk/tools').FrontendToolPin; p.definitions[0].name = 'changed';", /read-only property/u],
+        ["declare const p: import('@openpane/sdk/tools').FrontendToolPin; p.invoke('demo__x', {});", /Expected 3 arguments/u],
+        ["import type { RunAgentInput } from '@ag-ui/core'; import type { FrontendDefinition, FrontendOffer } from '@openpane/contracts'; type Tool = NonNullable<RunAgentInput['tools']>[number]; function wire<T extends Tool>(value: T): FrontendDefinition { return value; } declare const retained: RetainedFrontendTools; const offer: FrontendOffer = { platform: 'desktop', tools: retained.definitions.map(definition => ({ definition, activationId: 'activation' })) }; void wire; void offer;", null],
+        ["const definition: import('@openpane/contracts').FrontendDefinition = { name: 'demo__tool', description: 'Tool', parameters: { properties: { flag: true } }, metadata: { label: 'Tool' } }; const absent: import('@openpane/contracts').FrontendDefinition = { name: 'demo__tool', description: 'Tool' }; void definition; void absent;", null],
+        ["const definition: import('@openpane/contracts').FrontendDefinition = { name: 'demo__tool', description: 'Tool', parameters: true }; void definition;", /not assignable/u],
+        ["const definition: import('@openpane/contracts').FrontendDefinition = { name: 'demo__tool', description: 'Tool', parameters: [] }; void definition;", /not assignable/u],
+        ["const definition: import('@openpane/contracts').FrontendDefinition = { name: 'demo__tool', description: 'Tool', parameters: null }; void definition;", /not assignable/u],
+        ["const definition: import('@openpane/contracts').FrontendDefinition = { name: 'demo__tool', description: 'Tool', parameters: undefined }; void definition;", /not assignable/u],
+        ["declare const definition: import('@openpane/contracts').FrontendDefinition; const label: string = definition.metadata?.label; void label;", /not assignable/u],
         ['void document;', /Cannot find name 'document'/u],
         ['void process;', /Cannot find name 'process'/u],
       ],
@@ -127,7 +127,7 @@ test('packed tools consumer resolves its dependency and types without DOM', asyn
         '-e',
         `
           import assert from 'node:assert/strict';
-          import { createFrontendToolGeneration, pinFrontendTools, retainFrontendTools } from '@agentui/sdk/tools';
+          import { createFrontendToolGeneration, pinFrontendTools, retainFrontendTools } from '@openpane/sdk/tools';
           const { generation } = await createFrontendToolGeneration({
             namespace: 'demo', generation: '1', platform: 'ios', capture() { return undefined; },
             activate({ frontendTools: tools }) {
@@ -167,7 +167,7 @@ test('packed tools consumer resolves its dependency and types without DOM', asyn
   }
 });
 test('root and react bundles exclude the validator', async () => {
-  for (const entry of ['@agentui/sdk', '@agentui/sdk/react']) {
+  for (const entry of ['@openpane/sdk', '@openpane/sdk/react']) {
     const result = await build({
       stdin: { contents: `import * as sdk from '${entry}'; console.log(sdk);`, resolveDir: root },
       bundle: true,
@@ -193,7 +193,7 @@ test('tools import survives a URL with a getter-only hash', () => {
       `
     const NativeURL = URL;
     globalThis.URL = class extends NativeURL { get hash() { return super.hash; } };
-    const { createFrontendToolGeneration } = await import('@agentui/sdk/tools');
+    const { createFrontendToolGeneration } = await import('@openpane/sdk/tools');
     let failed = false;
     try { await createFrontendToolGeneration({ namespace: 'demo', generation: '1', platform: 'ios', capture() { return undefined; }, activate({ frontendTools: t }) { t.add({ definition: { name: 'x', description: 'x' }, decodeInput(x) { return x; }, async execute() { return ''; } }); return { dispose() {} }; } }); } catch (error) { failed = /standards-compliant URL/.test(error.message) && error.cause instanceof Error; }
     if (!failed) throw Error('registration should fail with a constrained URL');
@@ -206,12 +206,12 @@ test('tools import survives a URL with a getter-only hash', () => {
 
 test('react-tools opts into validator runtime while its declarations need no platform globals', async () => {
   const result = await build({
-    stdin: { contents: "import { createUiExtensionGeneration } from '@agentui/sdk/react-tools'; console.log(createUiExtensionGeneration);", resolveDir: root },
+    stdin: { contents: "import { createUiExtensionGeneration } from '@openpane/sdk/react-tools'; console.log(createUiExtensionGeneration);", resolveDir: root },
     bundle: true, platform: 'node', format: 'esm', write: false, metafile: true, external: ['react'],
   });
   assert.equal(Object.keys(result.metafile.inputs).some(path => path.includes('@cfworker/json-schema')), true);
   await assertCompileCases({ config: join(root, 'packages/sdk/tsconfig.react.json'),
-    prefix: "import { createUiExtensionGeneration } from '@agentui/sdk/react-tools';\n",
+    prefix: "import { createUiExtensionGeneration } from '@openpane/sdk/react-tools';\n",
     cases: [
       ["const active = await createUiExtensionGeneration({ namespace: 'demo', generation: 'one', platform: 'desktop', activate() { return { modules: [], dispose() {} }; } }); void active.generation.retire; void active.presentation.modules;", null],
       ["const active = await createUiExtensionGeneration({ namespace: 'demo', generation: 'one', platform: 'desktop', activate() { return { modules: [], dispose() {} }; } }); active.presentation.dispose();", /Property 'dispose' does not exist/u],

@@ -14,7 +14,7 @@ test('AG-UI SDK, validator and installed license match the retained pins', () =>
   const lock = json('package-lock.json');
   assert.equal(digest(readFileSync(join(fork.folder, fork.core.artifact))), fork.core.sha256, 'Installed SDK archive digest must match fork provenance');
   assert.equal(fork.core.version, sdk.version, 'Installed SDK version must match the historical pin');
-  assert.equal(digest(readFileSync(join(dirname(hostDependencyManifest('@mattsp1290/switchboard')), 'LICENSE'))), provenance.files['SWITCHBOARD-LICENSE'].sha256, 'Installed Switchboard license must match the retained digest');
+  assert.equal(digest(readFileSync(join(dirname(hostDependencyManifest('@operatorworks/switchboard')), 'LICENSE'))), provenance.files['SWITCHBOARD-LICENSE'].sha256, 'Installed Switchboard license must match the retained digest');
   assert.equal(lock.packages['node_modules/ajv'].version, project.devDependencies.ajv, 'Locked Ajv version must match the root manifest');
   assert.deepEqual(json('node_modules/@ag-ui/core/package.json'), fork.core.packedManifest, 'Installed SDK manifest must match the frozen fork core');
   assert.equal(json('node_modules/ajv/package.json').version, project.devDependencies.ajv, 'Installed Ajv version must match the root manifest');

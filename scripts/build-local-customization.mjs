@@ -21,7 +21,7 @@ let owned = false, scratch, prepared;
 try {
   await mkdir(out, { mode: 0o700 });
   owned = true;
-  scratch = await realpath(await mkdtemp(join(dirname(out), '.agentui-build-')));
+  scratch = await realpath(await mkdtemp(join(dirname(out), '.openpane-build-')));
   prepared = await prepareCustomizationSources({ reference: { repository: values.repository, commit: values.commit,
     ...(values.subdirectory ? { subdirectory: values.subdirectory } : {}) }, scratchParent: scratch });
   const plan = desktopPlan(prepared.root);

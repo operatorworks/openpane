@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
-import { createBrowserConnection, ServiceError, ServiceProtocolError } from '@agentui/client/service';
-import { parseServiceRequest, parseServiceResponse, parseServicePull, SERVICE_MAX_RESPONSE_BYTES } from '@agentui/contracts/service';
+import { createBrowserConnection, ServiceError, ServiceProtocolError } from '@openpane/client/service';
+import { parseServiceRequest, parseServiceResponse, parseServicePull, SERVICE_MAX_RESPONSE_BYTES } from '@openpane/contracts/service';
 
 const scope = { hostId: 'host', conversationId: 'conversation' };
 const snapshot = { kind: 'snapshot', snapshot: { scope, projectionVersion: 4, cursor: 0,

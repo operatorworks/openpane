@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { EXTENSION_SDK_VERSION, parseExtensionManifest } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION, parseExtensionManifest } from '@openpane/sdk';
 import { bundledPlan } from '../../../scripts/bundled-extensions.mjs';
 import { customizationPlugin, mergePlans } from '../../../scripts/lib/customization-plugin.mjs';
 
@@ -15,9 +15,9 @@ test('every in-repo extension manifest parses and targets the current SDK', asyn
   assert.ok(names.length > 0);
   for (const name of names) {
     const metadata = JSON.parse(await readFile(join(root, 'extensions', name, 'package.json'), 'utf8'));
-    const manifest = parseExtensionManifest(metadata.agentui.extension);
+    const manifest = parseExtensionManifest(metadata.openpane.extension);
     assert.equal(manifest.sdkVersion, EXTENSION_SDK_VERSION, name);
-    assert.equal(metadata.name.startsWith('@agentui/'), false, `${name} stays outside the @agentui/ scope`);
+    assert.equal(metadata.name.startsWith('@openpane/'), false, `${name} stays outside the @openpane/ scope`);
   }
 });
 
@@ -28,12 +28,12 @@ test('bundledPlan lists desktop entries sorted by namespace with only extension 
   assert.ok(namespaces.length > 0);
   assert.ok(plan.roots.every(directory => directory.startsWith(join(root, 'extensions'))));
   assert.equal(plan.roots.includes(root.replace(/\/$/u, '')), false);
-  const temp = await mkdtemp(join(tmpdir(), 'agentui-bundled-'));
+  const temp = await mkdtemp(join(tmpdir(), 'openpane-bundled-'));
   t.after(() => rm(temp, { recursive: true, force: true }));
   const write = async (name, extension, sources) => {
     await mkdir(join(temp, 'extensions', name, 'src'), { recursive: true });
     await writeFile(join(temp, 'extensions', name, 'src', 'index.tsx'), 'export default {};');
-    await writeFile(join(temp, 'extensions', name, 'package.json'), JSON.stringify({ name: `agentui-extension-${name}`, agentui: { extension, sources } }));
+    await writeFile(join(temp, 'extensions', name, 'package.json'), JSON.stringify({ name: `openpane-extension-${name}`, openpane: { extension, sources } }));
   };
   const manifest = namespace => ({ namespace, trust: 'full', sdkVersion: EXTENSION_SDK_VERSION, entries: [{ kind: 'desktop', module: './dist/desktop.js' }] });
   await write('zeta', manifest('zeta'), { './dist/desktop.js': './src/index.tsx' });
@@ -53,10 +53,10 @@ test('bundledPlan lists desktop entries sorted by namespace with only extension 
 });
 
 test('the shared plugin admits a bundled package by its real name and refuses reserved owners and outside imports', async t => {
-  const temp = await mkdtemp(join(tmpdir(), 'agentui-bundled-policy-'));
+  const temp = await mkdtemp(join(tmpdir(), 'openpane-bundled-policy-'));
   t.after(() => rm(temp, { recursive: true, force: true }));
   const good = join(temp, 'good'), reserved = join(temp, 'reserved');
-  for (const [directory, name] of [[good, 'agentui-extension-good'], [reserved, '@agentui/reserved']]) {
+  for (const [directory, name] of [[good, 'openpane-extension-good'], [reserved, '@openpane/reserved']]) {
     await mkdir(join(directory, 'src'), { recursive: true });
     await writeFile(join(directory, 'package.json'), JSON.stringify({ name }));
     await writeFile(join(directory, 'src', 'index.tsx'), 'export const value = 1;\n');
@@ -66,7 +66,7 @@ test('the shared plugin admits a bundled package by its real name and refuses re
   await assert.rejects(plugin.load(join(reserved, 'src', 'index.tsx')), /Duplicate shared customization dependency/);
   const context = { resolve: async () => null };
   await assert.rejects(plugin.resolveId.call(context, 'node:fs', join(good, 'src', 'index.tsx'), { kind: 'import-statement' }), /Unsupported customization import/);
-  await assert.rejects(plugin.resolveId.call(context, '@agentui/host', join(good, 'src', 'index.tsx'), { kind: 'import-statement' }), /Unsupported customization import/);
+  await assert.rejects(plugin.resolveId.call(context, '@openpane/host', join(good, 'src', 'index.tsx'), { kind: 'import-statement' }), /Unsupported customization import/);
 });
 
 test('mergePlans keeps bundled entries first and refuses a namespace in both plans', () => {

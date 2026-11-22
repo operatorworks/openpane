@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { openLocalHost, createRecordedDriver } from '@agentui/host';
+import { openLocalHost, createRecordedDriver } from '@openpane/host';
 import { command, completed, note, projection, scope, installed } from './fixture.mjs';
 
 const [mode, path, backendPath] = process.argv.slice(2);

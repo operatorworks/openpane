@@ -11,7 +11,7 @@ const revision = 'a'.repeat(40);
 const historicalLog = Buffer.from('historical output without a scoped record');
 
 function evidenceFixture(context) {
-  const folder = mkdtempSync(join(tmpdir(), 'agentui-ledger-test-'));
+  const folder = mkdtempSync(join(tmpdir(), 'openpane-ledger-test-'));
   context.after(() => rmSync(folder, { recursive: true, force: true }));
   mkdirSync(join(folder, 'evidence'));
   const files = { 'source-pnpm-lock.yaml': Buffer.from('frozen lock'), history: Buffer.from('historical metadata'), replay: historicalLog };

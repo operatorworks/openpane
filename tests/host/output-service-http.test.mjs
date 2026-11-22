@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { createBrowserConnection } from '@agentui/client/service';
-import { canonicalJson } from '@agentui/contracts';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { createBrowserConnection } from '@openpane/client/service';
+import { canonicalJson } from '@openpane/contracts';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { startBrowserHost } from '../../apps/host/build/tsc/server.js';
 import { instance } from '../../examples/generated-text-output/dist/model.js';
 
@@ -18,11 +18,11 @@ const installed = { kind: 'installed', directory: directoryOf('../../examples/ge
   installations: [{ id: 'reports', instance, service: 'http://127.0.0.1:1', expectedAuthority: 'remote-provider', authentication: { kind: 'unauthenticated' } }] };
 
 test('actual HTTP public client uses installed report producer through create, replay, reopen and 33-output eviction', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-output-http-'));
-  const previous = process.env.AGENTUI_REPORT_DATABASE;
-  process.env.AGENTUI_REPORT_DATABASE = join(directory, 'reports.sqlite');
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-output-http-'));
+  const previous = process.env.OPENPANE_REPORT_DATABASE;
+  process.env.OPENPANE_REPORT_DATABASE = join(directory, 'reports.sqlite');
   let running, origin;
-  const record = value => { if (process.env.AGENTUI_OUTPUT_AUDIT_RESOURCES) appendFileSync(process.env.AGENTUI_OUTPUT_AUDIT_RESOURCES, `${JSON.stringify(value)}\n`); };
+  const record = value => { if (process.env.OPENPANE_OUTPUT_AUDIT_RESOURCES) appendFileSync(process.env.OPENPANE_OUTPUT_AUDIT_RESOURCES, `${JSON.stringify(value)}\n`); };
   record({ kind: 'temporary-directory', path: directory, pid: process.pid });
   const start = async () => {
     running = await startBrowserHost({ directory: join(directory, 'host'), port: 0, agentStartup: { kind: 'extensions' },
@@ -93,7 +93,7 @@ test('actual HTTP public client uses installed report producer through create, r
     assert.ok(requests.every(request => request.path === '/api/v1'));
     for (const op of ['create', 'submit', 'output-list', 'output-read', 'reconcile']) assert.ok(requests.some(request => request.op === op));
     await running.close(); running = undefined;
-    const db = new DatabaseSync(process.env.AGENTUI_REPORT_DATABASE);
+    const db = new DatabaseSync(process.env.OPENPANE_REPORT_DATABASE);
     try {
       assert.equal(db.prepare('SELECT COUNT(*) AS count FROM payloads').get().count, 32);
       assert.equal(db.prepare('SELECT COUNT(*) AS count FROM receipts').get().count > 32, true);
@@ -101,15 +101,15 @@ test('actual HTTP public client uses installed report producer through create, r
     t.diagnostic('Real loopback HTTP /api/v1 with normally installed SDK 0.9 report server entry; no LocalHost output/read calls in the consumer.');
   } finally {
     if (running) await running.close();
-    if (previous === undefined) delete process.env.AGENTUI_REPORT_DATABASE; else process.env.AGENTUI_REPORT_DATABASE = previous;
+    if (previous === undefined) delete process.env.OPENPANE_REPORT_DATABASE; else process.env.OPENPANE_REPORT_DATABASE = previous;
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
 test('normal SDK boundary provider fixture carries zero and 65536 byte outputs through actual HTTP', async t => {
   const { providerFixture } = await import('./provider-outputs-fixture.mjs');
-  const f = providerFixture(), directory = mkdtempSync(join(tmpdir(), 'agentui-output-http-boundary-'));
-  if (process.env.AGENTUI_OUTPUT_AUDIT_RESOURCES) appendFileSync(process.env.AGENTUI_OUTPUT_AUDIT_RESOURCES,
+  const f = providerFixture(), directory = mkdtempSync(join(tmpdir(), 'openpane-output-http-boundary-'));
+  if (process.env.OPENPANE_OUTPUT_AUDIT_RESOURCES) appendFileSync(process.env.OPENPANE_OUTPUT_AUDIT_RESOURCES,
     `${JSON.stringify({ kind: 'temporary-directory', path: directory, pid: process.pid })}\n`);
   let running;
   try {
@@ -117,7 +117,7 @@ test('normal SDK boundary provider fixture carries zero and 65536 byte outputs t
       assetsDirectory: directoryOf('../../apps/desktop/web-dist-browser/'), hostArtifactDirectory: directoryOf('../../apps/host/dist/'),
       extensions: { kind: 'transient', entries: [{ manifest: f.extension.manifest, entry: f.extension.entry,
         installations: [{ id: 'reports', instance: f.instance, service: 'http://127.0.0.1:1', expectedAuthority: 'remote-provider', authentication: { kind: 'unauthenticated' } }] }] } });
-    if (process.env.AGENTUI_OUTPUT_AUDIT_RESOURCES) appendFileSync(process.env.AGENTUI_OUTPUT_AUDIT_RESOURCES,
+    if (process.env.OPENPANE_OUTPUT_AUDIT_RESOURCES) appendFileSync(process.env.OPENPANE_OUTPUT_AUDIT_RESOURCES,
       `${JSON.stringify({ kind: 'listener', origin: running.origin, pid: process.pid })}\n`);
     const client = createBrowserConnection({ fetch: (path, init) => fetch(`${running.origin}${path}`, { ...init, headers: { ...init.headers, Origin: running.origin } }) });
     const scope = { hostId: running.hostId, conversationId: 'boundary-fixture' };

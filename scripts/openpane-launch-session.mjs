@@ -34,10 +34,10 @@ lines.once('line', line => {
   try {
     const supplied = JSON.parse(line);
     if (supplied.OPENCODE_GO_API_KEY !== null && typeof supplied.OPENCODE_GO_API_KEY !== 'string') throw new Error();
-    if (supplied.AGENTUI_SETUP_CAPABILITY !== undefined && (typeof supplied.AGENTUI_SETUP_CAPABILITY !== 'string' || !/^[a-f0-9]{64}$/.test(supplied.AGENTUI_SETUP_CAPABILITY))) throw new Error();
-    environment = { ...process.env, ...(supplied.AGENTUI_SETUP_CAPABILITY ? { AGENTUI_SETUP_CAPABILITY: supplied.AGENTUI_SETUP_CAPABILITY } : {}), ...(process.env.OPENCODE_GO_API_KEY ? {} : supplied.OPENCODE_GO_API_KEY ? { OPENCODE_GO_API_KEY: supplied.OPENCODE_GO_API_KEY } : {}) };
+    if (supplied.OPENPANE_SETUP_CAPABILITY !== undefined && (typeof supplied.OPENPANE_SETUP_CAPABILITY !== 'string' || !/^[a-f0-9]{64}$/.test(supplied.OPENPANE_SETUP_CAPABILITY))) throw new Error();
+    environment = { ...process.env, ...(supplied.OPENPANE_SETUP_CAPABILITY ? { OPENPANE_SETUP_CAPABILITY: supplied.OPENPANE_SETUP_CAPABILITY } : {}), ...(process.env.OPENCODE_GO_API_KEY ? {} : supplied.OPENCODE_GO_API_KEY ? { OPENCODE_GO_API_KEY: supplied.OPENCODE_GO_API_KEY } : {}) };
   } catch {
-    process.stderr.write('Invalid AgentUI session environment.\n');
+    process.stderr.write('Invalid OpenPane session environment.\n');
     process.exitCode = 1;
     lines.close();
     process.stdin.destroy();
@@ -46,7 +46,7 @@ lines.once('line', line => {
   host = spawn(node, [main, ...args], { detached: process.platform !== 'win32', env: environment, stdio: ['ignore', 'inherit', 'inherit'] });
   hostGroupPid = host.pid ?? null;
   host.once('error', error => {
-    process.stderr.write(`Cannot start AgentUI host: ${error.message}\n`);
+    process.stderr.write(`Cannot start OpenPane host: ${error.message}\n`);
     process.exitCode = 1;
     void stop();
   });

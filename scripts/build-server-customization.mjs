@@ -14,9 +14,9 @@ if (process.argv.includes('--refresh-ipc') && process.send) {
   let used = false;
   try {
     const { buildServerCustomization, qualifyServerCustomizationToolchain } = await import('./server-customization.mjs');
-    const { canonicalJson } = await import('@agentui/contracts');
-    const { record } = await import('@agentui/contracts/decode');
-    const { parseGitExtensionReference } = await import('@agentui/host/customization');
+    const { canonicalJson } = await import('@openpane/contracts');
+    const { record } = await import('@openpane/contracts/decode');
+    const { parseGitExtensionReference } = await import('@openpane/host/customization');
     const qualified = await qualifyServerCustomizationToolchain();
     process.on('message', async value => {
       if (used || stopping) { stop(); return; }
@@ -41,7 +41,7 @@ if (process.argv.includes('--refresh-ipc') && process.send) {
     if (!stopping && process.connected) process.send({ kind: 'qualified', qualification: qualified });
   } catch { stop(); }
 } else {
-  const { CustomizationError } = await import('@agentui/host/customization');
+  const { CustomizationError } = await import('@openpane/host/customization');
   const { buildServerCustomization } = await import('./server-customization.mjs');
   try {
     const { values } = parseArgs({ options: { repository: { type: 'string' }, commit: { type: 'string' }, subdirectory: { type: 'string' }, out: { type: 'string' } } });

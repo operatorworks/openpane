@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { WorkspaceAgent, WorkspaceViewProps } from '@agentui/sdk/react';
-import { useTheme } from '@agentui/theme/react';
-import { ThemeScope } from '@agentui/ui-primitives/desktop';
+import type { WorkspaceAgent, WorkspaceViewProps } from '@openpane/sdk/react';
+import { useTheme } from '@openpane/theme/react';
+import { ThemeScope } from '@openpane/ui-primitives/desktop';
 import { MemberForm } from './MemberForm.js';
 import { initials } from './initials.js';
 import { membersListOutput } from '../operation-output.js';
 
-const CONFIGURATION = '~/.local/share/agentui/extensions.json';
-const TOKEN = 'AGENTUI_EXTENSION_CREW_TOKEN';
+const CONFIGURATION = '~/.local/share/openpane/extensions.json';
+const TOKEN = 'OPENPANE_EXTENSION_CREW_TOKEN';
 const NEWER = 'Requires a newer Crew service';
 /** A dark aubergine sidebar beside the host's light or dark message area. Layout and colour idiom only. */
 const SIDEBAR = {
@@ -105,8 +105,8 @@ export function CrewWorkspace(props: WorkspaceViewProps) {
   if (!installation) {
     return <div className="crew-workspace crew-setup" role="region" aria-label="Crew setup">
       <h2>Connect Crew</h2>
-      <p>Crew is not configured on this host. Add a Crew installation to <code>{CONFIGURATION}</code> with its service address and the token variable <code>{TOKEN}</code>, export that variable in the launcher's shell, and restart AgentUI.</p>
-      <p>See <code>docs/extensions/crew.md</code> in the AgentUI repository for the configuration file and the network setup Crew needs.</p>
+      <p>Crew is not configured on this host. Add a Crew installation to <code>{CONFIGURATION}</code> with its service address and the token variable <code>{TOKEN}</code>, export that variable in the launcher's shell, and restart OpenPane.</p>
+      <p>See <code>docs/extensions/crew.md</code> in the OpenPane repository for the configuration file and the network setup Crew needs.</p>
     </div>;
   }
   if (!available) {

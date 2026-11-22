@@ -1,5 +1,5 @@
-import type { ClientView } from '@agentui/client';
-import type { SubmitResult } from '@agentui/contracts';
+import type { ClientView } from '@openpane/client';
+import type { SubmitResult } from '@openpane/contracts';
 import type { ConversationActions } from './application-controller.js';
 import { recoveryModel } from './recovery.js';
 

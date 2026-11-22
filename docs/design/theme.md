@@ -6,8 +6,8 @@ Neither package depends on the host or an agent adapter.
 
 ## Desktop modules
 
-Import `@agentui/ui-primitives/styles.css` once in the desktop entry.
-Wrap a module in `ThemeScope` from `@agentui/ui-primitives/desktop`.
+Import `@openpane/ui-primitives/styles.css` once in the desktop entry.
+Wrap a module in `ThemeScope` from `@openpane/ui-primitives/desktop`.
 The outer scope follows system appearance and reduced motion unless you provide explicit values.
 Nested scopes inherit those choices.
 Use `ThemeScope` as the outer desktop boundary.
@@ -15,8 +15,8 @@ A plain `ThemeProvider` represents caller-supplied preferences, so scopes below 
 Nested scopes can request reduced motion but cannot re-enable motion that their parent reduced.
 
 ```tsx
-import { Button, Text, TextField, ThemeScope } from '@agentui/ui-primitives/desktop';
-import '@agentui/ui-primitives/styles.css';
+import { Button, Text, TextField, ThemeScope } from '@openpane/ui-primitives/desktop';
+import '@openpane/ui-primitives/styles.css';
 
 export function ComposerExample() {
 	return <ThemeScope>
@@ -33,7 +33,7 @@ The action in this example has no agent connection.
 Controls have a 44-pixel minimum target, keyboard focus outlines, and text that can wrap.
 Desktop text uses `rem` units and responds to browser text scaling.
 
-`toCssVariables(theme)` from `@agentui/ui-primitives/desktop` exposes the same values for custom DOM controls.
+`toCssVariables(theme)` from `@openpane/ui-primitives/desktop` exposes the same values for custom DOM controls.
 Color variables use `--aui-color-*` with kebab-case role names.
 Font sizes use `--aui-font-size-*`.
 The other families are `--aui-space-*`, `--aui-radius-*`, `--aui-leading-*`, `--aui-weight-*`, `--aui-text-color-*`, `--aui-motion-*`, `--aui-control-*`, `--aui-button-*`, and `--aui-disabled-opacity`.
@@ -42,7 +42,7 @@ The stylesheet contract test checks every theme variable reference against the e
 
 ## Native modules
 
-Import `Button`, `Text`, `Surface`, `TextField`, and `ThemeProvider` from `@agentui/ui-primitives/native`.
+Import `Button`, `Text`, `Surface`, `TextField`, and `ThemeProvider` from `@openpane/ui-primitives/native`.
 The native shell supplies appearance and reduced-motion preferences to `ThemeProvider`.
 This package does not subscribe to native OS preferences or mount an application.
 Native text always enables automatic font scaling and uses unscaled token sizes.

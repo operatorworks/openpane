@@ -9,8 +9,8 @@ import { coworkersService } from './support/coworkers-service.mjs';
 import { crewService } from '../../crew/tests/support/crew-service.mjs';
 
 const root = new URL('../../', import.meta.url);
-const manifestOf = async name => JSON.parse(await readFile(new URL(`${name}/package.json`, root), 'utf8')).agentui.extension;
-const shots = process.env.AGENTUI_SCREENSHOT_DIRECTORY;
+const manifestOf = async name => JSON.parse(await readFile(new URL(`${name}/package.json`, root), 'utf8')).openpane.extension;
+const shots = process.env.OPENPANE_SCREENSHOT_DIRECTORY;
 const coworkersInstance = { namespace: 'coworkers', installationId: 'team', generation: '1', protocolVersion: '1' };
 async function coworkersEntry(remote) {
   return { kind: 'installed', directory: fileURLToPath(new URL('coworkers/', root)), manifest: await manifestOf('coworkers'), installations: [{ id: 'team',
@@ -330,7 +330,7 @@ test('without a Coworkers installation the workspace names the configuration and
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Not configured', 'not configured');
   await view.page.getByRole('button', { name: 'Open Coworkers' }).click();
   const setup = view.page.getByRole('region', { name: 'Coworkers setup' });
-  await setup.getByText('AGENTUI_EXTENSION_COWORKERS_TOKEN').waitFor();
+  await setup.getByText('OPENPANE_EXTENSION_COWORKERS_TOKEN').waitFor();
   assert.match(await setup.textContent(), /listen on an address this host can reach/);
   assert.equal(await setup.locator('input').count(), 0);
 });

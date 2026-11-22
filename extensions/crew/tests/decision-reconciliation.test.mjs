@@ -103,7 +103,7 @@ async function crew(t, { receipts = true } = {}) {
 
 /** The Crew launcher as a child process over one persistent host directory, restartable after SIGKILL. */
 async function harness(t, remote) {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-crew-decisions-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-crew-decisions-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const hostDirectory = join(directory, 'host'), tokenFile = join(directory, 'token'), config = join(directory, 'crew-provider.json');
   await writeFile(tokenFile, token, { mode: 0o600 });
@@ -113,7 +113,7 @@ async function harness(t, remote) {
   const start = async () => {
     child = launchProcess(t, ['extensions/crew/run.mjs', config]);
     const ready = await startup(child, line => {
-      const match = /^AgentUI with Crew is ready at (http:\/\/[^/]+)\/browser\.html$/.exec(line);
+      const match = /^OpenPane with Crew is ready at (http:\/\/[^/]+)\/browser\.html$/.exec(line);
       return match && { origin: match[1] };
     });
     assert.equal(ready.kind, 'ready', child.stderr);

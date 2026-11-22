@@ -1,8 +1,8 @@
-import { canonicalJson } from '@agentui/contracts';
-import type { ConversationScope } from '@agentui/contracts';
-import type { RunOutcome, TranscriptEvent } from '@agentui/contracts/conversation';
-import { createGenAiObserver, instrumentationScope } from '@agentui/host/observability';
-import type { AgentHandle, TerminalOutcome } from '@agentui/host/observability';
+import { canonicalJson } from '@openpane/contracts';
+import type { ConversationScope } from '@openpane/contracts';
+import type { RunOutcome, TranscriptEvent } from '@openpane/contracts/conversation';
+import { createGenAiObserver, instrumentationScope } from '@openpane/host/observability';
+import type { AgentHandle, TerminalOutcome } from '@openpane/host/observability';
 import { ROOT_CONTEXT } from '@opentelemetry/api';
 import type { TracerProvider } from '@opentelemetry/api';
 import type { NativeProvider } from './agent-config.js';

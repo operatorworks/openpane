@@ -1,7 +1,7 @@
 import { createElement } from 'react';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { ConversationContentLayoutProps, ConversationModuleProps, UiExtensionEntry } from '@agentui/sdk/react';
-import { Surface, Text } from '@agentui/ui-primitives/desktop';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { ConversationContentLayoutProps, ConversationModuleProps, UiExtensionEntry } from '@openpane/sdk/react';
+import { Surface, Text } from '@openpane/ui-primitives/desktop';
 import { reviewPrompt } from '../shared/prompts.js';
 
 function ReviewLayout({ transcript, modules }: ConversationContentLayoutProps) {

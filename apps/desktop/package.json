@@ -1,5 +1,5 @@
 {
-  "name": "@agentui/desktop",
+  "name": "@openpane/desktop",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -22,12 +22,12 @@
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.4",
-    "@agentui/contracts": "0.0.0",
-    "@agentui/sdk": "0.0.0",
+    "@openpane/contracts": "0.0.0",
+    "@openpane/sdk": "0.0.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "@agentui/ui-primitives": "0.0.0",
-    "@agentui/client": "0.0.0",
+    "@openpane/ui-primitives": "0.0.0",
+    "@openpane/client": "0.0.0",
     "react-markdown": "10.1.0"
   },
   "devDependencies": {

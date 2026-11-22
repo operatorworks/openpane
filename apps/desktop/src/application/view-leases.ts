@@ -1,6 +1,6 @@
-import type { ConversationStore } from '@agentui/client';
-import type { ConversationScope } from '@agentui/contracts';
-import type { Transcript } from '@agentui/contracts/conversation';
+import type { ConversationStore } from '@openpane/client';
+import type { ConversationScope } from '@openpane/contracts';
+import type { Transcript } from '@openpane/contracts/conversation';
 import type { OwnedViewStorage } from './view-state.js';
 
 type Store = ConversationStore<Transcript>;

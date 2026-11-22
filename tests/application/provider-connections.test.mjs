@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { crew, crewBackend, crewPresentation } from '../extensions/providers/contracts/crew.ts';
 import { local, localBackend, localPresentation } from '../extensions/providers/contracts/local.ts';
 import { ownDirectory } from '../../apps/host/build/tsc/ownership.js';
@@ -26,7 +26,7 @@ registerHooks({ resolve(specifier, context, next) {
 const { startBrowserHost } = await import('../../apps/host/build/tsc/server.js');
 const sentinel = 'PRIVATE_PROVIDER_SENTINEL_98';
 function options(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-provider-connections-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-provider-connections-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   return { directory, port: 0, assetsDirectory: fileURLToPath(new URL('../../apps/desktop/web-dist-browser/', import.meta.url)) };
 }

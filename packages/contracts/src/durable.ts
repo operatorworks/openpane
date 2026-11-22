@@ -158,9 +158,9 @@ export function parseProviderBinding(value: unknown): ProviderBinding {
 export function parseRunAuthority(value: unknown): RunAuthority {
   const input = record(value);
   switch (input.kind) {
-    case 'agentui-host':
+    case 'openpane-host':
       exact(input, ['kind', 'hostId', 'binding']);
-      return { kind: 'agentui-host', hostId: identifier(input.hostId), binding: parseProviderBinding(input.binding) };
+      return { kind: 'openpane-host', hostId: identifier(input.hostId), binding: parseProviderBinding(input.binding) };
     case 'remote-provider':
       exact(input, ['kind', 'binding']);
       return { kind: 'remote-provider', binding: parseProviderBinding(input.binding) };
@@ -171,7 +171,7 @@ export function parseRunIdentity(value: unknown): RunIdentity {
   const input = record(value, ['conversation', 'runId', 'authority']);
   const conversation = parseScope(input.conversation);
   const authority = parseRunAuthority(input.authority);
-  if (authority.kind === 'agentui-host' && authority.hostId !== conversation.hostId) throw new Error('Run authority host mismatch');
+  if (authority.kind === 'openpane-host' && authority.hostId !== conversation.hostId) throw new Error('Run authority host mismatch');
   return { conversation, runId: nonempty(input.runId), authority };
 }
 /**

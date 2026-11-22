@@ -29,7 +29,7 @@ try {
     'build', '--bundles', 'app', '--target', target, '--config', config], {
     cwd: join(root, 'apps/desktop'), stdio: 'inherit', env: { ...process.env, CARGO_TARGET_DIR: cargoTarget },
   });
-  const app = join(cargoTarget, target, 'release/bundle/macos/AgentUI.app');
+  const app = join(cargoTarget, target, 'release/bundle/macos/OpenPane.app');
   if (!(await lstat(app)).isDirectory()) throw new Error('Tauri did not produce the native app');
   complete = true;
   process.stdout.write(`${JSON.stringify({ app, artifactId: manifest.artifactId })}\n`);

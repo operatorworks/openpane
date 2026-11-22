@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SERVICE_MAX_RESPONSE_BYTES } from '@agentui/contracts/service';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { SERVICE_MAX_RESPONSE_BYTES } from '@openpane/contracts/service';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { parseOrigin } from '../../../../examples/mcp-control/read/dist/host.js';
 import { Reader } from '../../../../examples/mcp-control/read/dist/reader.js';
 import { compatibility, connect, data, listen } from './support.mjs';
@@ -56,11 +56,11 @@ test('MCP refuses malformed, oversized, redirected, mismatched and non-snapshot 
     } else throw new Error(`Unexpected operation ${input.op}`);
   });
   const mcp = await connect(t, origin);
-  assert.equal(data(await mcp.client.callTool({ name: 'agentui_inspect', arguments: { conversationId: scope.conversationId } })).currentRun, null);
+  assert.equal(data(await mcp.client.callTool({ name: 'openpane_inspect', arguments: { conversationId: scope.conversationId } })).currentRun, null);
   assert.equal(closes, 1);
   for (scenario of ['malformed', 'oversized', 'utf8', 'events', 'ended', 'scope', 'projection', 'state', 'metadata-host', 'redirect']) {
     const before = closes;
-    const result = await mcp.client.callTool({ name: 'agentui_inspect', arguments: { conversationId: scope.conversationId } });
+    const result = await mcp.client.callTool({ name: 'openpane_inspect', arguments: { conversationId: scope.conversationId } });
     assert.equal(result.isError, true, scenario);
     assert.equal(result.structuredContent, undefined);
     assert.ok(!JSON.stringify(result).includes('private-host-response'));

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXTENSION_SDK_VERSION, SERVICE_WIRE_VERSION } from '@agentui/contracts/compatibility';
+import { EXTENSION_SDK_VERSION, SERVICE_WIRE_VERSION } from '@openpane/contracts/compatibility';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const hash = value => createHash('sha256').update(value).digest('hex');

@@ -35,7 +35,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   const reply = result => send({ id: message.id, result });
   switch (message.method) {
-    case 'initialize': reply({ userAgent: 'agentui-codex-fixture', platformFamily: 'unix' }); break;
+    case 'initialize': reply({ userAgent: 'openpane-codex-fixture', platformFamily: 'unix' }); break;
     case 'initialized': break;
     case 'model/list': {
       if (mode === 'models-error') { send({ id: message.id, error: { code: -32000, message: 'Fixture model catalog unavailable' } }); break; }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { canonicalJson, CORE_SNAPSHOT_DOCUMENT_JSON_BUDGET, DEFAULT_MAX_COMMAND_BYTES,
-  HOST_DEFAULT_PAGE_BYTES, HOST_DEFAULT_PAGE_EVENTS, HOST_DEFAULT_SNAPSHOT_BYTES } from '@agentui/contracts';
+  HOST_DEFAULT_PAGE_BYTES, HOST_DEFAULT_PAGE_EVENTS, HOST_DEFAULT_SNAPSHOT_BYTES } from '@openpane/contracts';
 import { SqliteStore } from '../../packages/host/dist/sqlite-store.js';
 import { budgets } from '../../packages/host/dist/durable-model.js';
 import { fixture, scope, installed, command, completed, note, deferred, snapshot, projection } from './fixture.mjs';

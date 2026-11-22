@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { SqliteStore } from '../../packages/host/dist/sqlite-store.js';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { budgets } from '../../packages/host/dist/durable-model.js';
 import { fixture, scope, installed, projection, note, command, run, question } from './fixture.mjs';
 

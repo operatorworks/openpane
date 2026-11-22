@@ -1,5 +1,5 @@
-import { canonicalJson, foldDocument, parseFeedItem, FeedMismatchError, parseReceipt, parseScope, sameScope } from '@agentui/contracts';
-import type { ConversationDocument, ConversationScope, FeedItem, Projection, Receipt } from '@agentui/contracts';
+import { canonicalJson, foldDocument, parseFeedItem, FeedMismatchError, parseReceipt, parseScope, sameScope } from '@openpane/contracts';
+import type { ConversationDocument, ConversationScope, FeedItem, Projection, Receipt } from '@openpane/contracts';
 
 const RETAINED_SEQUENCE_IDENTITIES = 256;
 

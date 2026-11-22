@@ -1,5 +1,5 @@
 import { Suspense, type ReactNode } from 'react';
-import type { ConversationContentLayoutProps } from '@agentui/sdk/react';
+import type { ConversationContentLayoutProps } from '@openpane/sdk/react';
 import { CustomizationBoundary, type ContentLayoutSelection } from './DesktopCustomizations.js';
 
 export function CustomizationContent({ selection, conversationKey, transcript, nativeTranscript, modules, before = null }: ConversationContentLayoutProps & {

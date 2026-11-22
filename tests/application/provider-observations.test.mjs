@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { canonicalJson } from '@agentui/contracts';
-import { ContinuationRefused } from '@agentui/host';
+import { canonicalJson } from '@openpane/contracts';
+import { ContinuationRefused } from '@openpane/host';
 import { observationFixture, actor, scope, events } from './provider-observations-fixture.mjs';
 import { until } from '../host/fixture.mjs';
 

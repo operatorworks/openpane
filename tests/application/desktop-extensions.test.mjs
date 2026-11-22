@@ -17,15 +17,15 @@ const instance = { namespace: 'crew', installationId: 'personal', generation: '1
 test('built desktop host loads the installed Crew extension from a version 2 file beside native agents', { timeout: 30_000 }, async t => {
   const memberId = randomUUID();
   const remote = await crewService(t, { memberId, token, instance });
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-desktop-extensions-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-desktop-extensions-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, 'extensions.json');
   await writeFile(file, JSON.stringify({ version: 2, ownership: 'transient', extensions: [{ directory: join(root, 'extensions/crew'), installations: [{
     id: 'personal', instance, service: remote.origin, expectedAuthority: 'remote-provider',
-    authentication: { kind: 'environment', variable: 'AGENTUI_EXTENSION_CREW_TOKEN', revision: '1' } }] }] }));
+    authentication: { kind: 'environment', variable: 'OPENPANE_EXTENSION_CREW_TOKEN', revision: '1' } }] }] }));
   const child = spawn(process.execPath, ['apps/host/dist/main.js', 'desktop', '--preferred', 'pi', '--workspace', directory,
     '--data-dir', join(directory, 'data'), '--port', '0', '--extensions', file], { cwd: root,
-    env: { ...process.env, OPENCODE_GO_API_KEY: '', AGENTUI_SETUP_CAPABILITY: 'cd'.repeat(32), AGENTUI_EXTENSION_CREW_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] });
+    env: { ...process.env, OPENCODE_GO_API_KEY: '', OPENPANE_SETUP_CAPABILITY: 'cd'.repeat(32), OPENPANE_EXTENSION_CREW_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', data => { stderr += data; });
   const exited = new Promise(resolve => child.once('exit', code => resolve(code)));

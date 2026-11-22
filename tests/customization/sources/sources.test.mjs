@@ -5,7 +5,7 @@ import { mkdir, readFile, readdir, stat, symlink, writeFile } from 'node:fs/prom
 import { basename, dirname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
-import { CustomizationError, readCustomizationSnapshot } from '@agentui/host/customization';
+import { CustomizationError, readCustomizationSnapshot } from '@openpane/host/customization';
 import { SourceBudget } from '../../../packages/host/dist/customization/budget.js';
 import { manager, digest, integrity, git, write, fixture, shared, reference, lockFor, registry } from './source-support.mjs';
 
@@ -160,7 +160,7 @@ test('actual npm workspace lock selects package metadata and preserves sibling i
   const f = await fixture(t);
   const repo = await f.repository('workspace');
   await write(repo.directory, 'package.json', { name: 'root', version: '1.0.0', packageManager: manager,
-    workspaces: ['packages/*'], agentui: { shared: './missing-root-input' } });
+    workspaces: ['packages/*'], openpane: { shared: './missing-root-input' } });
   await shared(repo, 'packages/foo', { name: 'foo', version: '1.2.3' });
   await write(repo.directory, 'packages/util.ts', 'export const util = 42;\n');
   await write(repo.directory, 'package-lock.json', await readFile(new URL('./npm-workspace-lock.json', import.meta.url), 'utf8'));
@@ -181,13 +181,13 @@ test('nested pinned sources preserve order and share duplicate and diamond packa
   await shared(leaf);
   const leafRef = reference(leaf, leaf.commit());
   const a = await f.repository('a');
-  await shared(a, '', { agentui: { extensions: [leafRef] } });
+  await shared(a, '', { openpane: { extensions: [leafRef] } });
   const aRef = reference(a, a.commit());
   const b = await f.repository('b');
-  await shared(b, '', { agentui: { extensions: [leafRef] } });
+  await shared(b, '', { openpane: { extensions: [leafRef] } });
   const bRef = reference(b, b.commit());
   const root = await f.repository('root');
-  await shared(root, '', { agentui: { extensions: [aRef, bRef, aRef] } });
+  await shared(root, '', { openpane: { extensions: [aRef, bRef, aRef] } });
   const result = await f.read(reference(root, root.commit()));
   const [first, second, third] = result.root.extensions;
   assert.equal(first, third);
@@ -205,7 +205,7 @@ test('relative child repositories use captured invocation directory and concurre
   await shared(leaf);
   const root = await f.repository('relative-root');
   const leafRef = { repository: relative(process.cwd(), leaf.directory), commit: leaf.commit() };
-  await shared(root, '', { agentui: { extensions: [leafRef] } });
+  await shared(root, '', { openpane: { extensions: [leafRef] } });
   const ref = reference(root, root.commit());
   const [one, two] = await Promise.all([f.read(ref), f.read(ref)]);
   assert.equal(one.root.extensions[0].commit, leafRef.commit);
@@ -224,7 +224,7 @@ test('failure in final descendant cleans acquired sources and keeps an unrelated
   const keeper = await f.read(valid);
   const missing = await f.repository('empty');
   const root = await f.repository('root');
-  await shared(root, '', { agentui: { extensions: [valid, reference(missing, missing.commit())] } });
+  await shared(root, '', { openpane: { extensions: [valid, reference(missing, missing.commit())] } });
   await assert.rejects(f.read(reference(root, root.commit())), { code: 'invalid-package' });
   assert.equal((await readdir(f.scratchParent)).length, 1);
   assert.equal(await readFile(join(keeper.root.directory, 'source.ts'), 'utf8'), 'export const value = 1;\n');
@@ -388,9 +388,9 @@ test('edge declarations and package expansion have graph-wide bounds', async t =
   for (let index = 0; index < 65; index++) await shared(leaf, `packages/p${index}`);
   const commit = leaf.commit();
   const root = await f.repository('root');
-  await shared(root, '', { agentui: { extensions: Array.from({ length: 65 }, (_, index) => reference(leaf, commit, `packages/p${index}`)) } });
+  await shared(root, '', { openpane: { extensions: Array.from({ length: 65 }, (_, index) => reference(leaf, commit, `packages/p${index}`)) } });
   await assert.rejects(f.read(reference(root, root.commit())), { code: 'resource-limit' });
-  await shared(root, '', { agentui: { extensions: Array.from({ length: 257 }, () => reference(leaf, commit, 'packages/p0')) } });
+  await shared(root, '', { openpane: { extensions: Array.from({ length: 257 }, () => reference(leaf, commit, 'packages/p0')) } });
   await assert.rejects(f.read(reference(root, root.commit())), { code: 'resource-limit' });
   assert.deepEqual(await readdir(f.scratchParent), []);
 });
@@ -403,7 +403,7 @@ test('selected workspace links retain sibling inputs without activating sibling 
   const bar = { name: 'bar', version: '2.0.0' };
   await write(repo.directory, 'package.json', root);
   await shared(repo, 'packages/foo', foo);
-  await write(repo.directory, 'packages/bar/package.json', { ...bar, agentui: { shared: './missing-source' } });
+  await write(repo.directory, 'packages/bar/package.json', { ...bar, openpane: { shared: './missing-source' } });
   await write(repo.directory, 'packages/bar/input.ts', 'sibling-input');
   const { name: _name, ...fooEntry } = foo;
   const lock = lockFor(root, { 'packages/foo': fooEntry, 'packages/bar': { version: bar.version },
@@ -449,8 +449,8 @@ test('non-workspace directory links reject even when dependency-free or inside t
 test('root no-op metadata preserves defaults despite unrelated npm workspace configuration', async t => {
   const f = await fixture(t);
   const repo = await f.repository('no-op');
-  for (const agentui of [undefined, {}, { extensions: [] }]) {
-    await write(repo.directory, 'package.json', { workspaces: ['unsupported/**'], dependencies: 'unused malformed metadata', agentui });
+  for (const openpane of [undefined, {}, { extensions: [] }]) {
+    await write(repo.directory, 'package.json', { workspaces: ['unsupported/**'], dependencies: 'unused malformed metadata', openpane });
     const result = await f.read(reference(repo, repo.commit()));
     assert.equal(result.root.customization, undefined);
     assert.deepEqual(result.root.npm, { kind: 'absent' });
@@ -464,10 +464,10 @@ test('inherited SSH access retrieves committed bytes and retains no credential o
   await shared(repo);
   const commit = repo.commit();
   const helper = join(f.root, 'ssh-success-helper');
-  await writeFile(helper, '#!/bin/sh\n[ "$AGENTUI_TEST_CREDENTIAL" = "HOST_CREDENTIAL_SECRET" ] || exit 1\nexec git-upload-pack "$AGENTUI_TEST_REPOSITORY"\n', { mode: 0o700 });
-  const prior = { ssh: process.env.GIT_SSH_COMMAND, credential: process.env.AGENTUI_TEST_CREDENTIAL, repository: process.env.AGENTUI_TEST_REPOSITORY };
+  await writeFile(helper, '#!/bin/sh\n[ "$OPENPANE_TEST_CREDENTIAL" = "HOST_CREDENTIAL_SECRET" ] || exit 1\nexec git-upload-pack "$OPENPANE_TEST_REPOSITORY"\n', { mode: 0o700 });
+  const prior = { ssh: process.env.GIT_SSH_COMMAND, credential: process.env.OPENPANE_TEST_CREDENTIAL, repository: process.env.OPENPANE_TEST_REPOSITORY };
   try {
-    Object.assign(process.env, { GIT_SSH_COMMAND: helper, AGENTUI_TEST_CREDENTIAL: 'HOST_CREDENTIAL_SECRET', AGENTUI_TEST_REPOSITORY: repo.directory });
+    Object.assign(process.env, { GIT_SSH_COMMAND: helper, OPENPANE_TEST_CREDENTIAL: 'HOST_CREDENTIAL_SECRET', OPENPANE_TEST_REPOSITORY: repo.directory });
     const [one, two] = await Promise.all([f.read({ repository: 'ssh://git@example.invalid/private', commit }), f.read({ repository: 'ssh://git@example.invalid/private', commit })]);
     for (const result of [one, two]) {
       assert.deepEqual(await readdir(dirname(result.root.directory)), ['source']);
@@ -481,7 +481,7 @@ test('inherited SSH access retrieves committed bytes and retains no credential o
     assert.equal(await readFile(join(two.root.directory, 'source.ts'), 'utf8'), 'export const value = 1;\n');
     await two.dispose();
   } finally {
-    for (const [key, value] of [['GIT_SSH_COMMAND', prior.ssh], ['AGENTUI_TEST_CREDENTIAL', prior.credential], ['AGENTUI_TEST_REPOSITORY', prior.repository]]) {
+    for (const [key, value] of [['GIT_SSH_COMMAND', prior.ssh], ['OPENPANE_TEST_CREDENTIAL', prior.credential], ['OPENPANE_TEST_REPOSITORY', prior.repository]]) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
@@ -589,7 +589,7 @@ test('absolute path aliases deduplicate before acquisition and encoded file URLs
     await shared(child);
     const commit = child.commit();
     const root = await f.repository('aliases-root');
-    await shared(root, '', { agentui: { extensions: [child.directory, `${child.directory}/`, `${child.directory}/../aliases-child`, pathToFileURL(child.directory).href].map(repository => ({ repository, commit })) } });
+    await shared(root, '', { openpane: { extensions: [child.directory, `${child.directory}/`, `${child.directory}/../aliases-child`, pathToFileURL(child.directory).href].map(repository => ({ repository, commit })) } });
     const result = await f.read(reference(root, root.commit()));
     assert.ok(result.root.extensions.every(child => child === result.root.extensions[0]));
     assert.equal((await readdir(dirname(dirname(result.root.directory)))).length, 2);
@@ -604,19 +604,19 @@ test('trusted remote parents authorize committed local descendants with inherite
   await shared(leaf);
   const child = { repository: relative(process.cwd(), leaf.directory), commit: leaf.commit() };
   const parent = await f.repository('remote-parent');
-  await shared(parent, '', { agentui: { extensions: [child] } });
+  await shared(parent, '', { openpane: { extensions: [child] } });
   const commit = parent.commit();
   const helper = join(f.root, 'remote-helper');
-  await writeFile(helper, '#!/bin/sh\n[ "$AGENTUI_TEST_CREDENTIAL" = "HOST_CREDENTIAL_SECRET" ] || exit 1\nexec git-upload-pack "$AGENTUI_TEST_REPOSITORY"\n', { mode: 0o700 });
+  await writeFile(helper, '#!/bin/sh\n[ "$OPENPANE_TEST_CREDENTIAL" = "HOST_CREDENTIAL_SECRET" ] || exit 1\nexec git-upload-pack "$OPENPANE_TEST_REPOSITORY"\n', { mode: 0o700 });
   const prior = { ...process.env };
   try {
-    Object.assign(process.env, { GIT_SSH_COMMAND: helper, AGENTUI_TEST_CREDENTIAL: 'HOST_CREDENTIAL_SECRET', AGENTUI_TEST_REPOSITORY: parent.directory });
+    Object.assign(process.env, { GIT_SSH_COMMAND: helper, OPENPANE_TEST_CREDENTIAL: 'HOST_CREDENTIAL_SECRET', OPENPANE_TEST_REPOSITORY: parent.directory });
     const result = await f.read({ repository: 'ssh://git@example.invalid/parent', commit });
     assert.equal(result.root.extensions[0].commit, child.commit);
     assert.equal(await readFile(join(result.root.extensions[0].directory, 'source.ts'), 'utf8'), 'export const value = 1;\n');
     await result.dispose();
   } finally {
-    for (const key of ['GIT_SSH_COMMAND', 'AGENTUI_TEST_CREDENTIAL', 'AGENTUI_TEST_REPOSITORY']) {
+    for (const key of ['GIT_SSH_COMMAND', 'OPENPANE_TEST_CREDENTIAL', 'OPENPANE_TEST_REPOSITORY']) {
       if (prior[key] === undefined) delete process.env[key];
       else process.env[key] = prior[key];
     }
@@ -703,13 +703,13 @@ test('relative root and child references work in a spaced invocation cwd through
   await shared(child);
   const childCommit = child.commit();
   const root = await f.repository('invocation with spaces/spaced-root');
-  await shared(root, '', { agentui: { extensions: [{ repository: './spaced-child', commit: childCommit }] } });
+  await shared(root, '', { openpane: { extensions: [{ repository: './spaced-child', commit: childCommit }] } });
   const input = { reference: { repository: './spaced-root', commit: root.commit() }, scratchParent: f.scratchParent };
   const output = execFileSync(process.execPath, ['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
     import { readFile, readdir } from 'node:fs/promises';
     import { join } from 'node:path';
-    const { readCustomizationSnapshot, resolveCustomizationSources } = await import(${JSON.stringify(import.meta.resolve('@agentui/host/customization'))});
+    const { readCustomizationSnapshot, resolveCustomizationSources } = await import(${JSON.stringify(import.meta.resolve('@openpane/host/customization'))});
     const input = ${JSON.stringify(input)};
     const snapshot = await readCustomizationSnapshot({ ...input.reference, scratchParent: input.scratchParent });
     assert.equal(snapshot.customization.shared, './source.ts');

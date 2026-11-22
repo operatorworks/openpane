@@ -1,6 +1,6 @@
 # Secure harness and credential setup
 
-AgentUI should let a fresh Mac install Pi, Claude, or Codex on itself or a Linux target and configure provider credentials. Neither machine needs an existing provider login. The private Tailscale or NetBird network supplies the access boundary. The design concentrates on encrypted transport, encrypted persistence, and provider refresh ownership.
+OpenPane should let a fresh Mac install Pi, Claude, or Codex on itself or a Linux target and configure provider credentials. Neither machine needs an existing provider login. The private Tailscale or NetBird network supplies the access boundary. The design concentrates on encrypted transport, encrypted persistence, and provider refresh ownership.
 
 The first delivery supplies an install-only command and a public secret-provider interface. Launcher-managed Pi now also has a separate bundled Mac setup window that stores a static OpenCode Go key in Keychain and delivers it to the running host. Provider-native subscription login and encrypted Linux persistence remain open. Beans task `agentui-w4wf` tracks the broader onboarding work.
 
@@ -8,7 +8,7 @@ The first delivery supplies an install-only command and a public secret-provider
 
 The Mac orchestrates target setup. The selected target installs and runs the harness. A secret provider supplies static API keys or tokens to trusted host code. Native harnesses retain responsibility for their own login and refresh state.
 
-Remote setup and chat use SSH with ordinary host-key verification. The service stays on target loopback. Provider and external-vault connections use their own verified HTTPS connections. No extra AgentUI user-account system is needed for this deployment.
+Remote setup and chat use SSH with ordinary host-key verification. The service stays on target loopback. Provider and external-vault connections use their own verified HTTPS connections. No extra OpenPane user-account system is needed for this deployment.
 
 The eventual setup flow is as follows.
 
@@ -23,13 +23,13 @@ The native setup controls belong outside customizable chat content. The launcher
 
 ## Let the target own subscription refresh
 
-Codex on the selected target owns its login and all refresh updates. Prefer the provider's supported device-login flow for a headless target. The Mac browser authorizes the target login. AgentUI does not need the user's provider password. A forwarded localhost callback is an alternative when device login is unavailable. See [Codex authentication](https://learn.chatgpt.com/docs/auth).
+Codex on the selected target owns its login and all refresh updates. Prefer the provider's supported device-login flow for a headless target. The Mac browser authorizes the target login. OpenPane does not need the user's provider password. A forwarded localhost callback is an alternative when device login is unavailable. See [Codex authentication](https://learn.chatgpt.com/docs/auth).
 
 Do not synchronize copies of `auth.json` between Mac and Linux. A target can rotate a refresh token and crash before copying it back. A watcher or shutdown export adds the same persistence gap. A process lease prevents concurrent cooperating writers but cannot make provider refresh and a remote Keychain update atomic.
 
-An encrypted keyring or encrypted writable filesystem must persist the native provider's writes directly. The qualified storage must include temporary sibling files used for atomic replacement. AgentUI must not claim that periodically encrypting a plaintext runtime directory makes token refresh crash-safe.
+An encrypted keyring or encrypted writable filesystem must persist the native provider's writes directly. The qualified storage must include temporary sibling files used for atomic replacement. OpenPane must not claim that periodically encrypting a plaintext runtime directory makes token refresh crash-safe.
 
-The launcher pins Codex app-server 0.167.2. The separate SDK mode pins 0.169.0. The exact [0.167.2 login schema](https://raw.githubusercontent.com/openai/codex/rust-v0.167.2/codex-rs/app-server-protocol/schema/json/v2/LoginAccountParams.json) marks externally supplied ChatGPT tokens internal-only and unstable. Current [app-server documentation](https://learn.chatgpt.com/docs/app-server) describes an experimental external-token flow, but that does not establish a supported integration for these pinned modes. An AgentUI-owned subscription refresh broker is outside the first design.
+The launcher pins Codex app-server 0.167.2. The separate SDK mode pins 0.169.0. The exact [0.167.2 login schema](https://raw.githubusercontent.com/openai/codex/rust-v0.167.2/codex-rs/app-server-protocol/schema/json/v2/LoginAccountParams.json) marks externally supplied ChatGPT tokens internal-only and unstable. Current [app-server documentation](https://learn.chatgpt.com/docs/app-server) describes an experimental external-token flow, but that does not establish a supported integration for these pinned modes. An OpenPane-owned subscription refresh broker is outside the first design.
 
 ## Choose a storage backend that proves its protection
 

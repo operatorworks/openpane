@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { takeServerExtensionConfiguration } from '../../apps/host/build/tsc/server-extension-config.js';
 import { createProviderAuthority } from '../../apps/host/build/tsc/provider-credentials.js';
 import { openAccessDatabase } from '../../apps/host/build/tsc/access-database.js';
@@ -11,15 +11,15 @@ import { openAccessDatabase } from '../../apps/host/build/tsc/access-database.js
 const secret = '  PRIVATE_CONFIG_SECRET_673\n';
 const instance = { namespace: 'example-crew', installationId: 'personal', generation: '1', protocolVersion: 'v1' };
 const grant = () => ({ id: 'service', instance: { ...instance }, service: 'https://EXAMPLE.com:443/', expectedAuthority: 'remote-provider',
-  authentication: { kind: 'environment', variable: 'AGENTUI_EXTENSION_CREW_TOKEN', revision: 'first' } });
+  authentication: { kind: 'environment', variable: 'OPENPANE_EXTENSION_CREW_TOKEN', revision: 'first' } });
 function fixture(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-extension-config-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-extension-config-'));
   const installed = join(directory, 'installed'); mkdirSync(installed);
   const config = join(directory, 'extensions.json'), packagePath = join(installed, 'package.json');
   const manifest = { namespace: instance.namespace, trust: 'full', sdkVersion: EXTENSION_SDK_VERSION, entries: [{ kind: 'server', module: './server.mjs' }] };
-  const metadata = { name: '@example/crew', exports: './ignored.js', agentui: { sources: ['ignored'], extension: manifest } };
+  const metadata = { name: '@example/crew', exports: './ignored.js', openpane: { sources: ['ignored'], extension: manifest } };
   const input = { version: 2, ownership: 'transient', extensions: [{ directory: './installed', installations: [grant()] }] };
-  const environment = { AGENTUI_EXTENSION_CREW_TOKEN: secret, AGENTUI_EXTENSION_UNSELECTED: 'unselected', PATH: '/native/path', OPENCODE_GO_API_KEY: 'native-key' };
+  const environment = { OPENPANE_EXTENSION_CREW_TOKEN: secret, OPENPANE_EXTENSION_UNSELECTED: 'unselected', PATH: '/native/path', OPENCODE_GO_API_KEY: 'native-key' };
   const read = (values = environment) => {
     writeFileSync(packagePath, JSON.stringify(metadata)); writeFileSync(config, JSON.stringify(input));
     return takeServerExtensionConfiguration(config, values);
@@ -31,7 +31,7 @@ function invalid(action) {
   assert.throws(action, error => {
     assert.equal(error.message, 'Invalid server extension configuration');
     assert.equal(error.cause, undefined);
-    assert.doesNotMatch(String(error.stack), /PRIVATE_CONFIG_SECRET|AGENTUI_EXTENSION_CREW_TOKEN|installed\/package/);
+    assert.doesNotMatch(String(error.stack), /PRIVATE_CONFIG_SECRET|OPENPANE_EXTENSION_CREW_TOKEN|installed\/package/);
     return true;
   });
 }
@@ -41,15 +41,15 @@ test('compiled consumer resolves package metadata from the config directory and 
   assert.equal(selection.kind, 'installed'); assert.equal(selection.directory, f.installed);
   assert.deepEqual(selection.manifest, f.manifest);
   assert.equal(selection.installations[0].service, 'https://example.com');
-  assert.doesNotMatch(JSON.stringify(selection), /PRIVATE_CONFIG_SECRET|AGENTUI_EXTENSION_CREW_TOKEN|sources|ignored/);
-  assert.deepEqual(f.environment, { AGENTUI_EXTENSION_UNSELECTED: 'unselected', PATH: '/native/path', OPENCODE_GO_API_KEY: 'native-key' });
-  f.environment.AGENTUI_EXTENSION_CREW_TOKEN = 'changed'; delete f.environment.AGENTUI_EXTENSION_CREW_TOKEN;
+  assert.doesNotMatch(JSON.stringify(selection), /PRIVATE_CONFIG_SECRET|OPENPANE_EXTENSION_CREW_TOKEN|sources|ignored/);
+  assert.deepEqual(f.environment, { OPENPANE_EXTENSION_UNSELECTED: 'unselected', PATH: '/native/path', OPENCODE_GO_API_KEY: 'native-key' });
+  f.environment.OPENPANE_EXTENSION_CREW_TOKEN = 'changed'; delete f.environment.OPENPANE_EXTENSION_CREW_TOKEN;
   assert.equal(await selection.installations[0].authentication.resolve(), secret);
   const state = openAccessDatabase(join(f.directory, 'host.sqlite'));
   const authority = createProviderAuthority(state, instance.namespace, selection.installations);
   const { credential } = authority.issue('service', instance);
   assert.equal(await authority.credentials.use({ credential, service: 'https://example.com' }, async value => value), secret);
-  assert.doesNotMatch(JSON.stringify(state.database.prepare('SELECT * FROM service_provider_credentials').all()), /PRIVATE_CONFIG_SECRET|AGENTUI_EXTENSION_CREW_TOKEN/);
+  assert.doesNotMatch(JSON.stringify(state.database.prepare('SELECT * FROM service_provider_credentials').all()), /PRIVATE_CONFIG_SECRET|OPENPANE_EXTENSION_CREW_TOKEN/);
   await authority.close(); state.database.close();
   assert.equal(readFileSync(join(f.directory, 'host.sqlite')).includes(Buffer.from(secret)), false);
 });
@@ -59,14 +59,14 @@ test('shared variables are consumed once after all grants capture their exact by
   second.id = 'other'; second.instance.installationId = 'other';
   f.input.extensions[0].installations.push(second);
   const [selection] = f.read().entries;
-  assert.equal(Object.hasOwn(f.environment, 'AGENTUI_EXTENSION_CREW_TOKEN'), false);
+  assert.equal(Object.hasOwn(f.environment, 'OPENPANE_EXTENSION_CREW_TOKEN'), false);
   for (const installation of selection.installations) assert.equal(await installation.authentication.resolve(), secret);
 });
 
 for (const [name, change] of [
   ['missing second credential', f => {
     const second = grant(); second.id = 'other'; second.instance.installationId = 'other';
-    second.authentication.variable = 'AGENTUI_EXTENSION_MISSING'; f.input.extensions[0].installations.push(second);
+    second.authentication.variable = 'OPENPANE_EXTENSION_MISSING'; f.input.extensions[0].installations.push(second);
   }],
   ['invalid second grant', f => {
     const second = grant(); second.id = 'other'; second.instance.installationId = 'other';
@@ -79,7 +79,7 @@ for (const [name, change] of [
   ['missing second package', f => { f.input.extensions.push({ directory: './missing', installations: [] }); }],
   ['invalid second manifest', f => {
     const directory = join(f.directory, 'second'); mkdirSync(directory);
-    writeFileSync(join(directory, 'package.json'), JSON.stringify({ agentui: { extension: { ...f.manifest, sdkVersion: '99.0.0' } } }));
+    writeFileSync(join(directory, 'package.json'), JSON.stringify({ openpane: { extension: { ...f.manifest, sdkVersion: '99.0.0' } } }));
     f.input.extensions.push({ directory: './second', installations: [] });
   }],
 ]) test(`later ${name} leaves every environment value unchanged`, t => {
@@ -87,8 +87,8 @@ for (const [name, change] of [
   invalid(f.read); assert.deepEqual(f.environment, before);
 });
 
-for (const variable of ['PATH', 'HOME', 'OPENCODE_GO_API_KEY', 'AGENTUI_ANTHROPIC_API_KEY', 'OTEL_EXPORTER_OTLP_HEADERS',
-  'CREW_TOKEN', 'AGENTUI_EXTENSION_', 'AGENTUI_EXTENSION_bad-name', 'AGENTUI_EXTENSION_bad\n']) {
+for (const variable of ['PATH', 'HOME', 'OPENCODE_GO_API_KEY', 'OPENPANE_ANTHROPIC_API_KEY', 'OTEL_EXPORTER_OTLP_HEADERS',
+  'CREW_TOKEN', 'OPENPANE_EXTENSION_', 'OPENPANE_EXTENSION_bad-name', 'OPENPANE_EXTENSION_bad\n']) {
   test(`consumer refuses reserved or malformed variable ${JSON.stringify(variable)} without mutation`, t => {
     const f = fixture(t); f.input.extensions[0].installations[0].authentication.variable = variable;
     f.environment[variable] = secret; const before = { ...f.environment };
@@ -125,8 +125,8 @@ for (const [name, change] of [
   ['blank directory', f => { f.input.extensions[0].directory = ' '; }],
   ['unbounded directory', f => { f.input.extensions[0].directory = 'x'.repeat(1025); }],
   ['non-array grants', f => { f.input.extensions[0].installations = {}; }],
-  ['missing package manifest', f => { delete f.metadata.agentui.extension; }],
-  ['compiled catalog metadata', f => { delete f.metadata.agentui; f.metadata.entries = []; }],
+  ['missing package manifest', f => { delete f.metadata.openpane.extension; }],
+  ['compiled catalog metadata', f => { delete f.metadata.openpane; f.metadata.entries = []; }],
   ['manifest extra field', f => { f.manifest.secret = secret; }],
   ['manifest blank namespace', f => { f.manifest.namespace = ' '; }],
   ['manifest namespace syntax', f => { f.manifest.namespace = 'UPPER'; }],
@@ -154,8 +154,8 @@ for (const [name, change] of [
   ['missing revision', f => { delete f.input.extensions[0].installations[0].authentication.revision; }],
   ['blank revision', f => { f.input.extensions[0].installations[0].authentication.revision = ' '; }],
   ['unbounded revision', f => { f.input.extensions[0].installations[0].authentication.revision = 'x'.repeat(1025); }],
-  ...['', '1TOKEN', 'CREW-TOKEN', ' TOKEN', 'TOKEN\n', 'AGENTUI_EXTENSION_' + 'x'.repeat(1025)].map(variable => ['invalid environment variable', f => { f.input.extensions[0].installations[0].authentication.variable = variable; }]),
-  ...[undefined, '', ' \t\n', 42].map(value => ['absent or blank environment value', f => { f.environment.AGENTUI_EXTENSION_CREW_TOKEN = value; }]),
+  ...['', '1TOKEN', 'CREW-TOKEN', ' TOKEN', 'TOKEN\n', 'OPENPANE_EXTENSION_' + 'x'.repeat(1025)].map(variable => ['invalid environment variable', f => { f.input.extensions[0].installations[0].authentication.variable = variable; }]),
+  ...[undefined, '', ' \t\n', 42].map(value => ['absent or blank environment value', f => { f.environment.OPENPANE_EXTENSION_CREW_TOKEN = value; }]),
   ...['namespace', 'installationId', 'generation', 'protocolVersion'].flatMap(field => [
     ['blank identity field', f => { f.input.extensions[0].installations[0].instance[field] = ' '; }],
     ['missing identity field', f => { delete f.input.extensions[0].installations[0].instance[field]; }],

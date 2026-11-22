@@ -1,9 +1,9 @@
-import { ServiceError } from '@agentui/contracts/service';
-import { sameScope } from '@agentui/contracts';
-import type { ConversationScope } from '@agentui/contracts';
-import { conversationPreview, transcriptProjection } from '@agentui/contracts/conversation';
-import type { Transcript } from '@agentui/contracts/conversation';
-import type { ContinuationAction, ContinuationView, ConversationCatalogEntry, ServiceConnection } from '@agentui/contracts/service';
+import { ServiceError } from '@openpane/contracts/service';
+import { sameScope } from '@openpane/contracts';
+import type { ConversationScope } from '@openpane/contracts';
+import { conversationPreview, transcriptProjection } from '@openpane/contracts/conversation';
+import type { Transcript } from '@openpane/contracts/conversation';
+import type { ContinuationAction, ContinuationView, ConversationCatalogEntry, ServiceConnection } from '@openpane/contracts/service';
 import type { SavedView } from './view-state.js';
 import type { StoreBorrow, ViewBorrow } from './view-leases.js';
 import type { ApplicationSnapshot, ContinuationBoundary, ConversationContinuation, EarlierSegment, OpenConversation } from './application-controller.js';

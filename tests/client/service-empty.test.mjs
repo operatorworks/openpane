@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseServiceResponse } from '@agentui/contracts/service';
-import { checkCompatibility } from '@agentui/client';
-import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, SOLO_CLIENT_COMPATIBILITY, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
-import { manifestPayload, BROWSER_RUNTIME } from '@agentui/contracts/artifact';
+import { parseServiceResponse } from '@openpane/contracts/service';
+import { checkCompatibility } from '@openpane/client';
+import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, SOLO_CLIENT_COMPATIBILITY, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
+import { manifestPayload, BROWSER_RUNTIME } from '@openpane/contracts/artifact';
 
 const compatibility = { wireVersion: SERVICE_WIRE_VERSION, extensionSdkVersion: EXTENSION_SDK_VERSION, nativeRuntime: null,
   desiredGitRevision: 'revision', appliedArtifact: { artifactId: 'artifact', gitRevision: 'revision' } };

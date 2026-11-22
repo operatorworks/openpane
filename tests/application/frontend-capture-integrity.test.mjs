@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SqliteStore } from '../../packages/host/dist/sqlite-store.js';
 import { budgets } from '../../packages/host/dist/durable-model.js';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { png } from '../host/image-fixtures.mjs';
 import { Worker } from 'node:worker_threads';
 import { join } from 'node:path';
-import { createProviderRegistry } from '@agentui/host';
+import { createProviderRegistry } from '@openpane/host';
 import { fixture as hostFixture, scope as hostScope } from '../host/fixture.mjs';
 import { fixture, create, offered, send, actualInput, aguiExtension, unavailable } from './provider-send-fixture.mjs';
 
@@ -95,7 +95,7 @@ const admissionWorker = `
   }
   const { SqliteStore } = await import(workerData.store);
   const { budgets } = await import(workerData.model);
-  const { transcriptProjection } = await import('@agentui/contracts/conversation');
+  const { transcriptProjection } = await import('@openpane/contracts/conversation');
   const store = new SqliteStore(workerData.path, transcriptProjection, budgets());
   parentPort.postMessage({ ready: true });
   parentPort.once('message', () => {

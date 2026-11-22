@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute, posix, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { record } from '@agentui/contracts/decode';
-import { parseExtensionManifest, type ExtensionManifest } from '@agentui/sdk';
+import { record } from '@openpane/contracts/decode';
+import { parseExtensionManifest, type ExtensionManifest } from '@openpane/sdk';
 
 const supportedNodeMinimum = [24, 22, 3] as const;
 const supportedNodeRange = `>=${supportedNodeMinimum.join('.')} <${supportedNodeMinimum[0] + 1}`;
@@ -164,8 +164,8 @@ export function manifestMatchesLockEntry(packageJson: Record<string, unknown>, e
 export function parseCustomizationPackage(input: unknown, files: ReadonlySet<string>): CustomizationSource | undefined {
   try {
     const packageJson = record(input);
-    if (packageJson.agentui === undefined) return undefined;
-    const metadata = fields(packageJson.agentui, ['extension', 'sources', 'shared', 'extensions']);
+    if (packageJson.openpane === undefined) return undefined;
+    const metadata = fields(packageJson.openpane, ['extension', 'sources', 'shared', 'extensions']);
     let local: CustomizationSource['local'];
     if (metadata.extension !== undefined || metadata.sources !== undefined) {
       const manifest = parseExtensionManifest(metadata.extension);

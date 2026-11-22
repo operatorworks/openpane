@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import test from 'node:test';
-import { createBrowserConnection } from '@agentui/client/service';
-import { EXTENSION_SDK_VERSION, backendProviderContractVersion } from '@agentui/sdk';
+import { createBrowserConnection } from '@openpane/client/service';
+import { EXTENSION_SDK_VERSION, backendProviderContractVersion } from '@openpane/sdk';
 import { options, startBrowserHost } from './fixtures.mjs';
 
 const secret = 'PRIVATE_OPERATION_CREDENTIAL_42';

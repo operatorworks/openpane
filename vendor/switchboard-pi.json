@@ -1,5 +1,5 @@
 {
-  "installedAlias": "@agentui/switchboard-pi",
+  "installedAlias": "@openpane/switchboard-pi",
   "entrypoint": "./pi",
   "nativeSdk": "1.5.2",
   "provider": "opencode-go",

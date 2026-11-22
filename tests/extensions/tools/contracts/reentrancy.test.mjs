@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseRunIdentity } from '@agentui/contracts';
-import { createFrontendToolGeneration, pinFrontendTools } from '@agentui/sdk/tools';
+import { parseRunIdentity } from '@openpane/contracts';
+import { createFrontendToolGeneration, pinFrontendTools } from '@openpane/sdk/tools';
 
 const run = {
   conversation: { hostId: 'h', conversationId: 'c' }, runId: 'r',
-  authority: { kind: 'agentui-host', hostId: 'h',
+  authority: { kind: 'openpane-host', hostId: 'h',
     binding: { namespace: 'n', installationId: 'i', opaqueSessionId: 's' } },
 };
 const capabilities = { tools: { clientProvided: true } };

@@ -1,8 +1,8 @@
-import { canRetryObservation } from '@agentui/contracts';
-import type { ConversationClosure, ObservationStopReason } from '@agentui/contracts';
-import { IMAGE_MAX_BYTES } from '@agentui/contracts/image';
+import { canRetryObservation } from '@openpane/contracts';
+import type { ConversationClosure, ObservationStopReason } from '@openpane/contracts';
+import { IMAGE_MAX_BYTES } from '@openpane/contracts/image';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useConversation } from '@agentui/client/react';
+import { useConversation } from '@openpane/client/react';
 import type { ConversationActions, ConversationContinuation, OpenConversation, ConversationObservation, PermissionState } from './application-controller.js';
 import { ContinuationChoices, ContinuationHistory } from './ContinuationNotice.js';
 import { ConversationPermissions } from './ConversationPermissions.js';

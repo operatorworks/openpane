@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { openLocalHost } from '@agentui/host';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { openLocalHost } from '@openpane/host';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { createCodexDriver } from '../../packages/host/dist/codex-driver.js';
 import { command, scope, snapshot as genericSnapshot, until } from './fixture.mjs';
 
@@ -14,7 +14,7 @@ const projection = transcriptProjection;
 const snapshot = port => genericSnapshot(port, projection.version);
 
 function fixture(t, mode = 'stream') {
-  const dir = mkdtempSync(join(tmpdir(), 'agentui-codex-driver-'));
+  const dir = mkdtempSync(join(tmpdir(), 'openpane-codex-driver-'));
   const logPath = join(dir, 'rpc.jsonl');
   const sessions = [];
   const open = () => {
@@ -90,10 +90,10 @@ const messages = document => document.domain.messages;
 const assistant = document => messages(document).filter(message => message.role === 'assistant');
 
 test('passes the caller environment to its Codex process', { timeout: 4000 }, async t => {
-  const dir = mkdtempSync(join(tmpdir(), 'agentui-codex-environment-'));
+  const dir = mkdtempSync(join(tmpdir(), 'openpane-codex-environment-'));
   const path = join(dir, 'environment.json');
   const env = { PATH: process.env.PATH ?? '', OPENAI_API_KEY: 'explicit-provider-credential',
-    OTEL_EXPORTER_OTLP_HEADERS: 'explicit-collector-header', AGENTUI_DATADOG_LLMOBS: 'true' };
+    OTEL_EXPORTER_OTLP_HEADERS: 'explicit-collector-header', OPENPANE_DATADOG_LLMOBS: 'true' };
   const driver = createCodexDriver({ cwd: dir, version: '0.167.2', executable: process.execPath,
     args: ['--eval', `const fs = require('node:fs'); const temporary = process.argv[1] + '.tmp'; fs.writeFileSync(temporary, JSON.stringify(process.env)); fs.renameSync(temporary, process.argv[1]); setInterval(() => {}, 1000);`, path],
     env, append() {},

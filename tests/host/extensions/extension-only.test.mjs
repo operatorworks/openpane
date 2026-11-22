@@ -5,8 +5,8 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { chromium } from 'playwright';
 import { createCrewFixture } from '../../extensions/providers/contracts/crew.ts';
-import { createBrowserConnection } from '@agentui/client/service';
-import { recordedInstallation } from '@agentui/host/recorded';
+import { createBrowserConnection } from '@openpane/client/service';
+import { recordedInstallation } from '@openpane/host/recorded';
 import { describeAgent } from '../../../apps/host/build/tsc/agents.js';
 import { entry, options, startBrowserHost } from './fixtures.mjs';
 
@@ -172,7 +172,7 @@ test('extension-only restart reads saved native history without installing its r
   assert.equal(assertDefault(await f.client.metadata()), null);
   assert.deepEqual((await f.client.catalog()).map(item => item.scope), [scope]);
   const saved = await f.client.conversationAgent(scope);
-  assert.equal(saved.runtime.engine, 'agentui-recorded'); assert.equal(saved.availability.kind, 'unavailable');
+  assert.equal(saved.runtime.engine, 'openpane-recorded'); assert.equal(saved.availability.kind, 'unavailable');
   const received = Promise.withResolvers();
   const feed = f.client.conversation(scope).watch({ after: null, projectionVersion: 4 }, frame => received.resolve(frame));
   try { assert.equal((await received.promise).kind, 'snapshot'); }

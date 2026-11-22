@@ -6,7 +6,7 @@
   },
   "viewId": "released-ready-attachment-view",
   "database": {
-    "name": "agentui-browser-views",
+    "name": "openpane-browser-views",
     "version": 1,
     "objectStore": "records"
   },

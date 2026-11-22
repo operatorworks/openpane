@@ -5,13 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
-import { CODEX_SDK_RUNTIME } from '@agentui/contracts/compatibility';
+import { CODEX_SDK_RUNTIME } from '@openpane/contracts/compatibility';
 import { DatabaseSync } from 'node:sqlite';
 import { readAgentConfiguration } from '../../apps/host/build/tsc/agent-config.js';
 
 const root = new URL('../../', import.meta.url);
 async function fixture(t) {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-sdk-startup-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-sdk-startup-'));
   const bin = join(directory, 'bin');
   await mkdir(bin);
   const fixtureUrl = new URL('../host/fixtures/codex-sdk-exec.mjs', import.meta.url).href;
@@ -126,7 +126,7 @@ test('configured agents probe and launch their exact binaries while missing opti
   ] };
   const config = join(f.directory, 'agents.json');
   await writeFile(config, JSON.stringify(configuration));
-  const host = f.launch(['serve', '--config', config, '--port', '0'], { AGENTUI_ANTHROPIC_API_KEY: '', OPENCODE_GO_API_KEY: '' });
+  const host = f.launch(['serve', '--config', config, '--port', '0'], { OPENPANE_ANTHROPIC_API_KEY: '', OPENCODE_GO_API_KEY: '' });
   const lines = createInterface({ input: host.child.stdout });
   const ready = await Promise.race([new Promise(resolve => lines.once('line', line => resolve(JSON.parse(line)))), host.exited.then(() => { throw new Error(host.stderr); })]);
   lines.close();
@@ -142,7 +142,7 @@ test('configured agents probe and launch their exact binaries while missing opti
   assert.equal(metadata.defaultAgentId, metadata.agents[0].id);
   assert.match(metadata.agents[0].label, /^sol · Codex/);
   assert.match(metadata.agents[3].label, /^missing-binary · Codex/);
-  assert.doesNotMatch(JSON.stringify(metadata), /not-installed|private|AGENTUI_ANTHROPIC|OPENCODE_GO|Unselected/);
+  assert.doesNotMatch(JSON.stringify(metadata), /not-installed|private|OPENPANE_ANTHROPIC|OPENCODE_GO|Unselected/);
   for (const [index, agent] of metadata.agents.slice(0, 2).entries()) {
     const scope = { hostId: ready.hostId, conversationId: `configured-${index}` };
     await call({ op: 'create', scope, agentId: agent.id });
@@ -159,7 +159,7 @@ test('configured agents probe and launch their exact binaries while missing opti
   for (const { pid } of records) assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
   configuration.default = 'missing-binary';
   await writeFile(config, JSON.stringify(configuration));
-  const unavailableDefault = f.launch(['serve', '--config', config, '--port', '0'], { AGENTUI_ANTHROPIC_API_KEY: '', OPENCODE_GO_API_KEY: '' });
+  const unavailableDefault = f.launch(['serve', '--config', config, '--port', '0'], { OPENPANE_ANTHROPIC_API_KEY: '', OPENCODE_GO_API_KEY: '' });
   const nextLines = createInterface({ input: unavailableDefault.child.stdout });
   const next = await Promise.race([new Promise(resolve => nextLines.once('line', line => resolve(JSON.parse(line)))), unavailableDefault.exited.then(() => { throw new Error(unavailableDefault.stderr); })]);
   nextLines.close();

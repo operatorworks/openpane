@@ -1,4 +1,4 @@
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { providerService, fixture, saved, send } from './provider-stream-fixture.mjs';

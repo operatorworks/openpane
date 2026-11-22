@@ -16,14 +16,14 @@ Start the host with an existing workspace directory. Use a private data director
 ```sh
 node apps/host/dist/main.js codex \
 	--workspace /absolute/path/to/your/project \
-	--data-dir "$HOME/.local/share/agentui-codex" \
+	--data-dir "$HOME/.local/share/openpane-codex" \
 	--port 7140
 ```
 
 On macOS, open this host in the desktop app from another terminal. Keep the host running.
 
 ```sh
-./agentui --host-url http://127.0.0.1:7140/browser.html
+./openpane --host-url http://127.0.0.1:7140/browser.html
 ```
 
 The desktop window uses the local host's app screens. It grants the page no native commands. Native startup for this option still needs a macOS smoke test. You can also use [the local app](http://127.0.0.1:7140/browser.html) in a browser.

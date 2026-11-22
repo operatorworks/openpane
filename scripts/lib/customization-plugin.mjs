@@ -4,13 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { checkCustomizationSource, isWorkerRequest, sourcePolicies } from './customization-source-policy.mjs';
 import { checkCustomizationAsset, customizationCssPolicy, within } from './customization-asset-policy.mjs';
 
-// This module must not import @agentui/host: the desktop Vite configuration loads it on a tree where only desktop:prepare ran.
+// This module must not import @openpane/host: the desktop Vite configuration loads it on a tree where only desktop:prepare ran.
 const selection = fileURLToPath(new URL('../../apps/desktop/src/application/customization-selection.ts', import.meta.url));
 const tsconfig = fileURLToPath(new URL('../../apps/desktop/tsconfig.json', import.meta.url));
 const SHARED = Object.freeze({
   react: ['', '/jsx-runtime', '/jsx-dev-runtime'], 'react-dom': ['', '/client'],
-  '@agentui/sdk': ['', '/react', '/tools', '/react-tools'], '@agentui/contracts': ['*'], '@agentui/protocol': [''],
-  '@agentui/ui-primitives': ['/desktop'], '@agentui/theme': ['', '/react'],
+  '@openpane/sdk': ['', '/react', '/tools', '/react-tools'], '@openpane/contracts': ['*'], '@openpane/protocol': [''],
+  '@openpane/ui-primitives': ['/desktop'], '@openpane/theme': ['', '/react'],
 });
 const sharedPackage = specifier => Object.keys(SHARED).find(name => specifier === name || specifier.startsWith(`${name}/`));
 function sharedImport(specifier) {
@@ -22,7 +22,7 @@ const scripts = /\.[cm]?[jt]sx?$/u;
 /**
  * One plan from the bundled and an external plan. A namespace in both fails, naming the namespace.
  * `identity` stays the external plan's: `customization-identity.json` records only the external package graph. Bundled
- * entries are AgentUI source, covered by the artifact manifest's source provenance and by `artifactId`, which hashes
+ * entries are OpenPane source, covered by the artifact manifest's source provenance and by `artifactId`, which hashes
  * every built file.
  */
 export function mergePlans(bundled, external) {
@@ -45,7 +45,7 @@ function checkSource(code, id, label) {
 
 export function customizationPlugin(plan) {
   const contained = id => plan.roots.some(root => within(root, id));
-  const reserved = name => (name ?? '').startsWith('@agentui/') || Object.hasOwn(SHARED, name);
+  const reserved = name => (name ?? '').startsWith('@openpane/') || Object.hasOwn(SHARED, name);
   const owners = new Map();
   async function owner(path) {
     let directory = dirname(path);
@@ -62,7 +62,7 @@ export function customizationPlugin(plan) {
   }
   const source = `export default [${plan.entries.map(entry => `{manifest:${JSON.stringify(entry.manifest)},load:()=>import(${JSON.stringify(entry.source)})}`).join(',')}];`;
   return {
-    name: 'agentui-committed-customization', enforce: 'pre',
+    name: 'openpane-committed-customization', enforce: 'pre',
     config: () => ({ tsconfig, resolve: { dedupe: Object.keys(SHARED) }, css: { postcss: { plugins: [customizationCssPolicy(plan.roots)] } },
       oxc: { jsx: { runtime: 'automatic', importSource: 'react' } } }),
     async resolveId(specifier, importer, options) {
@@ -73,7 +73,7 @@ export function customizationPlugin(plan) {
         if (!result || result.external) throw new Error(`Unsupported shared customization import: ${specifier}`);
         return result;
       }
-      if (sharedPackage(specifier) || specifier.startsWith('@agentui/') || specifier.includes('\\') || /^(?:node:|[a-z]+:|#)/iu.test(specifier)) throw new Error(`Unsupported customization import: ${specifier}`);
+      if (sharedPackage(specifier) || specifier.startsWith('@openpane/') || specifier.includes('\\') || /^(?:node:|[a-z]+:|#)/iu.test(specifier)) throw new Error(`Unsupported customization import: ${specifier}`);
       const result = await this.resolve(specifier, importer, { skipSelf: true, kind: options.kind });
       if (result && isWorkerRequest(result.id)) throw new Error(`Unsupported customization import (unsupportedWorker): ${specifier}`);
       if (result?.id.startsWith('\0') && !result.external) return result;

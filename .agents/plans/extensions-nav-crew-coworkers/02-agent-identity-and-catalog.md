@@ -2,7 +2,7 @@
 
 ## Goal
 
-A workspace view maps a service's agent (a Crew member, a coworker) to the AgentUI agent that creates conversations with it. It lists the conversations of one namespace or one provider agent without one request per conversation. The list keeps conversations whose agent was later retired, deleted or replaced.
+A workspace view maps a service's agent (a Crew member, a coworker) to the OpenPane agent that creates conversations with it. It lists the conversations of one namespace or one provider agent without one request per conversation. The list keeps conversations whose agent was later retired, deleted or replaced.
 
 Prerequisite state: WP1 merged (wire 15).
 

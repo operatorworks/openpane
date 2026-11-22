@@ -1,4 +1,4 @@
-import { record } from '@agentui/contracts/decode';
+import { record } from '@openpane/contracts/decode';
 import { readFile } from 'node:fs/promises';
 import { join, posix } from 'node:path';
 import { supportedPackageManager, containedPath, CustomizationError, dependencyGroups, hasDependencies, parseCustomizationPackage, npmLockPackages, manifestMatchesLockEntry, npmLocalPath, parentDirectory, byPath, identity, type CustomizationSource } from './contract.js';
@@ -19,6 +19,7 @@ export type NpmInputs = { readonly kind: 'absent' } | {
 export function npmIdentity(input: {
   readonly treeId: string; readonly path: string; readonly selected: SourceFile;
 } & Pick<Extract<NpmInputs, { kind: 'locked' }>, 'packageJson' | 'lockfile' | 'workspaces' | 'localInputs'>): string {
+  // Hash domain tag predates the OpenPane rename; changing it would change every recorded artifact identity.
   return identity(['agentui-npm-v1', input.treeId, input.path, input.selected, input.packageJson, input.lockfile, input.workspaces, input.localInputs]);
 }
 export interface SelectedPackage { readonly directory: string; readonly customization: CustomizationSource | undefined; readonly npm: NpmInputs }

@@ -18,7 +18,7 @@ for (const mode of ['success', 'deadline', 'startup-failure', 'removal-failure',
     await recordResource({ type: 'directory', path: directory });
     t.after(() => rm(directory, { recursive: true, force: true }));
     if (mode === 'removal-failure') await mkdir(source); else await writeFile(source, '{}');
-    const env = { AGENTUI_REFRESH_WAIT_MS: mode === 'startup-failure' ? 'invalid' : '700', AGENTUI_REFRESH_SOURCE: source };
+    const env = { OPENPANE_REFRESH_WAIT_MS: mode === 'startup-failure' ? 'invalid' : '700', OPENPANE_REFRESH_SOURCE: source };
     if (mode === 'owner-kill') {
       const owner = spawn(process.execPath, ['--input-type=module', '-e', `import {spawn} from 'node:child_process'; const c=spawn(process.execPath,['--import',${JSON.stringify(guard)},'-e','setInterval(()=>{},1000)'],{env:${JSON.stringify(env)},stdio:['pipe','ignore','ignore']}); console.log(c.pid); setInterval(()=>{},1000);`], { stdio: ['ignore', 'pipe', 'pipe'] });
       const [bytes] = await once(owner.stdout, 'data'), pid = Number(bytes.toString().trim());

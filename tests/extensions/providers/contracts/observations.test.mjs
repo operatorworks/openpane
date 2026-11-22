@@ -5,7 +5,7 @@ import { assertCompileCases } from '../../../support/compile.mjs';
 const fixture = await readFile(new URL('../../../application/fixtures/provider-observations.ts', import.meta.url), 'utf8');
 test('controlled HTTP observation provider compiles against public SDK exports', () => assertCompileCases({ prefix: fixture, cases: [['', null]] }));
 test('observation opt-in preserves model and installation boundaries', () => assertCompileCases({ prefix: `
-import type { AguiModel, AguiObservations, AguiOriginalRun, ProviderContributions, BackendProvider, ProviderPresentation } from '@agentui/sdk';
+import type { AguiModel, AguiObservations, AguiOriginalRun, ProviderContributions, BackendProvider, ProviderPresentation } from '@openpane/sdk';
 declare const contributions: ProviderContributions;
 declare const backend: BackendProvider<AguiModel, 'one'>;
 declare const presentation: ProviderPresentation<AguiModel, 'one'>;

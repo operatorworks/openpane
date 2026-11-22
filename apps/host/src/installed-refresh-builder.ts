@@ -3,15 +3,15 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { canonicalJson } from '@agentui/contracts';
-import { hex, identifier, record } from '@agentui/contracts/decode';
-import { readServerCustomizationArtifact } from '@agentui/host/customization';
-import type { ServerArtifactExpectation } from '@agentui/host/customization';
+import { canonicalJson } from '@openpane/contracts';
+import { hex, identifier, record } from '@openpane/contracts/decode';
+import { readServerCustomizationArtifact } from '@openpane/host/customization';
+import type { ServerArtifactExpectation } from '@openpane/host/customization';
 import type { RefreshBuilder, RefreshBuildCommand, RefreshBuildFailure, RefreshBuildResult } from './refresh-jobs.js';
 
 type Identity = Extract<RefreshBuilder, { kind: 'ready' }>['identity'];
 type Compatibility = Omit<ServerArtifactExpectation, 'artifactId'>;
-type Qualification = Readonly<{ protocol: 'agentui-refresh-builder-v1'; entry: string; lockfile: string; identity: Identity; compatibility: Compatibility }>;
+type Qualification = Readonly<{ protocol: 'openpane-refresh-builder-v1'; entry: string; lockfile: string; identity: Identity; compatibility: Compatibility }>;
 const fail = (failure: RefreshBuildFailure): RefreshBuildResult => ({ kind: 'failed', failure });
 const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b);
 const hash = async (path: string) => createHash('sha256').update(await readFile(path)).digest('hex');
@@ -30,7 +30,7 @@ function qualification(value: unknown): Qualification {
   const identity = record(input.identity, ['kind', 'node', 'entrySha256', 'lockSha256', 'builder']);
   const builder = record(identity.builder, ['identity', 'esbuildVersion']);
   const compatibility = record(input.compatibility, ['sdkVersion', 'nodeVersion', 'nodeModules', 'abiIdentity']);
-  if (input.protocol !== 'agentui-refresh-builder-v1' || identity.kind !== 'ready') throw new Error('Incompatible refresh builder');
+  if (input.protocol !== 'openpane-refresh-builder-v1' || identity.kind !== 'ready') throw new Error('Incompatible refresh builder');
   return { protocol: input.protocol, entry: identifier(input.entry, 4096), lockfile: identifier(input.lockfile, 4096),
     identity: { kind: identity.kind, node: identifier(identity.node, 4096), entrySha256: hex(identity.entrySha256, 64), lockSha256: hex(identity.lockSha256, 64),
       builder: { identity: hex(builder.identity, 64), esbuildVersion: identifier(builder.esbuildVersion, 128) } },
@@ -160,7 +160,7 @@ export async function createInstalledRefreshBuilder(input: { readonly entry?: st
       const task = (async () => {
         if (closed) return fail('unavailable');
         if (!same(command.toolchain, startup.identity) || !/^[a-zA-Z0-9_-]{1,80}$/.test(command.id)) return fail('incompatible');
-        const scratch = join(dirname(command.directory), `.agentui-server-${command.id}`);
+        const scratch = join(dirname(command.directory), `.openpane-server-${command.id}`);
         if (await lstat(scratch).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; })) return fail('publication');
         if (closed) return fail('unavailable');
         const result = await launch(startup, command);

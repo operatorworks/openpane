@@ -6,14 +6,17 @@ The shared protocol and host workspaces install `@ag-ui/core@1.0.4` from the
 [PR49 fork artifact](ag-ui/ed2c1d5b63299d3f08676a1418cc2640bbe55fd1/README.md).
 Its six-package closure includes the Codex and Pi packages intended for later
 Switchboard composition. A separate controlled consumer verifies their installation,
-public imports and fixture behavior. AgentUI does not start a second native runtime. Full native integration,
+public imports and fixture behavior. OpenPane does not start a second native runtime. Full native integration,
 approvals, discovery, provider routes and Apple qualification remain open.
 
 ## Current Switchboard package
 
-The host installs `@mattsp1290/switchboard@0.0.0` and the existing Pi, Codex,
+The host installs `@operatorworks/switchboard` and the existing Pi, Codex,
 and Claude aliases from one immutable artifact at source
 `c9179737ec340dbbde284af4b11bcf2608756938`.
+The pinned artifact predates Switchboard's move to `operatorworks`, so its packed
+manifest still names `@mattsp1290/switchboard@0.0.0`; the host consumes it through
+the `@operatorworks/switchboard` alias.
 The [active pin](switchboard.json) records the source tree, source-lock SHA-256,
 artifact SHA-256, toolchain, command results, and retained logs.
 The alias pins identify their public entrypoints and native SDK versions. Their
@@ -24,7 +27,7 @@ The root lockfile records npm integrity separately.
 The public entries are core, `./agui`, `./testkit`, `./pi`, `./codex`, `./claude`,
 and `./observability`. Core has no required runtime dependencies.
 The observability entry requires the exact optional peer
-`@opentelemetry/api@1.9.0`. AgentUI declares that peer and keeps the existing
+`@opentelemetry/api@1.9.0`. OpenPane declares that peer and keeps the existing
 native SDK versions. The host owns telemetry providers and exporters.
 
 Qualification ran from a clean `git archive` of this revision on Darwin arm64
@@ -40,8 +43,8 @@ Reproduce the artifact from a separate directory. Do not replace a working
 Switchboard checkout to build the dependency.
 Since Switchboard #42, `npm ci` in the source downloads the `@ag-ui/core`
 devDependency from
-`https://raw.githubusercontent.com/mattsp1290/agentui/661216eab627be33067951ffad7a1691127a80fe/vendor/ag-ui/ed2c1d5b63299d3f08676a1418cc2640bbe55fd1/ag-ui-core-1.0.4.tgz`,
-the PR49 fork archive retained in AgentUI, so rebuilding needs network access
+`https://raw.githubusercontent.com/operatorworks/openpane/661216eab627be33067951ffad7a1691127a80fe/vendor/ag-ui/ed2c1d5b63299d3f08676a1418cc2640bbe55fd1/ag-ui-core-1.0.4.tgz`,
+the PR49 fork archive retained in OpenPane, so rebuilding needs network access
 to GitHub.
 
 ```sh
@@ -60,7 +63,7 @@ Rename the packed file to the commit-named artifact without changing its bytes.
 Compare its SHA-256 with the active pin before adoption. This update made no
 cross-machine reproducibility claim.
 
-From AgentUI, check the installed consumer after installation and build.
+From OpenPane, check the installed consumer after installation and build.
 
 ```sh
 	npm ci
@@ -90,8 +93,8 @@ artifact bytes and lockfile together.
 The artifact contains built JavaScript, declarations, the upstream architecture
 record and upstream MIT license. That historical package exports only core and `./agui`.
 Core has no required runtime dependency. The AG-UI entry requires the exact
-optional peer `@ag-ui/core@1.0.4`. The `@agentui/host` package, for its `./agui`
-entry, and the pure `@agentui/protocol` package each declare the pinned fork SDK
+optional peer `@ag-ui/core@1.0.4`. The `@openpane/host` package, for its `./agui`
+entry, and the pure `@openpane/protocol` package each declare the pinned fork SDK
 artifact dependency. Core-only host consumers still install the SDK, but the core entry
 imports no AG-UI code. See the [consumer conformance matrix](../docs/protocol/README.md).
 
@@ -113,7 +116,7 @@ Use a separate empty checkout and the recorded toolchain. The canonical AG-UI
 gate also needs the recorded uv and Python versions.
 
 ```sh
-git clone https://github.com/mattsp1290/switchboard.git /path/to/empty-checkout
+git clone https://github.com/operatorworks/switchboard.git /path/to/empty-checkout
 cd /path/to/empty-checkout
 git checkout --detach 58c7922d8fade3617cc86fedcf41677f897025ef
 npm ci
@@ -132,7 +135,7 @@ Compare the rebuilt package with the recorded SHA-256 before adopting it.
 
 ### Historical consumer checks
 
-From the AgentUI root with the pinned Node and npm versions:
+From the OpenPane root with the pinned Node and npm versions:
 
 ```sh
 npm ci
@@ -140,25 +143,25 @@ npm run build
 node --test packages/adapter-tests/tests/switchboard.test.mjs packages/adapter-tests/tests/switchboard-types.test.mjs
 ```
 
-These commands check the installed package through `@agentui/host`.
+These commands check the installed package through `@openpane/host`.
 They qualify package compatibility and controlled continuation fixtures.
 They do not authorize a client reply, consume a pending decision, dispatch to a
 native process or qualify integrated desktop and iOS applications.
 
 The [Mac measurement](../docs/qualification/switchboard-macos/58c7922d8fade3617cc86fedcf41677f897025ef/54065e2/README.md)
-passed this consumer unit at AgentUI source `54065e2`. It installed the committed
+passed this consumer unit at OpenPane source `54065e2`. It installed the committed
 artifact and verified all eleven requested frozen inputs without repacking it.
 
 ### Historical Pi text-chat adapter
 
 The historical host installed a separate commit-named Switchboard artifact through the
-`@agentui/switchboard-pi` local package alias. The [historical Pi pin](historical/switchboard-pi-564f04434b3a6575c5c97f706dd6d5510e41726f.json)
-records its source and digest. AgentUI imports only its public `./pi` entrypoint.
+`@openpane/switchboard-pi` local package alias. The [historical Pi pin](historical/switchboard-pi-564f04434b3a6575c5c97f706dd6d5510e41726f.json)
+records its source and digest. OpenPane imports only its public `./pi` entrypoint.
 The existing core and AG-UI dependency pins above remain separate.
 
 This adapter uses Pi SDK 1.5.2 with `opencode-go/glm-5.3` for text chat.
 Its emitted declarations contain no native SDK types. Switchboard isolates
-known upstream declaration errors in its adapter compiler project. AgentUI
+known upstream declaration errors in its adapter compiler project. OpenPane
 and Switchboard core retain strict dependency checking.
 
 See the [Pi host guide](../docs/development/pi-host.md) for startup and the

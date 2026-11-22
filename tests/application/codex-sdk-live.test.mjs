@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { chromium } from 'playwright';
-const live = process.env.AGENTUI_CODEX_SDK_LIVE === '1';
+const live = process.env.OPENPANE_CODEX_SDK_LIVE === '1';
 const wait = async (predicate, label) => {
   const end = Date.now() + 90_000;
   while (!await predicate()) {
@@ -17,12 +17,12 @@ const wait = async (predicate, label) => {
   }
 };
 
-test('live ChatGPT subscription GPT 6.1 Sol chat responds, remembers, reopens and stops through AgentUI', {
+test('live ChatGPT subscription GPT 6.1 Sol chat responds, remembers, reopens and stops through OpenPane', {
   skip: !live, timeout: 300_000,
 }, async t => {
-  const key = 'agentui-api-key-must-not-be-used';
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-codex-sdk-live-'));
-  const evidence = process.env.AGENTUI_CODEX_SDK_EVIDENCE_DIR;
+  const key = 'openpane-api-key-must-not-be-used';
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-codex-sdk-live-'));
+  const evidence = process.env.OPENPANE_CODEX_SDK_EVIDENCE_DIR;
   if (evidence) await mkdir(evidence, { recursive: true });
   const artifact = JSON.parse(await readFile(new URL('../../apps/host/dist/artifact.json', import.meta.url), 'utf8'));
   const report = { provider: 'chatgpt-subscription', model: 'gpt-6.1-sol', sdk: '0.169.0',
@@ -63,7 +63,7 @@ test('live ChatGPT subscription GPT 6.1 Sol chat responds, remembers, reopens an
   delete env.OPENAI_API_KEY;
   delete env.CODEX_API_KEY;
   delete env.ANTHROPIC_API_KEY;
-  delete env.AGENTUI_ANTHROPIC_API_KEY;
+  delete env.OPENPANE_ANTHROPIC_API_KEY;
   browser = await chromium.launch({ env });
   const page = await browser.newPage();
   page.setDefaultTimeout(20_000);

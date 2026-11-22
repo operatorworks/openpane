@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
-import { createBrowserConnection } from '@agentui/client/service';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { createBrowserConnection } from '@openpane/client/service';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { fixture, scope } from './support.mjs';
 
 const baseline = { kind: 'snapshot', snapshot: { scope, projectionVersion: 4, cursor: 0,

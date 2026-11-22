@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { AgentDescriptor } from '@agentui/contracts/service';
-import { CLAUDE_SDK_RUNTIMES, CODEX_SDK_MODEL, CODEX_SDK_RUNTIME, PI_RUNTIME, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
+import type { AgentDescriptor } from '@openpane/contracts/service';
+import { CLAUDE_SDK_RUNTIMES, CODEX_SDK_MODEL, CODEX_SDK_RUNTIME, PI_RUNTIME, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
 
 type Harness = 'pi' | 'claude' | 'codex' | 'recorded' | 'provider' | 'other';
 type Picker = { readonly kind: 'closed' } | { readonly kind: 'harness' } | { readonly kind: 'model'; readonly harness: Harness };
@@ -18,7 +18,7 @@ function harness(agent: AgentDescriptor | null): Harness {
     case 'pi': return 'pi';
     case 'claude-sdk': return 'claude';
     case 'codex': case 'codex-sdk': return 'codex';
-    case 'agentui-recorded': return 'recorded';
+    case 'openpane-recorded': return 'recorded';
     default: return 'other';
   }
 }

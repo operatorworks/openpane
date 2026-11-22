@@ -15,10 +15,10 @@ Build the app, then save an agent configuration file with paths for your host:
 }
 ```
 
-Use unique names and set `default` to one of them. Claude also accepts `"model": "opus"`. The other kinds use their existing fixed models. Omit entries you do not want. Keep keys out of this file. Claude reads `AGENTUI_ANTHROPIC_API_KEY`; Pi reads `OPENCODE_GO_API_KEY`. Codex uses its ordinary CLI login. An optional `executable` selects the exact Codex or Claude binary; omitting it uses the runtime's existing discovery.
+Use unique names and set `default` to one of them. Claude also accepts `"model": "opus"`. The other kinds use their existing fixed models. Omit entries you do not want. Keep keys out of this file. Claude reads `OPENPANE_ANTHROPIC_API_KEY`; Pi reads `OPENCODE_GO_API_KEY`. Codex uses its ordinary CLI login. An optional `executable` selects the exact Codex or Claude binary; omitting it uses the runtime's existing discovery.
 
 ```sh
-node apps/host/dist/main.js serve --config /absolute/agents.json --data-dir /absolute/private/agentui --port 7140
+node apps/host/dist/main.js serve --config /absolute/agents.json --data-dir /absolute/private/openpane --port 7140
 ```
 
 Open the printed address with `/browser.html` appended. The browser connects directly. Choose **Agent for new chat**, then **New conversation**. Each saved chat keeps its original agent, controls, and draft. Changing this selector affects only new chats.
@@ -29,4 +29,4 @@ A creation whose reply was lost keeps its original chat and agent. **Recover cre
 
 The `codex`, `codex-sdk`, `claude-sdk`, `pi`, and `browser-dev` commands remain available. The Codex and Claude shortcuts also accept `--executable /absolute/path`. This setup does not replace global CLI installations or change native login.
 
-Provider-only hosts can run `node apps/host/dist/main.js serve --extensions /absolute/extensions.json --data-dir /absolute/private/agentui`. See the [server extension guide](../architecture/extension-sdk.md#select-server-extensions-with-the-cli) for the selection file. The host chooses the ready provider with the smallest stable ID from each current catalog. With no ready providers it has no default, disables creation, and keeps saved conversations readable.
+Provider-only hosts can run `node apps/host/dist/main.js serve --extensions /absolute/extensions.json --data-dir /absolute/private/openpane`. See the [server extension guide](../architecture/extension-sdk.md#select-server-extensions-with-the-cli) for the selection file. The host chooses the ready provider with the smallest stable ID from each current catalog. With no ready providers it has no default, disables creation, and keeps saved conversations readable.

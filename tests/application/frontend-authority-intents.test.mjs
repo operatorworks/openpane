@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { createProviderRegistry } from '@agentui/host';
+import { createProviderRegistry } from '@openpane/host';
 import { fixture, scope } from '../host/fixture.mjs';
 import { actualInput, aguiExtension, offered, send } from './provider-send-fixture.mjs';
 

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { FeedMismatchError, parseFeedItem } from '@agentui/contracts';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import { parseServicePull, parseServiceResponse } from '@agentui/contracts/service';
-import { createBrowserConnection } from '@agentui/client/service';
+import { FeedMismatchError, parseFeedItem } from '@openpane/contracts';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import { parseServicePull, parseServiceResponse } from '@openpane/contracts/service';
+import { createBrowserConnection } from '@openpane/client/service';
 import { fixture as clientFixture } from '../client/support.mjs';
 import { fixture, installed, scope, until } from './fixture.mjs';
 

@@ -12,7 +12,7 @@ test('a locked package may contain an unexecuted global-detection fallback', { t
   const dependencies = { value: dependency.resolved };
   await write(repo.directory, 'package.json', {
     name: 'fixture', version: '1.0.0', type: 'module', packageManager: 'npm@11.19.1', dependencies,
-    agentui: { extension: { namespace: 'global-fallback', trust: 'full', sdkVersion: '0.13.0',
+    openpane: { extension: { namespace: 'global-fallback', trust: 'full', sdkVersion: '0.13.0',
       entries: [{ kind: 'desktop', module: './desktop.js' }] }, sources: { './desktop.js': './index.ts' } },
   });
   await write(repo.directory, 'package-lock.json', {

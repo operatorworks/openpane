@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseCommand } from '@agentui/contracts';
-import { parseServiceRequest, parseServiceResponse } from '@agentui/contracts/service';
+import { parseCommand } from '@openpane/contracts';
+import { parseServiceRequest, parseServiceResponse } from '@openpane/contracts/service';
 
 const scope = { hostId: 'host', conversationId: 'conversation' };
 const permission = { permissionId: 'permission', scope: 'conversation', actionLabel: 'Create work items', detail: 'This conversation' };

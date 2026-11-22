@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
-import { createFrontendToolGeneration, pinFrontendTools, retainFrontendTools } from '@agentui/sdk/tools';
+import { createFrontendToolGeneration, pinFrontendTools, retainFrontendTools } from '@openpane/sdk/tools';
 
 const run = {
   conversation: { hostId: 'h', conversationId: 'c' }, runId: 'r',
-  authority: { kind: 'agentui-host', hostId: 'h', binding: { namespace: 'n', installationId: 'i', opaqueSessionId: 's' } },
+  authority: { kind: 'openpane-host', hostId: 'h', binding: { namespace: 'n', installationId: 'i', opaqueSessionId: 's' } },
 };
 const retain = generations => retainFrontendTools({ generations, platform: 'desktop' });
 async function make({ namespace = 'demo', platform = 'desktop', dispose = () => {}, tools } = {}) {
@@ -43,7 +43,7 @@ test('complete parsed identity is copied, immutable and idempotent regardless of
   try {
     const p = retained.bind(input);
     input.runId = 'mutated'; input.authority.binding.namespace = 'mutated';
-    const reordered = { authority: { binding: { opaqueSessionId: 's', installationId: 'i', namespace: 'n' }, hostId: 'h', kind: 'agentui-host' }, runId: 'r', conversation: { conversationId: 'c', hostId: 'h' } };
+    const reordered = { authority: { binding: { opaqueSessionId: 's', installationId: 'i', namespace: 'n' }, hostId: 'h', kind: 'openpane-host' }, runId: 'r', conversation: { conversationId: 'c', hostId: 'h' } };
     assert.equal(retained.bind(reordered), p);
     assert.ok(Object.isFrozen(p.run.authority.binding));
     assert.throws(() => { p.run.runId = 'mutated'; }, TypeError);

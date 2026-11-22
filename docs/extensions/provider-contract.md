@@ -66,10 +66,10 @@ Transcript output and run outcomes come only from snapshots and `apply` events. 
 
 | Backend result | Cause | Fixed reason |
 | --- | --- | --- |
-| `unavailable` | `offline` | The provider service is offline or unreachable. AgentUI checks again automatically. |
-| `authentication-failed` | `authentication-failed` | The provider rejected the configured credential. Fix it on the provider and AgentUI checks again automatically, or change the extension secret and restart the host. |
-| `unauthorized` | `unauthorized` | The configured credential is not authorized for this provider. Grant it access; AgentUI checks again automatically. |
-| `version-unsupported`, `unsupported` | `version-unsupported` | The provider service version is unsupported. Install a compatible version; AgentUI checks again automatically. |
+| `unavailable` | `offline` | The provider service is offline or unreachable. OpenPane checks again automatically. |
+| `authentication-failed` | `authentication-failed` | The provider rejected the configured credential. Fix it on the provider and OpenPane checks again automatically, or change the extension secret and restart the host. |
+| `unauthorized` | `unauthorized` | The configured credential is not authorized for this provider. Grant it access; OpenPane checks again automatically. |
+| `version-unsupported`, `unsupported` | `version-unsupported` | The provider service version is unsupported. Install a compatible version; OpenPane checks again automatically. |
 | Thrown error, malformed result, identity mismatch | `invalid-installation` | The provider installation is invalid. Fix the extension configuration, then restart the host. |
 
 The provider's own reason text is never shown.
@@ -139,7 +139,7 @@ Transient entries skip module import and manifest resolution. `extensions/crew/t
 
 | Row | Request ids | Cursor | Event encoding | Supports |
 | --- | --- | --- | --- | --- |
-| Crew example (`extensions/crew`, shared controlled Crew service) | AgentUI operation UUIDs | `{ epoch, sequence, requests }` | SSE AG-UI, folded into authoritative snapshots | cancel, decide |
+| Crew example (`extensions/crew`, shared controlled Crew service) | OpenPane operation UUIDs | `{ epoch, sequence, requests }` | SSE AG-UI, folded into authoritative snapshots | cancel, decide |
 | Ledger fake (`ledger.mjs`) | Service-assigned `room-n` and `ticket-n` | `[epoch, offset]` | NDJSON log entries folded by `apply` | cancel, decide |
 | Ledger fake without controls | Same as ledger | Same as ledger | Same as ledger | none |
 
@@ -157,13 +157,13 @@ What the suite proves:
 - A send behind an uncertain earlier send is refused with `send-awaiting-confirmation` after exactly one `reconcileCommand` lookup and reaches no provider. Once reconciliation settles the earlier send, the next send is admitted.
 - A send cut at the proxy before it reaches the service stays `uncertain` after an explicit Reconcile, keeps refusing later sends in its conversation, and leaves a new conversation free to send.
 
-`boundaries.test.mjs` asserts that provider traffic carries no trace context or collector headers, that telemetry carries no prompt, reply or provider secret, and that no AgentUI agent span is synthesized for a remote run. A positive control proves the telemetry search finds a value that is exported.
+`boundaries.test.mjs` asserts that provider traffic carries no trace context or collector headers, that telemetry carries no prompt, reply or provider secret, and that no OpenPane agent span is synthesized for a remote run. A positive control proves the telemetry search finds a value that is exported.
 It also asserts that `apps`, `packages`, `scripts` and `templates` contain no case-insensitive `crew` substring, so camelCase or underscore names such as `isCrewProvider` are caught, excluding the one adapter-tests fixture that names `example.crew`, and that the repository contains no OpenBot code or dependency.
 The check is lexical. Crew-specific logic that never names Crew would pass. Vendored `.tgz` archives are out of scope; their declared dependencies appear in `package-lock.json`, which is searched.
 
 ## Generic consumers and clients
 
 The MCP read example (`examples/mcp-control/read`) inspects both providers' conversations through `/native/v1`. It has no provider-specific code. `boundaries.test.mjs` runs it against the conformance host.
-The suite uses `createBrowserConnection` and `createConversationStore` from `@agentui/client`. The desktop application builds the same pair in `apps/desktop/src/application/use-application.ts` and `application-controller.ts`. The Tauri shell reaches the same service through `/native/v1`.
+The suite uses `createBrowserConnection` and `createConversationStore` from `@openpane/client`. The desktop application builds the same pair in `apps/desktop/src/application/use-application.ts` and `application-controller.ts`. The Tauri shell reaches the same service through `/native/v1`.
 No pet example exists yet. Bean `agentui-xnk5` tracks it.
 The iOS app cannot reach a host until bean `agentui-3xme` lands. The suite does not cover iOS.

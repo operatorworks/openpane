@@ -2,10 +2,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { CrewClient, CrewHttpError, CrewProtocolError, CrewUnknownOutcomeError, type Capabilities, type HandoffRecord } from '@birbcrew/client';
 import { standingGrantsCapabilityV1Schema } from '@birbcrew/client/contract';
-import { canonicalJson } from '@agentui/contracts';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { canonicalJson } from '@openpane/contracts';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import type { BackendProvider, ConnectedProvider, ContinuationRefusal, CreationIntent, ProviderCommand, ProviderCommandEffect,
-  ProviderConversation, ProviderInstance, ProviderOutcome, ProviderPermissions, ServerExtensionContext, ServerExtensionEntry, ExtensionManifest } from '@agentui/sdk';
+  ProviderConversation, ProviderInstance, ProviderOutcome, ProviderPermissions, ServerExtensionContext, ServerExtensionEntry, ExtensionManifest } from '@openpane/sdk';
 import { bindingSchema, choiceSchema, decisionKey, presentation, reference, runOutcome, uncertain } from './provider-model.js';
 import type { CrewModel } from './provider-model.js';
 import { observation } from './provider-observation.js';
@@ -118,7 +118,7 @@ export function registerCrewProvider(context: ServerExtensionContext, id: string
         if (target === operation.operationId || target === source) throw new Error('Foreign Crew predecessor');
         if (!carryingTurn) throw new Error('Foreign Crew conversation');
       }
-      return bindingSchema.parse({ kind: 'agentui-created', creation: operation, authority: { kind: 'remote-provider',
+      return bindingSchema.parse({ kind: 'openpane-created', creation: operation, authority: { kind: 'remote-provider',
         binding: { namespace: instance.namespace, installationId: instance.installationId, opaqueSessionId: target } },
         ...(operation.from && { carryingTurn }) });
     }

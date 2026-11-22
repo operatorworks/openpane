@@ -1,8 +1,8 @@
-import { conversationLabel, conversationPreview } from '@agentui/contracts/conversation';
-import type { Transcript, TranscriptEvent } from '@agentui/contracts/conversation';
-import { SERVICE_CATALOG_PAGE, SERVICE_SEARCH_EXCERPT_LENGTH } from '@agentui/contracts/service';
-import type { ConversationSearchPage } from '@agentui/contracts/service';
-import type { LocalHost } from '@agentui/host';
+import { conversationLabel, conversationPreview } from '@openpane/contracts/conversation';
+import type { Transcript, TranscriptEvent } from '@openpane/contracts/conversation';
+import { SERVICE_CATALOG_PAGE, SERVICE_SEARCH_EXCERPT_LENGTH } from '@openpane/contracts/service';
+import type { ConversationSearchPage } from '@openpane/contracts/service';
+import type { LocalHost } from '@openpane/host';
 import { conversationProvider } from './agents.js';
 
 export function searchConversations(host: LocalHost<TranscriptEvent, Transcript>, request: {

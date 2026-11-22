@@ -28,7 +28,7 @@ async function serve(): Promise<void> {
   if (!entryStat.isFile() || !hostStat.isDirectory() || (hostStat.mode & 0o077) !== 0
       || hostStat.uid !== process.getuid?.()) throw new Error('Invalid installed entry or private host directory');
   const session = new RefreshSession({ executable: process.execPath, installedEntry, hostDirectory, invocationDirectory, waitMs });
-  const server = new McpServer({ name: 'agentui-refresh', version: '0.0.0' });
+  const server = new McpServer({ name: 'openpane-refresh', version: '0.0.0' });
   const transport = new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: 64 * 1024 });
   let closing = false;
   const stop = () => {
@@ -52,7 +52,7 @@ async function serve(): Promise<void> {
   for (const event of ['end', 'close', 'error']) process.stdin.on(event, stop);
   process.stdout.on('error', stop);
   for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, stop);
-  server.registerTool('agentui_refresh', {
+  server.registerTool('openpane_refresh', {
     description: 'Request a committed customization build and automatic desired-selection attempt. Identical replay/status only inspect. Promote reuses saved command and pins. Keep the original ID after uncertainty. Disconnect/cancel ends only the CLI wait, not host work; selection does not prove client activation.',
     inputSchema: toolInput,
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
@@ -65,5 +65,5 @@ async function serve(): Promise<void> {
   await server.connect(transport);
 }
 if (import.meta.main) {
-  void serve().catch(() => { process.stderr.write('AgentUI refresh MCP startup failed. Supply an absolute installed entry, private host directory and optional wait milliseconds.\n'); process.exit(1); });
+  void serve().catch(() => { process.stderr.write('OpenPane refresh MCP startup failed. Supply an absolute installed entry, private host directory and optional wait milliseconds.\n'); process.exit(1); });
 }

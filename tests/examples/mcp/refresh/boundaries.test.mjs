@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFile, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { EXTENSION_SDK_VERSION, SERVICE_WIRE_VERSION } from '@agentui/contracts/compatibility';
+import { EXTENSION_SDK_VERSION, SERVICE_WIRE_VERSION } from '@openpane/contracts/compatibility';
 import { serializeMessage } from '@modelcontextprotocol/sdk/shared/stdio.js';
 import test from 'node:test';
 import { canonicalOutput, operation, toolInput } from '../../../../examples/mcp-control/refresh/dist/refresh.js';
@@ -26,7 +26,7 @@ test('symlinked executable still validates startup instead of silently exiting',
   await recordResource({ type: 'cli', pid: child.pid, processGroup: child.pid });
   assert.equal(await exited, 1);
   assert.equal(stdout, '');
-  assert.match(stderr, /AgentUI refresh MCP startup failed/u);
+  assert.match(stderr, /OpenPane refresh MCP startup failed/u);
 });
 
 test('strict operation union rejects command/path controls and leaves references unchanged', () => {

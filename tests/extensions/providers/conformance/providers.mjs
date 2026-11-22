@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, request as forward } from 'node:http';
-import { crewProvider } from 'agentui-extension-crew/provider';
+import { crewProvider } from 'openpane-extension-crew/provider';
 import { crewService } from '../../../../extensions/crew/tests/support/crew-service.mjs';
 import { instrument } from './instrument.mjs';
-import coworkersEntry from 'agentui-extension-coworkers/server';
+import coworkersEntry from 'openpane-extension-coworkers/server';
 import { coworkersService } from '../../../../extensions/coworkers/tests/support/coworkers-service.mjs';
 import { ledgerExtension, ledgerService } from './ledger.mjs';
 
@@ -158,7 +158,7 @@ const ledgerRow = supports => t => ledger(t, supports);
 
 /**
  * The conformance table. Each row is driven only through its public extension entry, the real host and the desktop
- * client store. Rows differ in request ids (Crew reuses AgentUI operation UUIDs; ledger assigns rooms and tickets),
+ * client store. Rows differ in request ids (Crew reuses OpenPane operation UUIDs; ledger assigns rooms and tickets),
  * cursor shape (Crew `{ epoch, sequence, requests }`; ledger `[epoch, offset]`) and event encoding (Crew SSE AG-UI
  * snapshots; ledger NDJSON log entries folded by `apply`).
  * @type {ProviderRow[]}

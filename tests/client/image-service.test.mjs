@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { createBrowserConnection, ServiceProtocolError } from '@agentui/client/service';
-import { createMacConnection } from '@agentui/client/mac';
-import { canonicalJson, parseCommand } from '@agentui/contracts';
-import { parseServiceRequest, parseServiceResponse, SERVICE_MAX_RESPONSE_BYTES } from '@agentui/contracts/service';
-import { IMAGE_MAX_BYTES, IMAGE_TRANSFER_MAX_BYTES, parseImageBase64 } from '@agentui/contracts/image';
+import { createBrowserConnection, ServiceProtocolError } from '@openpane/client/service';
+import { createMacConnection } from '@openpane/client/mac';
+import { canonicalJson, parseCommand } from '@openpane/contracts';
+import { parseServiceRequest, parseServiceResponse, SERVICE_MAX_RESPONSE_BYTES } from '@openpane/contracts/service';
+import { IMAGE_MAX_BYTES, IMAGE_TRANSFER_MAX_BYTES, parseImageBase64 } from '@openpane/contracts/image';
 
 const scope = { hostId: 'host', conversationId: 'chat' }, imageId = randomUUID();
 const attachment = { imageId, name: 'Screen', mediaType: 'image/png', byteLength: 1, width: 1, height: 1 };

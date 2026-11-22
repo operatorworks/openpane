@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
-import { canonicalJson } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
 import { createRefreshController, parseRefreshRequest, parseRefreshReceipt } from '../../apps/host/build/tsc/refresh-jobs.js';
 import { createServerSelection } from '../../apps/host/build/tsc/server-selection.js';
 import { SelectionRefusal } from '../../apps/host/build/tsc/selection-protocol.js';

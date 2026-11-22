@@ -43,7 +43,7 @@ async function copyExactly(source, target, names, label) {
 }
 
 async function qualifyInstalledConsumer(fork, sources) {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-agui-fork-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-agui-fork-'));
   const consumer = join(directory, 'consumer');
   const env = { ...process.env, PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ''}`, CODEX_TEST_MODE: '1', CODEX_FIXTURE_DIR: join(directory, 'fixture'), AGUI49_CODEX_FIXTURE: join(consumer, 'codex-exec.mjs') };
   const results = [];

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createConversationStore } from '@agentui/client';
+import { createConversationStore } from '@openpane/client';
 import { fakePort, storage, scope, projection, receipt } from './support.mjs';
 
 const offer = { platform: 'desktop', tools: [{ definition: { name: 'fixture__echo', description: 'Original' }, activationId: 'A' }] };

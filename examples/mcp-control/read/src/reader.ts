@@ -1,8 +1,8 @@
-import { parseFeedItem } from '@agentui/contracts';
-import type { ConversationScope } from '@agentui/contracts';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import { parseServiceRequest, parseServiceResponse, SERVICE_MAX_RESPONSE_BYTES } from '@agentui/contracts/service';
-import type { ServiceRequest, ServiceValueMap } from '@agentui/contracts/service';
+import { parseFeedItem } from '@openpane/contracts';
+import type { ConversationScope } from '@openpane/contracts';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import { parseServiceRequest, parseServiceResponse, SERVICE_MAX_RESPONSE_BYTES } from '@openpane/contracts/service';
+import type { ServiceRequest, ServiceValueMap } from '@openpane/contracts/service';
 import { boundedJson, ReadError } from './host.js';
 
 type ReadRequest =
@@ -96,7 +96,7 @@ export class Reader {
     } finally {
       if (feedId !== undefined) {
         try { await this.request({ op: 'close', feedId }, AbortSignal.timeout(1000)); }
-        catch { process.stderr.write('AgentUI inspection cleanup failed\n'); }
+        catch { process.stderr.write('OpenPane inspection cleanup failed\n'); }
       }
       this.inspections--;
     }

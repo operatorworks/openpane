@@ -1,26 +1,26 @@
 # Coworkers extension
 
-`extensions/coworkers` (package `agentui-extension-coworkers`, namespace `coworkers`) connects AgentUI to a crabber-coworkers service through its v1 HTTP API. It lists the coworkers configured in that service's `config.json`, creates conversations with them and shows their replies inside a workspace in the Extensions view. The workspace shows one installation: the selected conversation's installation while it is available, otherwise the available installation with the first installation ID in sort order (the first installation when none is available). Coworkers and chats of other installations stay reachable from Chats.
+`extensions/coworkers` (package `openpane-extension-coworkers`, namespace `coworkers`) connects OpenPane to a crabber-coworkers service through its v1 HTTP API. It lists the coworkers configured in that service's `config.json`, creates conversations with them and shows their replies inside a workspace in the Extensions view. The workspace shows one installation: the selected conversation's installation while it is available, otherwise the available installation with the first installation ID in sort order (the first installation when none is available). Coworkers and chats of other installations stay reachable from Chats.
 
 ## Set up
 
-1. Build AgentUI (`npm run build`).
-2. Add an entry to `~/.local/share/agentui/extensions.json`:
+1. Build OpenPane (`npm run build`).
+2. Add an entry to `~/.local/share/openpane/extensions.json`:
 
 ```json
 {
-  "directory": "/absolute/path/to/agentui/extensions/coworkers",
+  "directory": "/absolute/path/to/openpane/extensions/coworkers",
   "installations": [{
     "id": "team",
     "instance": { "namespace": "coworkers", "installationId": "team", "generation": "1", "protocolVersion": "1" },
     "service": "http://<coworkers host>:<port>",
     "expectedAuthority": "remote-provider",
-    "authentication": { "kind": "environment", "variable": "AGENTUI_EXTENSION_COWORKERS_TOKEN", "revision": "1" }
+    "authentication": { "kind": "environment", "variable": "OPENPANE_EXTENSION_COWORKERS_TOKEN", "revision": "1" }
   }]
 }
 ```
 
-3. Export `AGENTUI_EXTENSION_COWORKERS_TOKEN` with the value of the service's `CRABBER_COWORKERS_API_TOKEN`, then start AgentUI.
+3. Export `OPENPANE_EXTENSION_COWORKERS_TOKEN` with the value of the service's `CRABBER_COWORKERS_API_TOKEN`, then start OpenPane.
 
 ## Network
 
@@ -31,7 +31,7 @@ The crabber-coworkers API listens on loopback unless `api.allow_remote` is `true
 | Workspace action | Call | Notes |
 |---|---|---|
 | Coworker cards and About | `GET /v1/coworkers` | Name, role, workspace access, Slack flag and instruction size. Instruction text is not exposed. |
-| Chat or New chat | `POST /v1/conversations` | The conversation ID is derived from the AgentUI operation, so a retry reopens the same conversation. |
+| Chat or New chat | `POST /v1/conversations` | The conversation ID is derived from the OpenPane operation, so a retry reopens the same conversation. |
 | Send | `POST /v1/conversations/{id}/requests` | The request ID is derived from the operation and the text, so a resend is the same request upstream. |
 | Stop | `POST …/requests/{requestId}/cancel` | |
 | Replies | polling `GET /v1/conversations/{id}` and request receipts | Active conversations every second, idle ones 5, 15, 60 then 300 seconds, at most four requests in flight. A typing indicator shows while a request runs. |

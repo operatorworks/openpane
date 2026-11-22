@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ImageAttachment, ImageId } from '@agentui/contracts/image';
+import type { ImageAttachment, ImageId } from '@openpane/contracts/image';
 
 export function imageSize(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;

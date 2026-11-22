@@ -1,10 +1,10 @@
 import { finishOutputRead } from './output-read.js';
-import { canonicalJson, FeedMismatchError, parseFeedItem, parseScope, sameScope } from '@agentui/contracts';
-import { utf8Bytes } from '@agentui/contracts/decode';
-import type { ConversationScope, Feed, FeedEnd, FeedItem, Projection } from '@agentui/contracts';
-import { classifyExtensionCall, ServiceError, parseServiceRequest, parseServiceResponse, SERVICE_MAX_REQUEST_BYTES, SERVICE_MAX_RESPONSE_BYTES, SERVICE_CATALOG_PAGE } from '@agentui/contracts/service';
-import type { ServiceConnection, ServiceRequest, ServiceResponse, ServiceValueMap } from '@agentui/contracts/service';
-import { IMAGE_MAX_BYTES, IMAGE_TRANSFER_MAX_BYTES } from '@agentui/contracts/image';
+import { canonicalJson, FeedMismatchError, parseFeedItem, parseScope, sameScope } from '@openpane/contracts';
+import { utf8Bytes } from '@openpane/contracts/decode';
+import type { ConversationScope, Feed, FeedEnd, FeedItem, Projection } from '@openpane/contracts';
+import { classifyExtensionCall, ServiceError, parseServiceRequest, parseServiceResponse, SERVICE_MAX_REQUEST_BYTES, SERVICE_MAX_RESPONSE_BYTES, SERVICE_CATALOG_PAGE } from '@openpane/contracts/service';
+import type { ServiceConnection, ServiceRequest, ServiceResponse, ServiceValueMap } from '@openpane/contracts/service';
+import { IMAGE_MAX_BYTES, IMAGE_TRANSFER_MAX_BYTES } from '@openpane/contracts/image';
 
 export class ServiceProtocolError extends Error {}
 export class ServiceConnectionLost extends ServiceError {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { checkCompatibility } from '@agentui/client';
-import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, CLAUDE_SDK_RUNTIMES, CODEX_SDK_RUNTIME, PI_RUNTIME, SOLO_CLIENT_COMPATIBILITY } from '@agentui/contracts/compatibility';
+import { checkCompatibility } from '@openpane/client';
+import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, CLAUDE_SDK_RUNTIMES, CODEX_SDK_RUNTIME, PI_RUNTIME, SOLO_CLIENT_COMPATIBILITY } from '@openpane/contracts/compatibility';
 
 const nativeRuntime = { engine: 'recorded', version: '1.0.0', format: 'recorded-v1' };
 const client = { supportedWireVersions: [1], supportedExtensionSdkVersions: ['0.2'], supportedNativeRuntimes: [nativeRuntime], expectedArtifactId: 'artifact-a' };

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { loadServerExtension } from '@agentui/host/extensions';
+import { loadServerExtension } from '@openpane/host/extensions';
 import { entry } from './fixtures.mjs';
 
 for (const [name, mutate] of [

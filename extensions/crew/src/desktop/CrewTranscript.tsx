@@ -1,4 +1,4 @@
-import type { ConversationModuleProps } from '@agentui/sdk/react';
+import type { ConversationModuleProps } from '@openpane/sdk/react';
 import { initials } from './initials.js';
 
 /** Flat message rows: avatar, bold sender, text. No bubbles. The SDK exposes no Markdown renderer, so text renders as written. */

@@ -4,19 +4,19 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { openLocalHost } from '@agentui/host';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { openLocalHost } from '@openpane/host';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 
 const installation = { kind: 'provider', contributionId: 'test', instance: { namespace: 'test', installationId: 'test', generation: '1', protocolVersion: '1' },
   agent: { opaqueId: 'agent', name: 'Agent' }, presentationVersion: 1, expectedAuthority: 'remote-provider' };
 function fixture(t, observe) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-observation-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-observation-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const providers = {
     captureCommand() { assert.fail('No command capture'); }, executeCommand() { assert.fail('No command effect'); }, observe,
     capture(scope) { return { installation, credential: null, intent: { kind: 'create', operationId: randomUUID(), scope,
       agent: { kind: 'agent', instance: installation.instance, opaqueId: installation.agent.opaqueId } } }; },
-    async execute(original) { return { kind: 'confirmed', source: 'create', evidence: null, binding: { kind: 'agentui-created', creation: original.intent,
+    async execute(original) { return { kind: 'confirmed', source: 'create', evidence: null, binding: { kind: 'openpane-created', creation: original.intent,
       authority: { kind: 'remote-provider', binding: { namespace: 'test', installationId: 'test', opaqueSessionId: 'session' } } } }; },
   };
   const host = openLocalHost({ path: join(directory, 'host.sqlite'), projection: transcriptProjection, driver: [], providers, authorize: () => true });

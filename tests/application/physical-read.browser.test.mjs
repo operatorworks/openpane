@@ -12,9 +12,9 @@ async function fixture(t) {
     import { ConversationView } from './apps/desktop/src/application/ConversationView.tsx';
     import { BrowserViewStorage } from './apps/desktop/src/application/browser-storage.ts';
     import { createApplicationController } from './apps/desktop/src/application/application-controller.ts';
-    import { createFrontendToolGeneration } from '@agentui/sdk/tools';
-    import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
-    import { transcriptProjection } from '@agentui/contracts/conversation';
+    import { createFrontendToolGeneration } from '@openpane/sdk/tools';
+    import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
+    import { transcriptProjection } from '@openpane/contracts/conversation';
     Object.assign(globalThis, { BrowserViewStorage, createApplicationController, createFrontendToolGeneration,
       SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, RECORDED_RUNTIME, transcriptProjection, createElement, createRoot, ConversationView });
   `, resolveDir: root }, bundle: true, write: false, format: 'iife' });
@@ -34,7 +34,7 @@ for (const scenario of ['obsolete-read-abort', 'obsolete-parse', 'current-read-a
         const staleScope = { hostId: 'host', conversationId: 'z-stale' };
         const saved = { version: 2, route: scope, pendingCreation: null };
         const raw = await new Promise((resolve, reject) => {
-          const request = indexedDB.open('agentui-browser-views', 1);
+          const request = indexedDB.open('openpane-browser-views', 1);
           request.onupgradeneeded = () => request.result.createObjectStore('records');
           request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
         });
@@ -43,7 +43,7 @@ for (const scenario of ['obsolete-read-abort', 'obsolete-parse', 'current-read-a
           await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onabort = () => reject(tx.error); });
         }
         await put(saved, ['view', 'A', 'host']); await put(saved, ['view', 'B', 'host']);
-        sessionStorage.setItem('agentui.viewId', 'A');
+        sessionStorage.setItem('openpane.viewId', 'A');
         const failures = [], feeds = [], submitted = [];
         let id = 0, generationDisposals = 0;
         const imageRead = scenario.endsWith('image-read');
@@ -134,7 +134,7 @@ for (const scenario of ['obsolete-read-abort', 'obsolete-parse', 'current-read-a
           await app.releaseCapturedSend(row.key).catch(error => { operationError = error.message; });
         } else {
           raw.close();
-          const request = indexedDB.open('agentui-browser-views', 2);
+          const request = indexedDB.open('openpane-browser-views', 2);
           upgrade = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
         }
         for (let i = 0; i < 20; i++) await new Promise(resolve => setTimeout(resolve, 5));
@@ -147,7 +147,7 @@ for (const scenario of ['obsolete-read-abort', 'obsolete-parse', 'current-read-a
           storageFailure: state.storageFailure, connection: active?.store.getSnapshot().connection.kind,
           captures: state.capturedSends.map(entry => ({ viewId: entry.viewId, status: entry.status, command: entry.command })),
           oldCaptureSame: state.capturedSends[0] === row, generationDisposals,
-          heldLock: (await navigator.locks.query()).held.some(lock => lock.name === 'agentui-view:A') };
+          heldLock: (await navigator.locks.query()).held.some(lock => lock.name === 'openpane-view:A') };
         IDBObjectStore.prototype.get = get; IDBObjectStore.prototype.put = nativePut;
         let retryCleared = null;
         if (scenario === 'current-image-read') {
@@ -196,7 +196,7 @@ test('initial active acquisition reports a native readonly abort through readine
     const scope = { hostId: 'host', conversationId: 'initial' }, failures = [], submitted = [];
     const initial = await BrowserViewStorage.reopen('initial-view', () => {});
     await initial.saveView('host', { version: 2, route: scope, pendingCreation: null });
-    await initial.close(); sessionStorage.setItem('agentui.viewId', 'initial-view');
+    await initial.close(); sessionStorage.setItem('openpane.viewId', 'initial-view');
     const get = IDBObjectStore.prototype.get;
     let aborted = false;
     IDBObjectStore.prototype.get = function(key) {
@@ -242,7 +242,7 @@ test('synchronous browser restart preserves the original view beyond the lock fa
     const scope = { hostId: 'host', conversationId: 'restart' }, viewId = '00000000-0000-4000-8000-000000000001';
     const original = await BrowserViewStorage.reopen(viewId, () => {});
     await original.saveView('host', { version: 2, route: scope, pendingCreation: null });
-    await original.close(); sessionStorage.setItem('agentui.viewId', viewId);
+    await original.close(); sessionStorage.setItem('openpane.viewId', viewId);
     const descriptor = { id: 'default', label: 'Default', runtime: RECORDED_RUNTIME,
       imageInput: { kind: 'unsupported', reason: 'This agent cannot receive images.' }, frontendOffers: 'unsupported', commands: ['send'], availability: { kind: 'ready' } };
     const connection = {
@@ -287,7 +287,7 @@ test('synchronous browser restart preserves the original view beyond the lock fa
       let oldClosed = false;
       await store.setDraft('Obsolete write').catch(error => { oldClosed = /closed/.test(error.message); });
       await new Promise(resolve => setTimeout(resolve, 1700));
-      const heldState = { acquisitions, oldClosed, viewId: sessionStorage.getItem('agentui.viewId'),
+      const heldState = { acquisitions, oldClosed, viewId: sessionStorage.getItem('openpane.viewId'),
         locks: (await navigator.locks.query()).held.map(lock => lock.name) };
       held = false;
       await Promise.all([writing, closing, restarted]);
@@ -305,7 +305,7 @@ test('synchronous browser restart preserves the original view beyond the lock fa
   assert.equal(result.heldState.acquisitions, 1);
   assert.equal(result.heldState.oldClosed, true);
   assert.equal(result.heldState.viewId, result.viewId);
-  assert.deepEqual(result.heldState.locks, [`agentui-view:${result.viewId}`]);
+  assert.deepEqual(result.heldState.locks, [`openpane-view:${result.viewId}`]);
   assert.deepEqual(result.restored, { viewId: result.viewId, route: result.scope, draft: 'Preserved through slow physical commit',
     acquisitions: 2, error: '', storageFailure: '' });
   assert.deepEqual(result.remainingLocks, []);

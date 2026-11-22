@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canonicalJson } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
 import { realFixture, request, rows } from './refresh-support.mjs';
 import { syntheticResult, assertFits, assertExceeds, JSON_MAX_NODES } from './refresh-resource-support.mjs';
 

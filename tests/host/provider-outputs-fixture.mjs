@@ -3,10 +3,10 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createProviderRegistry, openLocalHost } from '@agentui/host';
-import { createServerExtensions } from '@agentui/host/extensions';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { createProviderRegistry, openLocalHost } from '@openpane/host';
+import { createServerExtensions } from '@openpane/host/extensions';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 
 export const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 export const turn = () => new Promise(resolve => setImmediate(resolve));
@@ -20,8 +20,8 @@ export function providerFixture({ generation = '1', expectedAuthority = 'remote-
   const installation = { kind: 'provider', contributionId: 'reports', instance, agent: { opaqueId: 'writer', name: 'Writer' }, presentationVersion: 1, expectedAuthority };
   const calls = { connect: 0, list: 0, read: 0, close: 0, dispose: 0, authorityClose: 0 };
   const state = { authorized: true, scoped: true, bytes: new TextEncoder().encode('A provider report.\n'), credential: { kind: 'credential-handle', instance, hostId: 'host', opaqueHandle: secret } };
-  const binding = creation => ({ kind: 'agentui-created', creation, authority: { kind: expectedAuthority,
-    ...(expectedAuthority === 'agentui-host' ? { hostId: creation.scope.hostId } : {}),
+  const binding = creation => ({ kind: 'openpane-created', creation, authority: { kind: expectedAuthority,
+    ...(expectedAuthority === 'openpane-host' ? { hostId: creation.scope.hostId } : {}),
     binding: { namespace: instance.namespace, installationId: instance.installationId, opaqueSessionId: 'session' } } });
   const row = (binding, opaqueId = 'report') => ({ reference: { binding: structuredClone(binding), ref: { instance: structuredClone(instance), kind: 'output', opaqueId } },
     name: 'report.txt', mediaType: 'text/plain', byteLength: state.bytes.length, sha256: hash(state.bytes) });
@@ -55,7 +55,7 @@ export function providerFixture({ generation = '1', expectedAuthority = 'remote-
 }
 export async function fixture(t, options = {}) {
   const f = providerFixture(options);
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-outputs-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-outputs-'));
   const registry = options.owner ? createServerExtensions() : createProviderRegistry([f.extension]);
   if (options.owner) assert.equal((await registry.replace({ async prepare() { return { kind: 'ready', extensions: [f.extension] }; } })).kind, 'replaced');
   else { await registry.activate(); await registry.discover(); }

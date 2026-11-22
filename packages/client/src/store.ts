@@ -1,8 +1,8 @@
-import { parseCommand, parseScope, sameScope } from '@agentui/contracts';
-import type { CommandBody, Feed, Receipt, SubmitResult } from '@agentui/contracts';
-import { utf8Bytes } from '@agentui/contracts/decode';
-import { IMAGE_MAX_BYTES, IMAGE_MAX_NAME_BYTES, parseImageAttachment, parseImageName, parseUploadId } from '@agentui/contracts/image';
-import type { ImageFailureKind } from '@agentui/contracts/image';
+import { parseCommand, parseScope, sameScope } from '@openpane/contracts';
+import type { CommandBody, Feed, Receipt, SubmitResult } from '@openpane/contracts';
+import { utf8Bytes } from '@openpane/contracts/decode';
+import { IMAGE_MAX_BYTES, IMAGE_MAX_NAME_BYTES, parseImageAttachment, parseImageName, parseUploadId } from '@openpane/contracts/image';
+import type { ImageFailureKind } from '@openpane/contracts/image';
 import { applyDelivery, decodeReceipt, DeliveryError } from './delivery.js';
 import type { DeliveryState } from './delivery.js';
 import { copyCanonicalJson, immutable, restore } from './local-state.js';

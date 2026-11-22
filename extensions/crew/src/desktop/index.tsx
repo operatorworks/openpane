@@ -1,5 +1,5 @@
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { UiExtensionEntry } from '@agentui/sdk/react';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { UiExtensionEntry } from '@openpane/sdk/react';
 import { CrewTranscript } from './CrewTranscript.js';
 import { CrewWorkspace } from './CrewWorkspace.js';
 import './styles.css';

@@ -1,7 +1,7 @@
-import { canonicalJson, DEFAULT_MAX_COMMAND_BYTES, HOST_DEFAULT_PAGE_EVENTS, HOST_DEFAULT_PAGE_BYTES, HOST_DEFAULT_SNAPSHOT_BYTES } from '@agentui/contracts';
-import type { ConversationScope, Json, PendingDecision, Receipt, ReceiptState, RunIdentity, OfferedCommand } from '@agentui/contracts';
+import { canonicalJson, DEFAULT_MAX_COMMAND_BYTES, HOST_DEFAULT_PAGE_EVENTS, HOST_DEFAULT_PAGE_BYTES, HOST_DEFAULT_SNAPSHOT_BYTES } from '@openpane/contracts';
+import type { ConversationScope, Json, PendingDecision, Receipt, ReceiptState, RunIdentity, OfferedCommand } from '@openpane/contracts';
 import type { MatchedProviderCommand, ProviderObservation, V1Command } from './provider-commands.js';
-import type { DispatchIdentity, NativeDispatchObservation, SessionBinding, SessionReference } from '@mattsp1290/switchboard';
+import type { DispatchIdentity, NativeDispatchObservation, SessionBinding, SessionReference } from '@operatorworks/switchboard';
 
 export function scopeKey(scope: ConversationScope): [string, string] { return [scope.hostId, scope.conversationId]; }
 export function commandKey(scope: ConversationScope, id: string): string { return canonicalJson([...scopeKey(scope), id]); }

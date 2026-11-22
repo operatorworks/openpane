@@ -5,14 +5,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CrewClient } from '@birbcrew/client';
-import { connectCrewConversation } from 'agentui-extension-crew';
-import { fileIntents } from 'agentui-extension-crew/file-intents';
+import { connectCrewConversation } from 'openpane-extension-crew';
+import { fileIntents } from 'openpane-extension-crew/file-intents';
 
 export const conversationId = '22222222-2222-4222-8222-222222222222';
 export const memberId = '33333333-3333-4333-8333-333333333333';
-export const scope = { hostId: 'agentui-workstation', conversationId: 'local-crew-conversation' };
+export const scope = { hostId: 'openpane-workstation', conversationId: 'local-crew-conversation' };
 export async function fixture(t) {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-crew-example-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-crew-example-'));
   const path = join(directory, 'intent.json');
   const intents = fileIntents(path);
   const calls = [], accepted = new Map();

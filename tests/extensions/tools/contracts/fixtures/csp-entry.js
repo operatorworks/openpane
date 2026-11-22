@@ -1,4 +1,4 @@
-import { createFrontendToolGeneration, pinFrontendTools } from '@agentui/sdk/tools';
+import { createFrontendToolGeneration, pinFrontendTools } from '@openpane/sdk/tools';
 
 const { generation } = await createFrontendToolGeneration({
   capture: () => undefined,
@@ -32,7 +32,7 @@ const pin = pinFrontendTools({
     conversation: { hostId: 'h', conversationId: 'c' },
     runId: 'r',
     authority: {
-      kind: 'agentui-host',
+      kind: 'openpane-host',
       hostId: 'h',
       binding: { namespace: 'n', installationId: 'i', opaqueSessionId: 's' },
     },

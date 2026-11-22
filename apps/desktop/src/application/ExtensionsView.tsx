@@ -1,9 +1,9 @@
 import { Suspense, useEffect, type ReactNode } from 'react';
-import type { ConversationScope, Json } from '@agentui/contracts';
-import { sameScope } from '@agentui/contracts';
-import type { AgentDescriptor, ExtensionCallValue, ServiceMetadata } from '@agentui/contracts/service';
-import { classifyExtensionCall } from '@agentui/contracts/service';
-import type { WorkspaceAgent, WorkspaceContribution, WorkspaceConversation, WorkspaceViewProps } from '@agentui/sdk/react';
+import type { ConversationScope, Json } from '@openpane/contracts';
+import { sameScope } from '@openpane/contracts';
+import type { AgentDescriptor, ExtensionCallValue, ServiceMetadata } from '@openpane/contracts/service';
+import { classifyExtensionCall } from '@openpane/contracts/service';
+import type { WorkspaceAgent, WorkspaceContribution, WorkspaceConversation, WorkspaceViewProps } from '@openpane/sdk/react';
 import { CustomizationBoundary, workspaceTranscript, type ContentLayoutSelection, type DesktopCustomization, type NamespaceActivation, type TranscriptSelection } from './DesktopCustomizations.js';
 import type { ApplicationController, OpenConversation, WorkspaceConversations } from './application-controller.js';
 
@@ -24,7 +24,7 @@ export function openableRow(row: ExtensionRow | undefined): OpenableRow | null {
 }
 type ProviderAgent = Extract<AgentDescriptor, { readonly kind: 'provider' }>;
 const SERVER_FAILURE = 'The server extension failed to load. Check the extension configuration, then restart the host.';
-const UNAVAILABLE = 'The provider service is offline or unreachable. AgentUI checks again automatically.';
+const UNAVAILABLE = 'The provider service is offline or unreachable. OpenPane checks again automatically.';
 
 export function namespaceAgents(metadata: ServiceMetadata | null, namespace: string): readonly ProviderAgent[] {
   return (metadata?.agents ?? []).filter((agent): agent is ProviderAgent => 'kind' in agent && agent.namespace === namespace);

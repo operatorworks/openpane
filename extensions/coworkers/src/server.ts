@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { ExtensionOperation, ServerExtensionEntry } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { ExtensionOperation, ServerExtensionEntry } from '@openpane/sdk';
 import { CoworkersClient, type Coworker } from './client.js';
 import { registerCoworkersProvider } from './provider.js';
 import type { CoworkerSummary, CoworkersListOutput } from './operation-output.js';

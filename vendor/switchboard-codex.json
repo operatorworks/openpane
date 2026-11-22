@@ -1,5 +1,5 @@
 {
-  "installedAlias": "@agentui/switchboard-codex",
+  "installedAlias": "@openpane/switchboard-codex",
   "entrypoint": "./codex",
   "nativeSdk": "0.169.0",
   "provider": "chatgpt-subscription",

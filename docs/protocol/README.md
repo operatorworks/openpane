@@ -1,6 +1,6 @@
 # AG-UI consumer conformance
 
-AgentUI imports TypeScript SDK 1.0.4 types and `EventType` from `@agentui/protocol`.
+OpenPane imports TypeScript SDK 1.0.4 types and `EventType` from `@openpane/protocol`.
 The installed SDK is built from [the required AG-UI fork](https://github.com/mattsp1290/ag-ui/pull/49),
 branch `matt.spurlin/typescript-sdks`, frozen at
 `ed2c1d5b63299d3f08676a1418cc2640bbe55fd1`.
@@ -24,14 +24,14 @@ TypeScript assignability and canonical wire validity differ.
 `JSON.parse` returns `any` and bypasses TypeScript checking. Canonical schema
 validation establishes wire validity. Compiler controls separately check the
 plain discriminator value set and constructing an SDK event with enum members.
-Workspaces constructing SDK events import their types and enum from `@agentui/protocol`.
+Workspaces constructing SDK events import their types and enum from `@openpane/protocol`.
 
-AgentUI consumes the installed Switchboard projection through
-`@agentui/host/agui`. The host core entry remains independent of AG-UI imports.
+OpenPane consumes the installed Switchboard projection through
+`@openpane/host/agui`. The host core entry remains independent of AG-UI imports.
 No mapper or SDK fields are copied.
 
 The [versioned matrix](conformance.json) joins immutable upstream inventories to
-AgentUI's owned fixture coverage. Its version identifies canonical protocol 1.0,
+OpenPane's owned fixture coverage. Its version identifies canonical protocol 1.0,
 TypeScript SDK 1.0.4, Python SDK 1.0.0, the Switchboard artifact and the owned
 coverage contract schema. `coverageContractVersion` versions that schema; coverage
 content is reviewed with its Git revision. Source bytes, digests and both MIT
@@ -57,9 +57,9 @@ The matrix keeps these facts separate:
 SDK acceptance does not establish canonical validity. The report records
 historical runtime acceptance in `canonical.counts` and each category's
 `sdkRuntimeDivergences`. These flags describe upstream zod/pydantic validators,
-not published TypeScript assignability. The AgentUI suite runs no SDK validator.
+not published TypeScript assignability. The OpenPane suite runs no SDK validator.
 Canonical definitions and payload paths in the retained inventories are upstream
-evidence inputs, not AgentUI test counts.
+evidence inputs, not OpenPane test counts.
 
 The owned fixtures validate every emitted event against the retained canonical
 `Event` definition. They assert returned values and related IDs for text, tools,
@@ -168,7 +168,7 @@ Named validator controls prove closed shapes. The freshness test rejects stale
 committed output. `protocol:check` provides the same freshness comparison as a fast
 read-only command; `verify` already includes the test. Normal verification needs
 no upstream download or Python.
-The report's `agentuiCanonicalValidator` identifies the validator AgentUI runs.
+The report's `openpaneCanonicalValidator` identifies the validator OpenPane runs.
 `canonical.sdkRuntimeEvidence.canonicalLabels` identifies the historical upstream
 verifier. Both use the unchanged retained canonical schema.
 The earlier exact-source TS/Python comparison is retained with the

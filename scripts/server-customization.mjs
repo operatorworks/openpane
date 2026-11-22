@@ -3,9 +3,9 @@ import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { build, version as esbuildVersion } from 'esbuild';
 import { fileURLToPath } from 'node:url';
-import { canonicalJson } from '@agentui/contracts';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import { CustomizationError, assertSupportedNode, planServerCatalog, serverCatalogFile, parseServerCustomizationArtifact, readServerCustomizationArtifact, serverCustomizationArtifactId } from '@agentui/host/customization';
+import { canonicalJson } from '@openpane/contracts';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import { CustomizationError, assertSupportedNode, planServerCatalog, serverCatalogFile, parseServerCustomizationArtifact, readServerCustomizationArtifact, serverCustomizationArtifactId } from '@openpane/host/customization';
 import { prepareCustomizationSources } from './prepare-customization-sources.mjs';
 import { classifyHostSpecifier, serverCustomizationAbi } from './server-customization-abi.mjs';
 import { qualificationChild, qualifyServerCatalog } from './server-customization-qualifier.mjs';
@@ -20,7 +20,7 @@ function preparedResolutionPlugin(roots, abi) {
       const kind = classifyHostSpecifier(abi.imports, args.path);
       if (kind === 'forbidden') throw CustomizationError.fixed('build-failed');
       if (kind === 'sdk' || kind === 'builtin') return { path: args.path, external: true };
-      if (args.path.startsWith('@agentui/') || args.path.includes(':') && !isAbsolute(args.path)) throw CustomizationError.fixed('build-failed');
+      if (args.path.startsWith('@openpane/') || args.path.includes(':') && !isAbsolute(args.path)) throw CustomizationError.fixed('build-failed');
       if (args.pluginData?.resolving) return;
       const result = await builder.resolve(args.path, { importer: args.importer, resolveDir: args.resolveDir, kind: args.kind,
         pluginData: { resolving: true } });
@@ -42,7 +42,7 @@ async function compileCatalog({ roots, sources, directory, abi, repositoryDirect
     const root = await realpath(repositoryDirectory);
     const contents = sources.map((source, index) => `import entry${index} from ${JSON.stringify(source)};`).join('\n') +
       `\nexport const entries = [${sources.map((_, index) => `entry${index}`).join(',')}];\n`;
-    const result = await build({ stdin: { contents, sourcefile: 'agentui-server-catalog.mjs', resolveDir: root, loader: 'js' },
+    const result = await build({ stdin: { contents, sourcefile: 'openpane-server-catalog.mjs', resolveDir: root, loader: 'js' },
       absWorkingDir: root, outfile: join(directory, serverCatalogFile), bundle: true, splitting: false, format: 'esm', platform: 'node',
       target: `node${process.versions.node}`, conditions: ['node'], mainFields: ['main'],
       tsconfigRaw: { compilerOptions: { experimentalDecorators: false, useDefineForClassFields: true, jsx: 'transform' } },
@@ -69,12 +69,13 @@ async function builderIdentity() {
     plugins: [{ name: 'first-party-identity', setup(builder) {
       builder.onResolve({ filter: /^[^./]/ }, args => {
         if (isAbsolute(args.path)) return;
-        if (args.path.startsWith('@agentui/')) return { path: fileURLToPath(import.meta.resolve(args.path)) };
+        if (args.path.startsWith('@openpane/')) return { path: fileURLToPath(import.meta.resolve(args.path)) };
         return { path: args.path, external: true };
       });
     } }] });
   const paths = [...Object.keys(result.metafile.inputs), 'package-lock.json'].sort();
   const hashes = await Promise.all(paths.map(async path => [path, hash(await readFile(join(root, path)))]));
+  // Hash domain tag predates the OpenPane rename; changing it would change every recorded artifact identity.
   return { identity: hash(JSON.stringify(['agentui-server-builder-v1', esbuildVersion, hashes])), esbuildVersion };
 }
 
@@ -83,7 +84,7 @@ export async function qualifyServerCustomizationToolchain(entry = fileURLToPath(
   const [abi, builder] = await Promise.all([serverCustomizationAbi(), builderIdentity()]);
   const actualEntry = await realpath(entry);
   const lockfile = await realpath(fileURLToPath(new URL('../package-lock.json', import.meta.url)));
-  return { protocol: 'agentui-refresh-builder-v1', entry: actualEntry, lockfile,
+  return { protocol: 'openpane-refresh-builder-v1', entry: actualEntry, lockfile,
     identity: { kind: 'ready', node: process.execPath, entrySha256: hash(await readFile(actualEntry)), lockSha256: hash(await readFile(lockfile)), builder },
     compatibility: { sdkVersion: EXTENSION_SDK_VERSION, nodeVersion: process.versions.node, nodeModules: process.versions.modules, abiIdentity: abi.identity } };
 }
@@ -98,10 +99,10 @@ async function publishFresh(out, produce, attempt) {
     try { await mkdir(directory, { mode: 0o700 }); reserved = true; }
     catch (error) { if (error.code === 'EEXIST') throw CustomizationError.fixed('output-exists'); throw error; }
     if (attempt) {
-      const scratch = join(parent, `.agentui-server-${attempt}`);
+      const scratch = join(parent, `.openpane-server-${attempt}`);
       await mkdir(scratch, { mode: 0o700 });
       owner = scratch;
-    } else owner = await mkdtemp(join(parent, '.agentui-server-'));
+    } else owner = await mkdtemp(join(parent, '.openpane-server-'));
     const staged = join(owner, 'artifact');
     await mkdir(staged, { mode: 0o700 });
     const manifest = await produce(staged, owner);

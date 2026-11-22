@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { assertCompileCases } from '../../../support/compile.mjs';
 
 const fixtureSource = (await Promise.all(['crew.ts', 'local.ts'].map((name) => readFile(new URL(name, import.meta.url), 'utf8'))))
-  .map((source, index) => index ? source.replace("import * as SDK from '@agentui/sdk';", '') : source).join('\n');
+  .map((source, index) => index ? source.replace("import * as SDK from '@openpane/sdk';", '') : source).join('\n');
 
 const control = `
 export const successor: SDK.CreationIntent<'crew-personal'> = { ...crewCreation,

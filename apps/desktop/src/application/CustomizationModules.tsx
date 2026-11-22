@@ -1,8 +1,8 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
-import { useConversation } from '@agentui/client/react';
-import type { ConversationModule, ConversationModuleProps, ModuleAction } from '@agentui/sdk/react';
-import type { SubmitResult } from '@agentui/contracts';
-import { Button } from '@agentui/ui-primitives/desktop';
+import { useConversation } from '@openpane/client/react';
+import type { ConversationModule, ConversationModuleProps, ModuleAction } from '@openpane/sdk/react';
+import type { SubmitResult } from '@openpane/contracts';
+import { Button } from '@openpane/ui-primitives/desktop';
 import { refusalMessage } from './application-controller.js';
 import type { ConversationActions, OpenConversation } from './application-controller.js';
 import { conversationResponding } from './responding.js';

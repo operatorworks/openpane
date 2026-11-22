@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { createBrowserConnection, ServiceProtocolError } from '@agentui/client/service';
-import { createMacConnection } from '@agentui/client/mac';
-import { parseServiceRequest } from '@agentui/contracts/service';
+import { createBrowserConnection, ServiceProtocolError } from '@openpane/client/service';
+import { createMacConnection } from '@openpane/client/mac';
+import { parseServiceRequest } from '@openpane/contracts/service';
 
 const scope = { hostId: 'host', conversationId: 'chat' };
 const earlier = { hostId: 'host', conversationId: 'earlier' }, later = { hostId: 'host', conversationId: 'later' };

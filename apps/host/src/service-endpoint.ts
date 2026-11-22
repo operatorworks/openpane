@@ -1,7 +1,7 @@
-import { IMAGE_BODY_TIMEOUT_MS, IMAGE_TRANSFER_MAX_BYTES } from '@agentui/contracts/image';
+import { IMAGE_BODY_TIMEOUT_MS, IMAGE_TRANSFER_MAX_BYTES } from '@openpane/contracts/image';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { parseServiceRequest, SERVICE_MAX_REQUEST_BYTES, ServiceError } from '@agentui/contracts/service';
-import type { ServiceFailureKind } from '@agentui/contracts/service';
+import { parseServiceRequest, SERVICE_MAX_REQUEST_BYTES, ServiceError } from '@openpane/contracts/service';
+import type { ServiceFailureKind } from '@openpane/contracts/service';
 import type { createApi } from './api.js';
 import { FAILURE_STATUS } from './errors.js';
 import { json, readJson } from './framing.js';

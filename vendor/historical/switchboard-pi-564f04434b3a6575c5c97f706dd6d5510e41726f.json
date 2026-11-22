@@ -1,10 +1,10 @@
 {
-  "sourceRepository": "https://github.com/mattsp1290/switchboard",
+  "sourceRepository": "https://github.com/operatorworks/switchboard",
   "sourceRevision": "564f04434b3a6575c5c97f706dd6d5510e41726f",
   "artifact": "switchboard-564f04434b3a6575c5c97f706dd6d5510e41726f.tgz",
   "sha256": "0f8c2820f89b44068b14081b9fef7f4697b8c9d49a28c93a9947efffb2620ac8",
   "packageName": "@mattsp1290/switchboard",
-  "installedAlias": "@agentui/switchboard-pi",
+  "installedAlias": "@openpane/switchboard-pi",
   "entrypoint": "./pi",
   "nativeSdk": "1.5.2",
   "provider": "opencode-go",
@@ -17,7 +17,7 @@
     "npm": "11.19.1"
   },
   "qualification": {
-    "scope": "Offline native SDK fixtures and installed public package. Live subscription journey is separately exercised by AgentUI.",
+    "scope": "Offline native SDK fixtures and installed public package. Live subscription journey is separately exercised by OpenPane.",
     "checks": [
       "npm run build",
       "npm run lint",

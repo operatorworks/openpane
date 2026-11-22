@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson, OUTPUT_MAX_BINDING_BYTES, OUTPUT_MAX_COUNT, OUTPUT_MAX_ID_BYTES,
-  OUTPUT_MAX_LIST_BYTES, OUTPUT_MAX_METADATA_BYTES, parseOutputId, parseTextMetadata } from '@agentui/contracts';
-import type { OutputFailure, TextMetadata, TextOutput } from '@agentui/contracts';
-import { record, utf8Bytes } from '@agentui/contracts/decode';
-import type { ConversationRef, ProviderConversation, ProviderInstance } from '@agentui/sdk';
+  OUTPUT_MAX_LIST_BYTES, OUTPUT_MAX_METADATA_BYTES, parseOutputId, parseTextMetadata } from '@openpane/contracts';
+import type { OutputFailure, TextMetadata, TextOutput } from '@openpane/contracts';
+import { record, utf8Bytes } from '@openpane/contracts/decode';
+import type { ConversationRef, ProviderConversation, ProviderInstance } from '@openpane/sdk';
 import { creationBinding, creationIntent } from './provider-creation.js';
 import type { StoredCreation } from './provider-creation.js';
 import { providerReference } from './provider-commands.js';

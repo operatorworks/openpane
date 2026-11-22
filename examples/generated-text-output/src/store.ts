@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { canonicalJson, parseTextMetadata } from '@agentui/contracts';
+import { canonicalJson, parseTextMetadata } from '@openpane/contracts';
 import { z } from 'zod';
 import { binding, conversation, instance, operation, outputListing, reportMetadata, settlement, supportsOutputs } from './model.js';
-import type { ConversationRef, ProviderConversation, ProviderOutputListing, ProviderOutputRead } from '@agentui/sdk';
+import type { ConversationRef, ProviderConversation, ProviderOutputListing, ProviderOutputRead } from '@openpane/sdk';
 
 const schema = [
   ['creations', 'CREATE TABLE creations (scope TEXT PRIMARY KEY, intent TEXT NOT NULL, binding TEXT NOT NULL) WITHOUT ROWID'],

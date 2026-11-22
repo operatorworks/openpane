@@ -8,10 +8,10 @@ import test from 'node:test';
 import { syntheticReceipt } from './receipt-fixture.mjs';
 import { absent, main, synthetic, until } from './support.mjs';
 
-const journal = process.env.AGENTUI_MCP_RESOURCE_JOURNAL;
+const journal = process.env.OPENPANE_MCP_RESOURCE_JOURNAL;
 const record = async value => { if (journal) await appendFile(journal, JSON.stringify(value) + '\n'); };
 const init = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'terminal-proof', version: '1' } } };
-const call = { jsonrpc: '2.0', id: 'original-rpc', method: 'tools/call', params: { name: 'agentui_refresh', arguments: { operation: { kind: 'request', id: 'original', reference: { repository: '/source', commit: 'a'.repeat(40) }, expectedSelectionRevision: 0 } } } };
+const call = { jsonrpc: '2.0', id: 'original-rpc', method: 'tools/call', params: { name: 'openpane_refresh', arguments: { operation: { kind: 'request', id: 'original', reference: { repository: '/source', commit: 'a'.repeat(40) }, expectedSelectionRevision: 0 } } } };
 async function start(t, mode, patch = '', rpcId = call.id) {
   const f = await synthetic(t, mode), preload = join(f.root, 'fault.mjs');
   await writeFile(preload, `import fs from 'node:fs/promises'; import {syncBuiltinESMExports} from 'node:module'; ${patch}`);

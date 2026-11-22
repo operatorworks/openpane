@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 test('installed host serves only its verified browser bytes after an on-disk rebuild', { timeout: 15000 }, async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-installed-assets-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-installed-assets-'));
   const root = fileURLToPath(new URL('../../', import.meta.url));
   const host = join(directory, 'apps/host/dist'), browser = join(directory, 'apps/desktop/web-dist-browser');
   cpSync(join(root, 'apps/host/dist'), host, { recursive: true });

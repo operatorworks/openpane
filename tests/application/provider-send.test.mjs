@@ -1,14 +1,14 @@
-import { canonicalJson } from '@agentui/contracts';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { canonicalJson } from '@openpane/contracts';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import test from 'node:test';
-import { createProviderRegistry } from '@agentui/host';
-import { frontendToolsFor } from '@agentui/host/frontend-tools';
-import { createServerExtensions } from '@agentui/host/extensions';
+import { createProviderRegistry } from '@openpane/host';
+import { frontendToolsFor } from '@openpane/host/frontend-tools';
+import { createServerExtensions } from '@openpane/host/extensions';
 import { entry } from '../host/extensions/fixtures.mjs';
 import { fixture as hostFixture, scope as hostScope, snapshot } from '../host/fixture.mjs';
-import { SERVICE_WIRE_VERSION } from '@agentui/contracts/compatibility';
+import { SERVICE_WIRE_VERSION } from '@openpane/contracts/compatibility';
 import { extension, fixture, create, stored, send, unavailable, actualInput, offered, aguiExtension, secret, selected } from './provider-send-fixture.mjs';
 
 test('authenticated send commits exact target before HTTP effect, persists accepted runs for distinct typed models, and emits receipts only', async t => {
@@ -40,7 +40,7 @@ test('authenticated send commits exact target before HTTP effect, persists accep
   const runs = f.inspect(db => db.prepare('SELECT conversation,data FROM runs ORDER BY conversation').all());
   assert.equal(runs.length, 2);
   assert.deepEqual(runs.map(row => JSON.parse(row.data).identity.runId), ['same-run', 'same-run']);
-  assert.deepEqual(runs.map(row => JSON.parse(row.data).identity.authority.kind), ['agentui-host', 'remote-provider']);
+  assert.deepEqual(runs.map(row => JSON.parse(row.data).identity.authority.kind), ['openpane-host', 'remote-provider']);
   assert.equal(f.inspect(db => db.prepare("SELECT COUNT(*) AS n FROM events WHERE json_extract(payload,'$.event.kind')<>'receipt'").get().n), 0);
   assert.equal((await f.client.conversation(scope).submit(send(scope, 'next'))).reason, 'send-awaiting-confirmation');
   for (const body of [{ kind: 'cancel', runId: 'same-run' }, { kind: 'approve', pendingId: 'same-decision', choiceId: 'same-choice' }]) {
@@ -336,7 +336,7 @@ for (const field of ['scope', 'operation', 'generation', 'protocol', 'namespace'
       if (field === 'protocol') run.ref.instance.protocolVersion = 'foreign';
       if (field === 'namespace') run.ref.instance.namespace = 'foreign';
       if (field === 'installation') run.ref.instance.installationId = 'foreign';
-      if (field === 'authority') run.binding.authority = { ...run.binding.authority, kind: 'agentui-host', hostId: operation.binding.creation.scope.hostId };
+      if (field === 'authority') run.binding.authority = { ...run.binding.authority, kind: 'openpane-host', hostId: operation.binding.creation.scope.hostId };
       if (field === 'host') run.binding.authority.hostId = 'foreign';
       if (field === 'session') run.binding.authority.binding.opaqueSessionId = 'foreign';
       if (field === 'effect') result.value.kind = 'cancel';

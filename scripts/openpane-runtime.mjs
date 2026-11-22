@@ -28,7 +28,7 @@ if ! check_harness "$harness_root"; then
   work=$(mktemp -d "$root/tools/.harness-${id}-XXXXXX")
   trap 'if [ ! -f "$work/.ready" ]; then rm -rf "$work"; fi' EXIT
   trap 'exit 1' HUP INT TERM
-  echo ${shellQuote(`Installing ${id} ${version} in AgentUI's private tools directory.`)} >&2
+  echo ${shellQuote(`Installing ${id} ${version} in OpenPane's private tools directory.`)} >&2
   : > "$work/user.npmrc"
   : > "$work/global.npmrc"
   npm install --prefix "$work" --ignore-scripts --no-audit --no-fund --userconfig "$work/user.npmrc" --globalconfig "$work/global.npmrc" --registry=https://registry.npmjs.org ${shellQuote(`${packageName}@${version}`)} >&2
@@ -59,7 +59,7 @@ harness="$harness_root/node_modules/.bin/"${shellQuote(executable)}
 export function bootstrapScript(nodeVersion, agent, codexVersion) {
   return `set -eu
 umask 077
-root="$HOME/.local/share/agentui"
+root="$HOME/.local/share/openpane"
 mkdir -p "$root/tools" "$root/data" "$root/releases"
 os=$(uname -s)
 arch=$(uname -m)
@@ -72,7 +72,7 @@ for candidate in "$node" "$HOME/.nvm/versions/node/v$node_version/bin/node" "$(c
   if [ -n "$candidate" ] && [ -x "$candidate" ] && [ "$("$candidate" --version 2>/dev/null)" = "v$node_version" ]; then node="$candidate"; break; fi
 done
 if [ ! -x "$node" ] || [ "$("$node" --version 2>/dev/null || true)" != "v$node_version" ]; then
-  echo "Installing Node $node_version for $platform-$architecture in AgentUI's private tools directory." >&2
+  echo "Installing Node $node_version for $platform-$architecture in OpenPane's private tools directory." >&2
   work=$(mktemp -d "$root/tools/.node-XXXXXX")
   trap 'rm -rf "$work"' EXIT
   trap 'exit 1' HUP INT TERM
@@ -100,6 +100,6 @@ export PATH="$(dirname "$node"):$PATH"
 codex=''
 ${agent === 'codex' ? `${harnessInstallScript({ id: 'codex', packageName: '@openai/codex', version: codexVersion, executable: 'codex', expectedVersion: `codex-cli ${codexVersion}` })}
 codex="$harness"` : ''}
-"$node" -e 'console.log("AGENTUI_SETUP " + JSON.stringify({home:process.env.HOME,root:process.argv[1],node:process.argv[2],codex:process.argv[3],os:process.argv[4],arch:process.argv[5]}))' "$root" "$node" "$codex" "$os" "$arch"
+"$node" -e 'console.log("OPENPANE_SETUP " + JSON.stringify({home:process.env.HOME,root:process.argv[1],node:process.argv[2],codex:process.argv[3],os:process.argv[4],arch:process.argv[5]}))' "$root" "$node" "$codex" "$os" "$arch"
 `;
 }

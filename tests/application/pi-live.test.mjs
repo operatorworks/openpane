@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { chromium } from 'playwright';
-const live = process.env.AGENTUI_PI_LIVE === '1';
+const live = process.env.OPENPANE_PI_LIVE === '1';
 const wait = async (predicate, label) => {
   const end = Date.now() + 90_000;
   while (!await predicate()) {
@@ -17,13 +17,13 @@ const wait = async (predicate, label) => {
   }
 };
 
-test('live OpenCode Go GLM 5.3 chat streams, remembers, reopens and stops through AgentUI', {
+test('live OpenCode Go GLM 5.3 chat streams, remembers, reopens and stops through OpenPane', {
   skip: !live, timeout: 300_000,
 }, async t => {
   const key = process.env.OPENCODE_GO_API_KEY;
   assert(key?.trim(), 'Load OPENCODE_GO_API_KEY in the host process before this test');
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-pi-live-'));
-  const evidence = process.env.AGENTUI_PI_EVIDENCE_DIR;
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-pi-live-'));
+  const evidence = process.env.OPENPANE_PI_EVIDENCE_DIR;
   if (evidence) await mkdir(evidence, { recursive: true });
   const artifact = JSON.parse(await readFile(new URL('../../apps/host/dist/artifact.json', import.meta.url), 'utf8'));
   const report = { provider: 'opencode-go', model: 'glm-5.3', sdk: '1.5.2',

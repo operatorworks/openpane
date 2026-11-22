@@ -1,9 +1,9 @@
-import { IMAGE_TRANSFER_MAX_BYTES } from '@agentui/contracts/image';
-import { utf8Bytes } from '@agentui/contracts/decode';
-import { record, identifier, count } from '@agentui/contracts/decode';
-import { parseServiceRequest, ServiceError } from '@agentui/contracts/service';
-import type { ServiceConnection, ServiceRequest } from '@agentui/contracts/service';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { IMAGE_TRANSFER_MAX_BYTES } from '@openpane/contracts/image';
+import { utf8Bytes } from '@openpane/contracts/decode';
+import { record, identifier, count } from '@openpane/contracts/decode';
+import { parseServiceRequest, ServiceError } from '@openpane/contracts/service';
+import type { ServiceConnection, ServiceRequest } from '@openpane/contracts/service';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { createServiceConnection, ServiceConnectionLost } from './service-engine.js';
 import type { ServiceConnectionOptions } from './service-engine.js';
 
@@ -11,18 +11,18 @@ export type MacAccess = { readonly observation: string };
 export type MacNativeInvoke = (command: { readonly kind: 'connect' } | {
   readonly kind: 'execute'; readonly observation: string; readonly request: ServiceRequest;
 }) => Promise<unknown>;
-const invalidResponse = 'Invalid native connection response. Update AgentUI, then reconnect. Local work is retained.';
+const invalidResponse = 'Invalid native connection response. Update OpenPane, then reconnect. Local work is retained.';
 function failure(cause: unknown): ServiceError {
   let reason: string;
   switch (cause) {
-    case 'profile-in-use': reason = 'Close the other AgentUI instance before reconnecting.'; break;
+    case 'profile-in-use': reason = 'Close the other OpenPane instance before reconnecting.'; break;
     case 'invalid-input': reason = 'Invalid native request.'; break;
     case 'stale': return new ServiceConnectionLost('The local host connection changed. Reconnect before continuing.');
-    case 'host-changed': return new ServiceConnectionLost('A different AgentUI host is answering on this Mac. Reconnect to switch to it. Local work is retained.');
+    case 'host-changed': return new ServiceConnectionLost('A different OpenPane host is answering on this Mac. Reconnect to switch to it. Local work is retained.');
     case 'network-failed': reason = 'The local host request did not complete. Check that the host is running, then reconnect or inspect command recovery before retrying.'; break;
-    case 'forbidden': reason = 'Native access was refused. Open the installed AgentUI app, then reconnect.'; break;
-    case 'profile-unavailable': reason = 'The local profile is unavailable. Check that AgentUI can access its local profile, then restart AgentUI. Local work is retained.'; break;
-    default: reason = 'Native connection unavailable. Reconnect, or restart AgentUI if the problem continues. Local work is retained.';
+    case 'forbidden': reason = 'Native access was refused. Open the installed OpenPane app, then reconnect.'; break;
+    case 'profile-unavailable': reason = 'The local profile is unavailable. Check that OpenPane can access its local profile, then restart OpenPane. Local work is retained.'; break;
+    default: reason = 'Native connection unavailable. Reconnect, or restart OpenPane if the problem continues. Local work is retained.';
   }
   return new ServiceError('unavailable', reason);
 }

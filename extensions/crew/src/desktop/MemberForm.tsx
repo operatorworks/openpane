@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { WorkspaceViewProps } from '@agentui/sdk/react';
+import type { WorkspaceViewProps } from '@openpane/sdk/react';
 import { createdMemberId } from '../operation-output.js';
 
 const ENGINES = ['pi', 'claude', 'codex'] as const;
@@ -10,7 +10,7 @@ const DISALLOWED_CONTROL = /(?![\t\n])\p{Cc}/u;
 const REFUSALS: Readonly<Record<string, string>> = {
   'unknown-profile': 'Crew has no profile with that name. Check the profile and try again.',
   'invalid-input': 'Check the engine, profile and instructions, then try again.',
-  unauthorized: 'Crew refused the configured credential. Check AGENTUI_EXTENSION_CREW_TOKEN and restart AgentUI.',
+  unauthorized: 'Crew refused the configured credential. Check OPENPANE_EXTENSION_CREW_TOKEN and restart OpenPane.',
   rejected: 'Crew rejected this member.',
 };
 /** Outcomes that leave it unknown whether Crew created the member. The retry reuses the same request. */
@@ -24,7 +24,7 @@ const NO_ID = 'Crew created the member but did not return its ID. Find it in the
  * outcome unknown.
  */
 const NOT_SENT: Readonly<Record<string, { readonly first: string; readonly retry: string }>> = {
-  'unknown-extension': { first: 'AgentUI could not reach the Crew extension. Refresh and try again.', retry: 'AgentUI could not reach the Crew extension' },
+  'unknown-extension': { first: 'OpenPane could not reach the Crew extension. Refresh and try again.', retry: 'OpenPane could not reach the Crew extension' },
   'unknown-installation': { first: 'This Crew installation is no longer configured. Refresh and try again.', retry: 'this Crew installation is no longer configured' },
   'unknown-operation': { first: 'This Crew installation cannot add members. Refresh and try again.', retry: 'this Crew installation cannot add members' },
   'too-large': { first: 'The instructions are too long for Crew. Shorten them and try again.', retry: 'the request was too large for Crew' },

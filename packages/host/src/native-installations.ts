@@ -1,7 +1,7 @@
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { CLAUDE_SDK_RUNTIMES, CODEX_SDK_RUNTIME, PI_RUNTIME } from '@agentui/contracts/compatibility';
-import type { ClaudeSdkModel, NativeRuntimeIdentity } from '@agentui/contracts/compatibility';
+import { CLAUDE_SDK_RUNTIMES, CODEX_SDK_RUNTIME, PI_RUNTIME } from '@openpane/contracts/compatibility';
+import type { ClaudeSdkModel, NativeRuntimeIdentity } from '@openpane/contracts/compatibility';
 import type { Installation } from './durable-model.js';
 import { nonempty } from './codec.js';
 

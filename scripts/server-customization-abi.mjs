@@ -3,13 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
-export { classifyHostSpecifier } from '@agentui/host/server-artifact-policy';
+export { classifyHostSpecifier } from '@openpane/host/server-artifact-policy';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
 export async function serverCustomizationAbi() {
   const root = fileURLToPath(new URL('../', import.meta.url));
-  const sdk = import.meta.resolve('@agentui/sdk');
+  const sdk = import.meta.resolve('@openpane/sdk');
   const result = await build({ absWorkingDir: root, entryPoints: [fileURLToPath(sdk)], bundle: true, write: false, metafile: true,
     platform: 'node', format: 'esm', treeShaking: false, logLevel: 'silent' });
   const graph = [];
@@ -29,6 +29,7 @@ export async function serverCustomizationAbi() {
     graph.push({ package: pkg.name, version: pkg.version, path: relative(owner, absolute).split('\\').join('/'), sha256: hash(await readFile(absolute)) });
   }
   graph.sort((a, b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : JSON.stringify(a) > JSON.stringify(b) ? 1 : 0);
-  const imports = Object.freeze({ '@agentui/sdk': sdk });
+  const imports = Object.freeze({ '@openpane/sdk': sdk });
+  // Hash domain tag predates the OpenPane rename; changing it would change every recorded artifact identity.
   return Object.freeze({ imports, files: Object.freeze(files), identity: hash(JSON.stringify(['agentui-server-abi-v1', Object.keys(imports), graph])) });
 }

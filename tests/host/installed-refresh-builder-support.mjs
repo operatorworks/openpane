@@ -19,7 +19,7 @@ export function alive(pid) {
   try { process.kill(pid, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; }
 }
 export async function fixture(t) {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'agentui-installed-builder-')));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'openpane-installed-builder-')));
   await mkdir(join(root, 'scripts'));
   const entry = join(root, 'scripts', 'builder.mjs');
   const modeFile = join(root, 'mode.json');
@@ -34,7 +34,7 @@ const pidFile = ${JSON.stringify(pidFile)};
 appendFileSync(pidFile, JSON.stringify({pid: process.pid, group: process.pid}) + '\\n');
 writeFileSync(${JSON.stringify(envFile)}, JSON.stringify(process.env));
 const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
-const qualification = { protocol: 'agentui-refresh-builder-v1', entry: ${JSON.stringify(entry)}, lockfile: ${JSON.stringify(join(root, 'package-lock.json'))},
+const qualification = { protocol: 'openpane-refresh-builder-v1', entry: ${JSON.stringify(entry)}, lockfile: ${JSON.stringify(join(root, 'package-lock.json'))},
  identity: {kind:'ready', node: process.execPath, entrySha256: hash(${JSON.stringify(entry)}), lockSha256: hash(${JSON.stringify(join(root, 'package-lock.json'))}), builder:{identity:'b'.repeat(64),esbuildVersion:'test'}}, compatibility: ${JSON.stringify(expected)} };
 for (const [path, value] of Object.entries(mode.change ?? {})) { const parts=path.split('.'); let target=qualification; for(const part of parts.slice(0,-1)) target=target[part]; target[parts.at(-1)] = value; }
 if(mode.kind === 'ignore') process.on('SIGTERM', () => {});

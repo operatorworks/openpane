@@ -2,9 +2,9 @@ import { assertCompileCases } from '../support/compile.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { canonicalJson, parseCommand } from '@agentui/contracts';
-import { parseServiceRequest, parseServiceResponse } from '@agentui/contracts/service';
-import { createMacConnection } from '@agentui/client/mac';
+import { canonicalJson, parseCommand } from '@openpane/contracts';
+import { parseServiceRequest, parseServiceResponse } from '@openpane/contracts/service';
+import { createMacConnection } from '@openpane/client/mac';
 
 const cases = JSON.parse(readFileSync(new URL('./fixtures/frontend-sends.json', import.meta.url), 'utf8'));
 for (const item of cases) test(`frontend wire golden ${item.name}`, () => {
@@ -48,10 +48,10 @@ for (const reason of ['provider-rejected', 'not-dispatched', 'closures-unavailab
 
 test('public response parsing requires binding and output context while preserving generic service transport typing', () => assertCompileCases({
   config: new URL('../../packages/contracts/tsconfig.json', import.meta.url).pathname,
-  prefix: `import { parseServiceResponse } from '@agentui/contracts/service';
-    import type { ServiceRequest, ServiceValueMap, ServiceResponse } from '@agentui/contracts/service';
-    import { parseOutputId } from '@agentui/contracts';
-    import type { FrontendBinding } from '@agentui/contracts';
+  prefix: `import { parseServiceResponse } from '@openpane/contracts/service';
+    import type { ServiceRequest, ServiceValueMap, ServiceResponse } from '@openpane/contracts/service';
+    import { parseOutputId } from '@openpane/contracts';
+    import type { FrontendBinding } from '@openpane/contracts';
     export type { ServiceRequest, ServiceValueMap, ServiceResponse, FrontendBinding };
     export const scope = { hostId: 'host', conversationId: 'conversation' };
     export const outputId = parseOutputId('output-' + 'a'.repeat(64));`,
@@ -75,7 +75,7 @@ test('public response parsing requires binding and output context while preservi
 
 test('host binding requires the lazy scoped register capability', () => assertCompileCases({
   config: new URL('../../packages/host/tsconfig.json', import.meta.url).pathname,
-  prefix: `import type { LocalHost, FrontendSendActor } from '@agentui/host';
+  prefix: `import type { LocalHost, FrontendSendActor } from '@openpane/host';
     export declare const host: LocalHost<unknown, unknown>;
     export declare const actor: FrontendSendActor;
     export declare const producerFor: Parameters<typeof host.frontendBinding>[2];

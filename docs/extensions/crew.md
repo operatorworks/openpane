@@ -1,30 +1,30 @@
 # Crew extension
 
-`extensions/crew` (package `agentui-extension-crew`, namespace `crew`) connects AgentUI to a Crew service. Its server entry registers one provider per configured installation and the operations `members.list` and `members.create`. Its desktop workspace lists members, creates them and chats with them inside the Extensions view. The workspace shows one installation: the selected conversation's installation while it is available, otherwise the available installation with the first installation ID in sort order (the first installation when none is available). Members and conversations of other installations stay reachable from Chats.
+`extensions/crew` (package `openpane-extension-crew`, namespace `crew`) connects OpenPane to a Crew service. Its server entry registers one provider per configured installation and the operations `members.list` and `members.create`. Its desktop workspace lists members, creates them and chats with them inside the Extensions view. The workspace shows one installation: the selected conversation's installation while it is available, otherwise the available installation with the first installation ID in sort order (the first installation when none is available). Members and conversations of other installations stay reachable from Chats.
 
 ## Set up
 
-1. Build AgentUI (`npm run build`). The default desktop build already contains the Crew workspace.
-2. Create `~/.local/share/agentui/extensions.json`:
+1. Build OpenPane (`npm run build`). The default desktop build already contains the Crew workspace.
+2. Create `~/.local/share/openpane/extensions.json`:
 
 ```json
 {
   "version": 2,
   "ownership": "transient",
   "extensions": [{
-    "directory": "/absolute/path/to/agentui/extensions/crew",
+    "directory": "/absolute/path/to/openpane/extensions/crew",
     "installations": [{
       "id": "personal",
       "instance": { "namespace": "crew", "installationId": "personal", "generation": "1", "protocolVersion": "1" },
       "service": "http://<crew host>:<port>",
       "expectedAuthority": "remote-provider",
-      "authentication": { "kind": "environment", "variable": "AGENTUI_EXTENSION_CREW_TOKEN", "revision": "1" }
+      "authentication": { "kind": "environment", "variable": "OPENPANE_EXTENSION_CREW_TOKEN", "revision": "1" }
     }]
   }]
 }
 ```
 
-3. Export `AGENTUI_EXTENSION_CREW_TOKEN` with the Crew owner token in the shell that runs `./agentui`, then start AgentUI. The token never goes in the file and never reaches the UI.
+3. Export `OPENPANE_EXTENSION_CREW_TOKEN` with the Crew owner token in the shell that runs `./openpane`, then start OpenPane. The token never goes in the file and never reaches the UI.
 4. Open **Extensions → Crew**. Without the file or the variable the row shows `Not configured` and the workspace shows these steps.
 
 The grant `id` is free text; the server entry registers its provider under it. `protocolVersion` must be `1`.
@@ -43,7 +43,7 @@ The Crew gateway binds to loopback by default. A host on the same machine reache
 | Chat | Crew requests and AG-UI observation | Unchanged provider behaviour, now per member. |
 | Edit, Delete | none yet | Disabled until Crew ships member management. |
 
-Crew fixes a member's instructions, engine and profile when it is created and never deletes members. When Crew adds a retire route, AgentUI plans to model **edit** as replace-then-retire: create a replacement member, then retire the old one. Grants, memory, routines and budgets stay with the retired member, and its conversations stay readable. Whether that satisfies "update" is an open owner decision.
+Crew fixes a member's instructions, engine and profile when it is created and never deletes members. When Crew adds a retire route, OpenPane plans to model **edit** as replace-then-retire: create a replacement member, then retire the old one. Grants, memory, routines and budgets stay with the retired member, and its conversations stay readable. Whether that satisfies "update" is an open owner decision.
 
 ## Qualification
 

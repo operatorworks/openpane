@@ -17,8 +17,8 @@ const childSource = `
   const root = pathToFileURL(process.cwd() + '/');
   const artifact = new URL('apps/host/build/tsc/artifact.js', root).href;
   const accessDatabase = new URL('apps/host/build/tsc/access-database.js', root).href;
-  const hostPackage = import.meta.resolve('@agentui/host');
-  const piPackage = import.meta.resolve('@agentui/host/pi');
+  const hostPackage = import.meta.resolve('@openpane/host');
+  const piPackage = import.meta.resolve('@openpane/host/pi');
   const sourceModule = source => ({ url: 'data:text/javascript,' + encodeURIComponent(source), shortCircuit: true });
   registerHooks({ resolve(specifier, context, nextResolve) {
     if (specifier === './artifact.js' && context.parentURL?.endsWith('/server.js')) {
@@ -35,7 +35,7 @@ const childSource = `
         'export function openAccessDatabase(path) { const state = open(path); globalThis.shutdownTestAccess = state; return state; }'
       );
     }
-    if (specifier === '@agentui/host' && context.parentURL?.endsWith('/server.js')) {
+    if (specifier === '@openpane/host' && context.parentURL?.endsWith('/server.js')) {
       return sourceModule(
         'export * from ' + JSON.stringify(hostPackage) + ';' +
         'import { openLocalHost as open } from ' + JSON.stringify(hostPackage) + ';' +
@@ -49,7 +49,7 @@ const childSource = `
         '}'
       );
     }
-    if (specifier === '@agentui/host/pi' && context.parentURL?.endsWith('/server.js')) {
+    if (specifier === '@openpane/host/pi' && context.parentURL?.endsWith('/server.js')) {
       return sourceModule(
         'import { createPiDriver as create } from ' + JSON.stringify(piPackage) + ';' +
         'export async function createPiDriver(options) {' +

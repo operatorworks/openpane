@@ -1,6 +1,6 @@
 # Host secret providers
 
-`@agentui/sdk` exports `SecretProvider` for operator-trusted host adapters.
+`@openpane/sdk` exports `SecretProvider` for operator-trusted host adapters.
 The contract reads a string from a backend-specific reference.
 It does not create, update, list, delete, or persist secrets.
 
@@ -18,14 +18,14 @@ This keeps backend SDK types and bootstrap identity outside the public contract.
 
 ## Host integration
 
-`secretResolver` from `@agentui/host` adapts a provider and reference to the existing installation credential resolver.
+`secretResolver` from `@openpane/host` adapts a provider and reference to the existing installation credential resolver.
 Its input is `{ provider: SecretProvider, reference: string }`.
 Its result is `() => Promise<string>`.
 The following excerpt assumes an operator-created `provider` and the installation's existing binding fields.
 
 ```ts
-import { secretResolver } from '@agentui/host';
-import type { SecretProvider } from '@agentui/sdk';
+import { secretResolver } from '@openpane/host';
+import type { SecretProvider } from '@openpane/sdk';
 
 function authentication(provider: SecretProvider): {
 	readonly kind: 'secret';

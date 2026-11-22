@@ -1,4 +1,4 @@
-import { frontendToolsFor } from '@agentui/host/frontend-tools';
+import { frontendToolsFor } from '@openpane/host/frontend-tools';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
@@ -7,7 +7,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
-import { createFrontendToolGeneration, pinFrontendTools } from '@agentui/sdk/tools';
+import { createFrontendToolGeneration, pinFrontendTools } from '@openpane/sdk/tools';
 import { fixture, scope, installed, run } from '../fixture.mjs';
 
 const key = { threadId: 'thread', runId: 'run-a' };

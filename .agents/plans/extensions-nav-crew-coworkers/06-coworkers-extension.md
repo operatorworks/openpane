@@ -40,7 +40,7 @@ Prerequisite state: WP6 merged. The order is sequential so that shared files (`p
 
 ### Change surface
 
-- `package.json` (new): `agentui-extension-coworkers` (outside the `@agentui/` scope, decision D12), with `agentui.extension` namespace `coworkers`, entries `server` → `./dist/server.js` and `desktop` → `./dist/desktop.js`, and `agentui.sources` for the desktop entry. Dependencies: `@agentui/sdk`, `@agentui/contracts`, `zod` at the repository's pinned version. No new third-party dependency.
+- `package.json` (new): `openpane-extension-coworkers` (outside the `@openpane/` scope, decision D12), with `openpane.extension` namespace `coworkers`, entries `server` → `./dist/server.js` and `desktop` → `./dist/desktop.js`, and `openpane.sources` for the desktop entry. Dependencies: `@openpane/sdk`, `@openpane/contracts`, `zod` at the repository's pinned version. No new third-party dependency.
 - Root `package.json`: add the workspace and `extensions/coworkers/tests/*.test.mjs` to the `test` script.
 - `openapi/crabber-coworkers.v1.json` (new): a byte copy of the upstream document at the observed revision, with a `REVISION` file (new) holding the 40-character commit.
 - `src/client.ts` (new): a hand-written `fetch` client for the nine v1 routes. It refuses redirects, sets a per-call timeout, caps response bodies at 5 MiB, and validates responses with Zod schemas written from the OpenAPI document. It returns a closed result type for HTTP and transport failures and does not throw for them, so callers inside a `credentials.use` action can classify the failure. Every call takes an `AbortSignal`.
@@ -141,7 +141,7 @@ Prerequisite state: WP7 merged.
 - `Chat` on a card switches to the `Chat` tab filtered to that coworker. With no conversation it calls `props.create(agent.id)`. With one or more it opens the first in list order. A `New chat` button always creates.
 - The chat list order is the catalog order the host returns. The host has no activity time, so the list makes no recency claim.
 - Create, Edit and Delete controls are present and disabled with the tooltip `Requires a newer Coworkers service` while `management` is false.
-- With no installation: a setup panel that names the configuration file and the variable `AGENTUI_EXTENSION_COWORKERS_TOKEN`, and notes that the service must listen on an address the host can reach.
+- With no installation: a setup panel that names the configuration file and the variable `OPENPANE_EXTENSION_COWORKERS_TOKEN`, and notes that the service must listen on an address the host can reach.
 - With an unavailable installation: the sanitized status and a `Retry` button.
 
 ### Tests and acceptance

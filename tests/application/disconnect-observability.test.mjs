@@ -18,11 +18,11 @@ const deferred = () => {
 async function fixture(t, client, api) {
   const collector = await receiver(t);
   const exports = collector.received;
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-observability-disconnect-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-observability-disconnect-'));
   const access = openAccessDatabase(join(directory, 'host.sqlite'));
   const observability = createHostObservability({ kind: 'otlp',
     endpoint: `${collector.endpoint}/v1/traces`, headers: {},
-    serviceName: 'agentui-host', datadogLlmObservability: false });
+    serviceName: 'openpane-host', datadogLlmObservability: false });
   const handler = serviceEndpoint({ client, hostId: access.hostId, api, observability,
     isClosing: () => false, ...(client === 'browser-development' ? { files: new Map() } : {}) });
   const receipts = [];
@@ -56,7 +56,7 @@ async function fixture(t, client, api) {
       return exports.flatMap(value => {
         assert.equal(value.path, '/v1/traces');
         return value.body.resourceSpans.flatMap(resource => {
-          assert.deepEqual(attributes(resource.resource.attributes), { 'service.name': 'agentui-host' });
+          assert.deepEqual(attributes(resource.resource.attributes), { 'service.name': 'openpane-host' });
           return resource.scopeSpans.flatMap(scope => scope.spans);
         });
       });
@@ -88,8 +88,8 @@ test('a browser body disconnect exports invalid admission without inventing an H
   assert.equal(responseCount, 0, 'the client received no HTTP response headers');
   assert.equal(receipt.response.headersSent, false, 'the host emitted no HTTP response headers');
   assert.equal(spans.length, 1);
-  checkSpan(spans[0], { 'agentui.operation': 'admission', 'agentui.credential_class': 'browser-development',
-    'agentui.outcome': 'invalid' }, [...f.privateValues, privateBody, privateHeader], f.exports);
+  checkSpan(spans[0], { 'openpane.operation': 'admission', 'openpane.credential_class': 'browser-development',
+    'openpane.outcome': 'invalid' }, [...f.privateValues, privateBody, privateHeader], f.exports);
 });
 
 test('a native disconnect during an admitted operation exports success without inventing an HTTP response status', { timeout: 15_000 }, async t => {
@@ -117,8 +117,8 @@ test('a native disconnect during an admitted operation exports success without i
   assert.equal(responseCount, 0, 'the client received no HTTP response headers');
   assert.equal(receipt.response.headersSent, false, 'completion must not write headers to a destroyed response');
   assert.equal(spans.length, 1);
-  checkSpan(spans[0], { 'agentui.operation': 'metadata', 'agentui.credential_class': 'native',
-    'agentui.outcome': 'ok' }, [...f.privateValues, privateBody], f.exports);
+  checkSpan(spans[0], { 'openpane.operation': 'metadata', 'openpane.credential_class': 'native',
+    'openpane.outcome': 'ok' }, [...f.privateValues, privateBody], f.exports);
 });
 
 test('written success and admission failure export their actual HTTP response statuses', { timeout: 15_000 }, async t => {
@@ -135,7 +135,7 @@ test('written success and admission failure export their actual HTTP response st
   assert.equal(spans.length, 2);
   assert.ok(f.receipts.every(receipt => receipt.response.headersSent));
   for (const [index, expected] of [
-    { 'agentui.operation': 'metadata', 'agentui.credential_class': 'native', 'agentui.outcome': 'ok', 'http.response.status_code': 200 },
-    { 'agentui.operation': 'admission', 'agentui.credential_class': 'native', 'agentui.outcome': 'invalid', 'http.response.status_code': 400 },
+    { 'openpane.operation': 'metadata', 'openpane.credential_class': 'native', 'openpane.outcome': 'ok', 'http.response.status_code': 200 },
+    { 'openpane.operation': 'admission', 'openpane.credential_class': 'native', 'openpane.outcome': 'invalid', 'http.response.status_code': 400 },
   ].entries()) checkSpan(spans[index], expected, [...f.privateValues, 'private-normal-result-15ced3'], f.exports);
 });

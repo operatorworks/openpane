@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createFrontendToolGeneration } from '@agentui/sdk/tools';
-import { ServiceError } from '@agentui/contracts/service';
-import { ServiceConnectionLost } from '@agentui/client/service';
-import { CLAUDE_SDK_RUNTIMES, CODEX_RUNTIME, CODEX_SDK_RUNTIME, PI_RUNTIME, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
+import { createFrontendToolGeneration } from '@openpane/sdk/tools';
+import { ServiceError } from '@openpane/contracts/service';
+import { ServiceConnectionLost } from '@openpane/client/service';
+import { CLAUDE_SDK_RUNTIMES, CODEX_RUNTIME, CODEX_SDK_RUNTIME, PI_RUNTIME, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
 import { applicationEnabled } from '../../apps/desktop/dist/application/application-controller.js';
 import { scope, empty, deferred, fixture } from './controller-fixture.mjs';
 
@@ -463,17 +463,17 @@ for (const outcome of ['admission-rejected', 'rejected', 'uncertain', 'accepted'
 
 test('a lost native connection during a command disables the app until an explicit reconnect', async t => {
   const f = await openCommands(t);
-  const failure = new ServiceConnectionLost('A different AgentUI host is answering on this Mac. Reconnect to switch to it.');
+  const failure = new ServiceConnectionLost('A different OpenPane host is answering on this Mac. Reconnect to switch to it.');
   f.behavior.submit = async () => { f.connectionLost(failure); throw failure; };
   await assert.rejects(f.actions.commands.send('prompt'), error => error === failure);
   const snapshot = f.app.getSnapshot();
   assert.equal(snapshot.host.kind, 'unavailable');
-  assert.match(snapshot.error, /different AgentUI host/);
+  assert.match(snapshot.error, /different OpenPane host/);
   assert.equal(applicationEnabled(snapshot), false);
   assert.equal(f.target.store.getSnapshot().connection.kind, 'disconnected');
   assert.equal(f.target.store.getSnapshot().outbox.length, 1);
   f.connectionLost(new ServiceConnectionLost('The local host connection changed. Reconnect before continuing.'));
-  assert.match(f.app.getSnapshot().error, /different AgentUI host/);
+  assert.match(f.app.getSnapshot().error, /different OpenPane host/);
   await f.app.reconnect();
   assert.equal(f.app.getSnapshot().host.kind, 'ready');
   assert.equal(applicationEnabled(f.app.getSnapshot()), true);

@@ -8,17 +8,17 @@ official `@openai/codex-sdk` 0.169.0 package. It fixes the model to
 ## Ownership
 
 Switchboard owns native SDK creation, account checks, thread start and resume,
-message normalization, cancellation, and child-process cleanup. AgentUI does
+message normalization, cancellation, and child-process cleanup. OpenPane does
 not launch an alternative native transport or implement a model loop.
 
-AgentUI owns authorization, command receipts, saved conversation bindings,
+OpenPane owns authorization, command receipts, saved conversation bindings,
 transcript replay and restart recovery. It passes a native thread identifier
 back to Switchboard only from the private saved run of that conversation.
 A separate installation and runtime format prevent accidental resumption of
 existing app-server conversations through this SDK route.
 
 The native SDK runs with a read-only sandbox and no interactive approval prompts.
-This does not promise that every native local-read tool is absent. AgentUI does
+This does not promise that every native local-read tool is absent. OpenPane does
 not display SDK tool activity or support tool approval continuations in this
 mode.
 
@@ -42,7 +42,7 @@ Run the journey with the pinned toolchain and an existing ChatGPT login:
 
 ```sh
 npm run build
-AGENTUI_CODEX_SDK_LIVE=1 node --test tests/application/codex-sdk-live.test.mjs
+OPENPANE_CODEX_SDK_LIVE=1 node --test tests/application/codex-sdk-live.test.mjs
 ```
 
 This bounded route does not qualify interactive approvals, external session

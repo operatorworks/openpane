@@ -52,13 +52,13 @@ pub struct Status {
 
 impl Configuration {
     pub fn from_environment(host: Option<&tauri::Url>) -> Option<Self> {
-        let capability = std::env::var("AGENTUI_SETUP_CAPABILITY").ok();
-        let profile = std::env::var("AGENTUI_SETUP_PROFILE").ok();
-        let target = std::env::var("AGENTUI_SETUP_TARGET").ok();
+        let capability = std::env::var("OPENPANE_SETUP_CAPABILITY").ok();
+        let profile = std::env::var("OPENPANE_SETUP_PROFILE").ok();
+        let target = std::env::var("OPENPANE_SETUP_TARGET").ok();
         for name in [
-            "AGENTUI_SETUP_CAPABILITY",
-            "AGENTUI_SETUP_PROFILE",
-            "AGENTUI_SETUP_TARGET",
+            "OPENPANE_SETUP_CAPABILITY",
+            "OPENPANE_SETUP_PROFILE",
+            "OPENPANE_SETUP_TARGET",
         ] {
             std::env::remove_var(name);
         }
@@ -93,7 +93,7 @@ impl Configuration {
         Some(Self {
             endpoint,
             capability,
-            service: format!("homes.birb.agentui.provider.opencode-go.v1.{profile}"),
+            service: format!("homes.birb.openpane.provider.opencode-go.v1.{profile}"),
             target,
         })
     }
@@ -272,7 +272,7 @@ mod tests {
         assert_eq!(first.endpoint.as_str(), "http://127.0.0.1:12500/setup/pi");
         assert_eq!(
             first.service,
-            "homes.birb.agentui.provider.opencode-go.v1.profile-1"
+            "homes.birb.openpane.provider.opencode-go.v1.profile-1"
         );
         for host in [
             "http://localhost:12500/browser.html",
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn saved_key_is_encrypted_in_a_separate_keychain_item_and_never_returned() {
         let directory =
-            std::env::temp_dir().join(format!("agentui-pi-keychain-{}", Uuid::new_v4()));
+            std::env::temp_dir().join(format!("openpane-pi-keychain-{}", Uuid::new_v4()));
         std::fs::create_dir(&directory).unwrap();
         let handle = CreateOptions::new()
             .password(&Uuid::new_v4().to_string())
@@ -408,7 +408,7 @@ mod tests {
             .unwrap();
         let store = Keychain {
             handle: handle.clone(),
-            service: format!("agentui-pi-test-{}", Uuid::new_v4()),
+            service: format!("openpane-pi-test-{}", Uuid::new_v4()),
         };
         let marker = "synthetic-pi-keychain-marker";
         let intended = Some(marker.as_bytes().to_vec());
@@ -436,7 +436,7 @@ mod tests {
         let public = serde_json::to_string(&status).unwrap();
         assert!(!public.contains(marker));
         assert!(public.contains("saved"));
-        assert_ne!(configuration().service, "homes.birb.agentui.native.v1");
+        assert_ne!(configuration().service, "homes.birb.openpane.native.v1");
         {
             let _lock = crate::keychain::INTERACTION.lock().unwrap();
             unsafe {

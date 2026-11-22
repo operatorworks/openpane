@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
-import { SERVICE_MAX_RESPONSE_BYTES } from '@agentui/contracts/service';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { SERVICE_MAX_RESPONSE_BYTES } from '@openpane/contracts/service';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { projection, events, scope as textScope, snapshot as textSnapshot } from './support.mjs';
 import { createServiceConnection } from '../../packages/client/dist/service-engine.js';
-import { ServiceConnectionLost, ServiceError, ServiceProtocolError } from '@agentui/client/service';
+import { ServiceConnectionLost, ServiceError, ServiceProtocolError } from '@openpane/client/service';
 
 const scope = { hostId: 'host', conversationId: 'conversation' };
 const snapshot = { kind: 'snapshot', snapshot: { scope, projectionVersion: 4, cursor: 0,

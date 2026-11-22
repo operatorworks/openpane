@@ -1,4 +1,4 @@
-import type { Event } from '@agentui/protocol';
+import type { Event } from '@openpane/protocol';
 import type { AguiModel } from './extensions.js';
 import type { ConversationRef } from './providers.js';
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { frontendToolsFor } from '@agentui/host/frontend-tools';
+import { frontendToolsFor } from '@openpane/host/frontend-tools';
 import { SqliteStore } from '../../../packages/host/dist/sqlite-store.js';
 import { budgets } from '../../../packages/host/dist/durable-model.js';
 import { createFrontendCoordinator, prepareFrontendRegistration, prepareFrontendObservation } from '../../../packages/host/dist/frontend-tools/coordinator.js';
@@ -164,9 +164,9 @@ test('failed initialization closes its database and a valid store still opens', 
 });
 
 test('coordinator transaction seam is absent from package exports', async () => {
-  for (const path of ['@agentui/host/sqlite-store', '@agentui/host/frontend-tools/coordinator']) {
+  for (const path of ['@openpane/host/sqlite-store', '@openpane/host/frontend-tools/coordinator']) {
     await assert.rejects(import(path), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
   }
-  const publicTools = await import('@agentui/host/frontend-tools');
+  const publicTools = await import('@openpane/host/frontend-tools');
   assert.deepEqual(Object.keys(publicTools), ['frontendToolsFor']);
 });

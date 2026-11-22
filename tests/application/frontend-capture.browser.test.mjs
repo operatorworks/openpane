@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { registerHooks } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
 import { chromium } from 'playwright';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { crew, crewBackend, crewPresentation } from '../extensions/providers/contracts/crew.ts';
 import { repository, buildCustom, root } from '../customization/build/support.mjs';
 import { connected, draft, wait } from './browser-support.mjs';
@@ -21,14 +21,14 @@ registerHooks({ resolve(specifier, context, next) {
 const { startBrowserHost } = await import('../../apps/host/build/tsc/server.js');
 async function records(page) {
   return page.evaluate(async () => {
-    const opening = indexedDB.open('agentui-browser-views', 1);
+    const opening = indexedDB.open('openpane-browser-views', 1);
     const db = await new Promise((resolve, reject) => { opening.onsuccess = () => resolve(opening.result); opening.onerror = () => reject(opening.error); });
     try { const request = db.transaction('records').objectStore('records').getAll(); return await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
     finally { db.close(); }
   });
 }
 async function setup(t) {
-  const custom = repository(), directory = mkdtempSync(join(tmpdir(), 'agentui-captured-browser-'));
+  const custom = repository(), directory = mkdtempSync(join(tmpdir(), 'openpane-captured-browser-'));
   t.after(() => { rmSync(custom.directory, { recursive: true, force: true }); rmSync(directory, { recursive: true, force: true }); });
   custom.write('desktop/index.tsx', readFileSync(join(root, 'tests/application/fixtures/frontend-capture.tsx'), 'utf8'));
   const commit = custom.commit(); buildCustom(custom, commit);
@@ -95,19 +95,19 @@ test('committed production browser captures both actual send paths and retains o
   assert.deepEqual(f.inputs[0].tools.slice(1), original.command.body.frontend.tools.map(tool => tool.definition));
   assert.deepEqual(f.inspect(db => JSON.parse(db.prepare('SELECT target FROM commands WHERE id=?').get(original.command.clientCommandId).target).operation.request), f.inputs[0]);
   await page.getByRole('status').filter({ hasText: 'Waiting for confirmed run' }).waitFor();
-  const originalView = await page.evaluate(() => sessionStorage.getItem('agentui.viewId'));
+  const originalView = await page.evaluate(() => sessionStorage.getItem('openpane.viewId'));
   const other = await f.context.newPage(); await other.goto(`${f.host.origin}/browser.html`);
   await other.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(other);
-  const otherView = await other.evaluate(() => sessionStorage.getItem('agentui.viewId'));
+  const otherView = await other.evaluate(() => sessionStorage.getItem('openpane.viewId'));
   await other.getByRole('button', { name: `Reopen saved view ${originalView}`, exact: true }).click();
   await other.getByRole('alert').filter({ hasText: 'already open in another tab' }).waitFor();
   await other.close();
   await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
   await page.getByRole('button', { name: 'Chats', exact: true }).click();
   await page.getByRole('button', { name: `Reopen saved view ${otherView}`, exact: true }).click(); await connected(page);
-  assert.ok((await page.evaluate(() => navigator.locks.query())).held.some(lock => lock.name === `agentui-view:${originalView}`));
+  assert.ok((await page.evaluate(() => navigator.locks.query())).held.some(lock => lock.name === `openpane-view:${originalView}`));
   await page.getByRole('button', { name: `Reopen saved view ${originalView}`, exact: true }).click(); await connected(page);
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('agentui.viewId')), originalView);
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('openpane.viewId')), originalView);
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Composer capture');
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -218,12 +218,12 @@ test('production browser switches recovery views and releases the old lock befor
   const f = await setup(t), { page } = f, requests = [];
   await f.create(); await draft(page, 'Original physical view'); await page.getByRole('button', { name: 'Send', exact: true }).click();
   await wait(() => f.inputs.length === 1, 'original view dispatch');
-  const oldView = await page.evaluate(() => sessionStorage.getItem('agentui.viewId'));
+  const oldView = await page.evaluate(() => sessionStorage.getItem('openpane.viewId'));
   const original = (await records(page)).flatMap(row => row.frontendSends ?? [])[0];
   const other = await f.context.newPage(); await other.goto(`${f.host.origin}/browser.html`);
   await f.create(other); await draft(other, 'Next physical view'); await other.getByRole('button', { name: 'Send', exact: true }).click();
   await wait(() => f.inputs.length === 2, 'next view dispatch');
-  const nextView = await other.evaluate(() => sessionStorage.getItem('agentui.viewId'));
+  const nextView = await other.evaluate(() => sessionStorage.getItem('openpane.viewId'));
   const successor = (await records(page)).flatMap(row => row.frontendSends ?? []).find(row => row.command.clientCommandId !== original.command.clientCommandId);
   await other.route('**/api/v1', async route => {
     const request = route.request().postDataJSON();
@@ -253,8 +253,8 @@ test('production browser switches recovery views and releases the old lock befor
   const nextRequest = page.waitForRequest(request => request.postDataJSON()?.op === 'frontend-binding' && request.postDataJSON()?.id === successor.command.clientCommandId, { timeout: 5_000 });
   await page.getByRole('button', { name: `Reopen saved view ${nextView}`, exact: true }).click();
   await nextRequest; await connected(page);
-  await page.waitForFunction(async id => !(await navigator.locks.query()).held.some(lock => lock.name === `agentui-view:${id}`), oldView, { timeout: 5_000 });
-  assert.equal(await page.evaluate(id => navigator.locks.request(`agentui-view:${id}`, { ifAvailable: true }, lock => Boolean(lock)), oldView), true);
+  await page.waitForFunction(async id => !(await navigator.locks.query()).held.some(lock => lock.name === `openpane-view:${id}`), oldView, { timeout: 5_000 });
+  assert.equal(await page.evaluate(id => navigator.locks.request(`openpane-view:${id}`, { ifAvailable: true }, lock => Boolean(lock)), oldView), true);
   const before = (await records(page)).flatMap(row => row.frontendSends ?? []);
   releaseOld();
   await wait(() => f.inspect(db => db.prepare('SELECT state FROM frontend_send_owners WHERE command_id=?').get(original.command.clientCommandId).state) === 'unavailable', 'late original host response');

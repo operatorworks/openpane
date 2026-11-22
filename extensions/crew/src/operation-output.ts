@@ -1,4 +1,4 @@
-import type { Json } from '@agentui/contracts';
+import type { Json } from '@openpane/contracts';
 
 // The outputs of `members.list` and `members.create`, shared by the server operation and the desktop workspace. No node or Crew imports: the
 // desktop bundle imports this module. Type aliases, not interfaces, so the outputs are assignable to `Json`.

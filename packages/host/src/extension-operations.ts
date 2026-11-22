@@ -1,6 +1,6 @@
-import { record } from '@agentui/contracts/decode';
-import { parseExtensionCallValue } from '@agentui/contracts/service';
-import type { ExtensionCallFailure, ExtensionCallValue } from '@agentui/contracts/service';
+import { record } from '@openpane/contracts/decode';
+import { parseExtensionCallValue } from '@openpane/contracts/service';
+import type { ExtensionCallFailure, ExtensionCallValue } from '@openpane/contracts/service';
 
 /** The host replies to an extension operation within this many milliseconds of admission. */
 export const EXTENSION_OPERATION_DEADLINE_MS = 15_000;
