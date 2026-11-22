@@ -42,6 +42,10 @@ The other families are `--aui-space-*`, `--aui-radius-*`, `--aui-leading-*`, `--
 `ThemeScope` applies them automatically.
 The stylesheet contract test checks every theme variable reference against the emitted variables.
 
+## Application palettes
+
+Desktop Settings stores appearance choices and imported light/dark palette pairs separately from executable UI. Pass a paired `palette` to `ThemeScope` to select its map after resolving appearance; `colors` remains a single-map module override. A scope accepts one input or the other. The application keeps builtin navigation, Settings and recovery outside selected content palettes. See the [customization guide](../extensions/customization-guide.md) for the V1 file contract and origin-local persistence/recovery.
+
 ## Native modules
 
 Import `Button`, `Text`, `Surface`, `TextField`, and `ThemeProvider` from `@openpane/ui-primitives/native`.

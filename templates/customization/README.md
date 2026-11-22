@@ -80,7 +80,7 @@ An activation can add `overrides: { transcript: MyTranscript }` alongside its re
 `MyTranscript` receives `ConversationModuleProps`, including current conversation scope, activity, and captured commands.
 See the [SDK transcript example](../../docs/architecture/extension-sdk.md#contribute-conversation-views-and-actions).
 Only transcript presentation changes. The ordinary composer, approvals, Stop, and recovery remain available.
-The host retains the default transcript while selected activations or a lazy override load, and reports a conflict if multiple namespaces claim it.
+In automatic mode, the host retains the default transcript while selected activations or a lazy override load, and reports a conflict if multiple namespaces claim it. Settings also supports builtin or one explicit namespace; an unavailable explicit choice retains builtin presentation without selecting another claimant.
 A failed namespace is disposed once. Restore default view removes all presentation contributions and preserves the draft.
 
 ### Arrange transcript and modules
@@ -89,8 +89,8 @@ To replace only command and file presentation, return `overrides: { activity: My
 Its `ConversationActivityProps` adds readonly `updates` with `connected`, `reconnecting` or `paused` to the ordinary module context.
 Native messages, Markdown and sent images remain host-owned. A selected whole transcript takes precedence over this activity slot.
 
-The template returns `contentLayout: ReviewLayout`. Its `ConversationContentLayoutProps` contains only the host-created `transcript` and `modules` nodes.
+The template claims no global layout. To opt in, return `contentLayout: YourLayout`. Its `ConversationContentLayoutProps` contains only the host-created `transcript` and `modules` nodes.
 The transcript includes any selected transcript override. Render each node once with ordinary React and CSS.
 This desktop arrangement keeps permissions, approvals, the composer, Stop, and recovery under their existing host owners.
-Omit `contentLayout` to use the transcript-then-modules stack. A suspended layout temporarily shows native activity while custom transcript and module views, actions, and namespace diagnostics wait.
+Omit `contentLayout` to keep the native transcript and show modules under Conversation tools in Extensions. A suspended layout temporarily shows native activity while custom transcript and module views, actions, and namespace diagnostics wait.
 SDK compatibility is `0.13.0` and requires an exact match in both the manifest and loaded entry. Rebuild older extensions.
