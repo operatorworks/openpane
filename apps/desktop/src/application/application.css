@@ -11,7 +11,7 @@
 .eyebrow { font-size: .7rem; letter-spacing: .12em; color: var(--aui-color-accent); }
 .scope-label { color: var(--aui-color-muted); font-size: .75rem; overflow-wrap: anywhere; }
 .progress-label { display: block; font-size: .75rem; margin-top: .8rem; color: var(--aui-color-muted); }
-.empty-state, .empty-workspace > p:last-child { color: var(--aui-color-muted); line-height: 1.6; }
+.empty-state { color: var(--aui-color-muted); line-height: 1.6; }
 .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .decision-card, .permissions-panel, .outbox { padding: 1.25rem; margin-top: 1.5rem; border: 1px solid var(--aui-color-border); border-radius: .8rem; }
 .decision-card h2, .permissions-panel h2, .outbox h2 { margin-top: 0; font-size: 1rem; }
@@ -146,9 +146,6 @@
 .continuation-boundary { align-self: stretch; margin: 0; padding: 10px 0; border-top: 1px solid var(--aui-color-border); border-bottom: 1px solid var(--aui-color-border); color: var(--aui-color-muted); font-size: 12px; line-height: 1.5; }
 .continuation-choices p { margin: 8px 0 0; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-.empty-workspace { padding: 24px; max-width: 38rem; justify-content: center; }
-.empty-workspace .eyebrow { font-size: 11px; }
-.empty-workspace h1 { font-size: 28px; }
 .desktop-shell:has(.application-controls) .shell-footer { grid-column: 2; grid-row: 3; padding: 4px 24px; border: 0; font-size: 10px; }
 @media (max-width: 760px) {
   .desktop-shell:has(.application-controls) { grid-template-columns: 180px minmax(0, 1fr); }
@@ -256,8 +253,6 @@
 .composer-picker-option small { font-size: 10px; line-height: 1.4; color: var(--aui-color-muted); }
 .composer-picker-option .picker-check { position: absolute; right: 9px; top: 10px; }
 .conversation-panel .composer-setting:focus-visible, .conversation-panel .composer-picker button:focus-visible { outline: 2px solid var(--aui-color-accent); outline-offset: 2px; }
-.empty-composer { margin-top: 24px; }
-.empty-composer > p { margin: 0 0 12px; color: var(--aui-color-muted); font-size: 13px; }
 @media (max-width: 760px) {
   .composer-footer > .composer-agent-controls { flex-basis: 100%; }
   .composer-footer > .composer-add + .composer-agent-controls { flex-basis: calc(100% - 40px); }
@@ -309,10 +304,21 @@
 .conversation-panel[data-empty="true"] { justify-content: center; justify-content: safe center; }
 .conversation-panel[data-empty="true"] .conversation-content { flex: none; min-height: 0; }
 .conversation-panel[data-empty="true"] .transcript { padding: 0; min-height: 0; }
-.conversation-greeting { flex: none; margin: 0 0 16px; text-align: center; font-size: 22px; font-weight: 500; color: var(--aui-color-text); }
 .conversation-panel .permissions-panel { padding: 10px 12px; margin-top: 8px; }
 .conversation-tools { margin-top: 28px; }
 .conversation-tools h2 { margin: 0 0 4px; font-size: 15px; }
 .conversation-tools > p { margin: 0 0 12px; color: var(--aui-color-muted); font-size: 12px; overflow-wrap: anywhere; }
 .extensions-panel .customization-panel { max-height: none; overflow: visible; padding: 0 0 8px; }
 .extensions-panel .customization-modules button { padding: 6px 12px; border: 1px solid var(--aui-color-border); border-radius: 8px; background: var(--aui-color-raised); color: inherit; font: inherit; cursor: pointer; }
+
+/* The new-conversation screen draws the same greeting and composer as an empty conversation. Starting a conversation
+   swaps the two in one view transition, so the composer and greeting keep their identity and morph into place. */
+.new-conversation-note { flex: none; margin: 0 0 16px; text-align: center; color: var(--aui-color-muted); font-size: 13px; line-height: 1.5; }
+.conversation-panel .conversation-greeting { flex: none; margin: 0 0 16px; font-size: 22px; font-weight: 500; line-height: 1.3; text-align: center; color: var(--aui-color-text); }
+[data-morphing] .conversation-panel .composer { view-transition-name: conversation-composer; }
+[data-morphing] .conversation-panel .conversation-greeting { view-transition-name: conversation-greeting; }
+::view-transition-group(conversation-composer) { animation-duration: 320ms; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
+::view-transition-old(conversation-greeting) { animation-duration: 180ms; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none; }
+}

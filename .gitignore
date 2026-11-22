@@ -13,3 +13,4 @@ apps/ios/native/ios/OpenPane.xcworkspace/
 apps/ios/native/ios/.xcode.env.local
 apps/ios/native/.work/
 apps/ios/native/ios/**/xcuserdata/
+.agents/plans/
