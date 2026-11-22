@@ -47,6 +47,10 @@
     "./extensions": {
       "types": "./dist/extensions/index.d.ts",
       "import": "./dist/extensions/index.js"
+    },
+    "./images": {
+      "types": "./dist/image-input.d.ts",
+      "import": "./dist/image-input.js"
     }
   },
   "files": [

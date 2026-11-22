@@ -3,7 +3,7 @@ import { recordedInstallation } from '@openpane/host/recorded';
 const recordedAgentId = describeAgent(recordedInstallation, { kind: 'ready' }, { kind: 'unsupported', reason: 'Recorded text-only fixture.' }).id;
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, watch } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -256,14 +256,15 @@ test('SIGTERM during playback retains exclusive process ownership until the acce
   const f = await fixture(t), alice = await f.client();
   const scope = { hostId: f.hostId, conversationId: 'shutdown-drain' }, intent = command(scope);
   await f.ok({ op: 'create', agentId: recordedAgentId, scope }, alice.cookie);
-  const acceptance = deferred(), path = join(f.directory, 'recorded.jsonl');
-  const watcher = watch(f.directory, () => {
-    if (existsSync(path) && readFileSync(path, 'utf8').trim()) acceptance.resolve();
-  });
-  t.after(() => watcher.close());
+  const path = join(f.directory, 'recorded.jsonl');
   const submitted = f.begin({ op: 'submit', command: intent }, alice.cookie);
-  await acceptance.promise;
-  watcher.close();
+  const deadline = Date.now() + 5000;
+  // Directory notifications on macOS may arrive after the 540ms playback has finished.
+  // Observe the durable acceptance itself before disconnecting during playback.
+  while (!existsSync(path) || !readFileSync(path, 'utf8').trim()) {
+    assert.ok(Date.now() < deadline, 'recorded command was durably accepted');
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
   const lostReply = assert.rejects(submitted.response, /Client disconnected/);
   submitted.disconnect();
   await lostReply;

@@ -41,3 +41,8 @@ export type { ConversationPermission, ConversationPermissions, PermissionScope }
 export * from './frontend-sends.js';
 
 export * from './output.js';
+
+export * from './experience.js';
+export * from './experience-schema.js';
+export * from './metrics-card.js';
+export * from './ui-state.js';

@@ -13,10 +13,10 @@ export type ObservabilityConfiguration =
   | { readonly kind: 'otlp'; readonly endpoint: string; readonly headers: Readonly<Record<string, string>>; readonly serviceName: string;
       readonly datadogLlmObservability: boolean };
 
-export type ClientKind = 'browser-development' | 'native';
+export type ClientKind = 'browser-development' | 'native' | 'local-ui';
 
 export type RequestObservation = {
-  readonly operation: ServiceRequest['op'] | 'admission';
+  readonly operation: ServiceRequest['op'] | 'admission' | 'ui';
   readonly client: ClientKind;
   readonly outcome: 'ok' | ServiceFailureKind;
   readonly startTime: number;

@@ -86,16 +86,16 @@ export function ComposerAgentControls({ agents, agent, hasConversation, enabled,
   return <div className="composer-agent-controls" ref={root} role="group" aria-label="Chat settings" onBlur={event => {
     if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) close();
   }}>
-    <button type="button" className="composer-setting" aria-label={`Harness, ${agent ? harnessLabels[currentHarness] : 'Select harness'}`} aria-expanded={open && picker.kind === 'harness'} aria-controls={id} aria-haspopup="dialog" disabled={!enabled} onClick={event => {
+    <button data-openpane-part="button" type="button" className="composer-setting" aria-label={`Harness, ${agent ? harnessLabels[currentHarness] : 'Select harness'}`} aria-expanded={open && picker.kind === 'harness'} aria-controls={id} aria-haspopup="dialog" disabled={!enabled} onClick={event => {
       trigger.current = event.currentTarget;
       setPicker(previous => previous.kind === 'harness' ? { kind: 'closed' } : { kind: 'harness' });
     }}>{agent ? harnessLabels[currentHarness] : 'Harness'}<Chevron /></button>
-    <button type="button" className="composer-setting" aria-label={`Model, ${currentModel}`} aria-expanded={open && picker.kind === 'model'} aria-controls={id} aria-haspopup="dialog" disabled={!enabled || !agent} onClick={event => {
+    <button data-openpane-part="button" type="button" className="composer-setting" aria-label={`Model, ${currentModel}`} aria-expanded={open && picker.kind === 'model'} aria-controls={id} aria-haspopup="dialog" disabled={!enabled || !agent} onClick={event => {
       trigger.current = event.currentTarget;
       setPicker(previous => previous.kind === 'model' ? { kind: 'closed' } : { kind: 'model', harness: currentHarness });
     }}>{currentModel}<Chevron /></button>
     {open && <div id={id} ref={dialog} className="composer-picker" role="dialog" aria-label={picker.kind === 'harness' ? 'Choose harness' : 'Choose model'} tabIndex={-1}>
-      <div className="composer-picker-heading"><strong>{picker.kind === 'harness' ? 'Harness' : 'Select model'}</strong><button type="button" aria-label="Close chat settings" onClick={() => close(true)}>×</button></div>
+      <div className="composer-picker-heading"><strong>{picker.kind === 'harness' ? 'Harness' : 'Select model'}</strong><button data-openpane-part="button" type="button" aria-label="Close chat settings" onClick={() => close(true)}>×</button></div>
       {picker.kind === 'harness' && <p>{hasConversation ? 'Choosing a different harness starts a new chat. Your draft stays here.' : 'Choose a harness to start a new chat.'}</p>}
       <div className="composer-picker-options">
         {picker.kind === 'harness' ? groups.map(kind => {
@@ -104,7 +104,7 @@ export function ComposerAgentControls({ agents, agent, hasConversation, enabled,
           const unavailable = entries.find(entry => entry.availability.kind === 'unavailable');
           const reason = unavailable?.availability.kind === 'unavailable' ? unavailable.availability.reason : 'Not configured on this host';
           const setup = kind === 'pi' && !ready ? onSetupPi : undefined;
-          return <button type="button" key={kind} className="composer-picker-option" disabled={!ready && !setup} aria-label={`${harnessLabels[kind]}${ready ? '' : setup ? ', set up OpenCode Go' : ', unavailable'}`} title={ready ? undefined : reason} onClick={() => {
+          return <button data-openpane-part="button" type="button" key={kind} className="composer-picker-option" disabled={!ready && !setup} aria-label={`${harnessLabels[kind]}${ready ? '' : setup ? ', set up OpenCode Go' : ', unavailable'}`} title={ready ? undefined : reason} onClick={() => {
             if (setup) { close(); setup(); }
             else setPicker({ kind: 'model', harness: kind });
           }}>
@@ -114,7 +114,7 @@ export function ComposerAgentControls({ agents, agent, hasConversation, enabled,
           const selected = entry.id === selectedChoiceId;
           const current = hasConversation && selected;
           const ready = entry.availability.kind === 'ready';
-          return <button type="button" key={entry.id} className="composer-picker-option" disabled={!ready || current} aria-label={current ? `${entry.label}, current model` : `Start new chat with ${entry.label}`} aria-current={selected ? 'true' : undefined} title={entry.availability.kind === 'unavailable' ? entry.availability.reason : entry.label !== model(entry) ? entry.label : undefined} onClick={() => {
+          return <button data-openpane-part="button" type="button" key={entry.id} className="composer-picker-option" disabled={!ready || current} aria-label={current ? `${entry.label}, current model` : `Start new chat with ${entry.label}`} aria-current={selected ? 'true' : undefined} title={entry.availability.kind === 'unavailable' ? entry.availability.reason : entry.label !== model(entry) ? entry.label : undefined} onClick={() => {
             close();
             onStartConversation(entry.id);
           }}>

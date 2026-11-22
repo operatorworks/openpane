@@ -5,9 +5,9 @@ const ThemeContext = createContext<Theme | undefined>(undefined);
 export interface ThemeProviderProps extends ThemeOptions {
   readonly children?: ReactNode;
 }
-export function ThemeProvider({ children, appearance, reducedMotion, colors }: ThemeProviderProps) {
+export function ThemeProvider({ children, appearance, reducedMotion, colors, spacing, radius, typography, fonts, treatments, chart }: ThemeProviderProps) {
   const parent = useContext(ThemeContext);
-  const value = useMemo(() => createTheme({ appearance, reducedMotion, colors }, parent), [parent, appearance, reducedMotion, colors]);
+  const value = useMemo(() => createTheme({ appearance, reducedMotion, colors, spacing, radius, typography, fonts, treatments, chart }, parent), [parent, appearance, reducedMotion, colors, spacing, radius, typography, fonts, treatments, chart]);
   return <ThemeContext value={value}>{children}</ThemeContext>;
 }
 export function useTheme(): Theme {

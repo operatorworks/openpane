@@ -17,3 +17,11 @@ reqwest = { version = "=0.13.5", default-features = false, features = ["blocking
 [dev-dependencies]
 core-foundation = "=0.10.1"
 uuid = { version = "=1.29.2", features = ["v4"] }
+
+[features]
+experience-probe = []
+
+[[bin]]
+name = "experience-probe"
+path = "../../../tests/desktop/experience-probe/native.rs"
+required-features = ["experience-probe"]

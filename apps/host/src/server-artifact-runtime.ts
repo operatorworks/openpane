@@ -8,4 +8,3 @@ export function serverArtifactExpectation(artifactId: string): ServerArtifactExp
   return { artifactId, sdkVersion: EXTENSION_SDK_VERSION, nodeVersion: process.versions.node,
     nodeModules: process.versions.modules, abiIdentity: OPENPANE_SERVER_CUSTOMIZATION_ABI };
 }
-export function serverArtifactSdk(): string { return new URL('./sdk.js', import.meta.url).href; }

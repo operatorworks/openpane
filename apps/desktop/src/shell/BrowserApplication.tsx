@@ -1,3 +1,4 @@
+import { useExperience } from '../application/experience-state.js';
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { DesktopShell } from './Shell.js';
@@ -102,7 +103,8 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const customizationsOn = children === undefined && customizationEnabled;
   const selectedPalette = preferences.palette;
   const paletteResource = selectedPalette.kind === 'imported' ? personalization.saved?.palettes.find(item => item.digest === selectedPalette.digest && item.kind === 'ready') : undefined;
-  const contentPalette = paletteResource?.kind === 'ready' ? paletteResource.document.colors : palettes;
+  const experience = useExperience();
+  const contentPalette = experience ? { light: { ...palettes.light, ...experience.manifest.theme.light.colors }, dark: { ...palettes.dark, ...experience.manifest.theme.dark.colors } } : paletteResource?.kind === 'ready' ? paletteResource.document.colors : palettes;
   const custom = useDesktopCustomizations({ customizations: customization, sink: controller.frontendGenerations, enabled: customizationsOn,
     disabledNamespaces: preferences.ui.disabledNamespaces, slots: preferences.ui.slots, loading: personalization.readiness === 'loading' });
   const [recoveryChoice, setRecoveryChoice] = useState<{ scopeKey: string; agentId: string } | null>(null);
@@ -239,7 +241,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
       </div>
       {creationRecovery}
       <ConversationSearch controller={controller} connectionKey={searchConnection} enabled={enabled} active={app.active?.scope ?? null}>
-      {app.catalog.items.length > 0 && <nav className="conversation-catalog" aria-label="Host conversations">
+      {app.catalog.items.length > 0 && <nav className="conversation-catalog" data-openpane-part="chat-directory" aria-label="Host conversations">
         {app.catalog.items.map(({ scope, preview }) => {
           const label = conversationLabel({ scope, preview });
           return <button key={scope.conversationId} disabled={!enabled}
@@ -249,7 +251,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
         })}
         {app.catalog.after !== null && <button disabled={!enabled} onClick={() => void controller.moreConversations()}>More conversations</button>}
       </nav>}
-      {(app.savedViews.items.length > 0 || app.savedViews.after !== null) && <nav className="conversation-catalog" aria-label="Saved local views">
+      {(app.savedViews.items.length > 0 || app.savedViews.after !== null) && <nav className="conversation-catalog" data-openpane-part="chat-directory" aria-label="Saved local views">
         {app.savedViews.items.map(viewId => <button key={viewId} disabled={!enabled} onClick={() => void controller.reopenView(viewId)}>Reopen saved view {viewId}</button>)}
         {app.savedViews.after !== null && <button disabled={!enabled} onClick={() => void controller.moreSavedViews()}>More saved views</button>}
       </nav>}
@@ -285,20 +287,20 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   // On the rail, outside the keyed conversation and outside the chats pane the shell hides while a workspace is open.
   const continuationStatus = <div id="continuation-status" className="visually-hidden" aria-live="polite" aria-atomic="true">
     {continuationAnnouncement(app.continuation, app.observation?.status.kind === 'concluded')}</div>;
-  const rail = <nav className="view-rail" aria-label="Workspace views">
+  const rail = <nav className="view-rail" data-openpane-part="page-rail" aria-label="Workspace views">
     {continuationStatus}
-    <button type="button" aria-label="Chats" title="Chats" aria-pressed={selectedView === 'chats'} onClick={() => setSelectedView('chats')}>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3v-9.5A7.5 7.5 0 0 1 9.5 5H12"/><path d="M16 5h6m-3-3v6"/></svg>
+    <button type="button" data-openpane-essential="chats" data-openpane-part="button" aria-label="Chats" title="Chats" aria-pressed={selectedView === 'chats'} onClick={() => setSelectedView('chats')}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3v-9.5A7.5 7.5 0 0 1 9.5 5H12"/><path d="M16 5h6m-3-3v6"/></svg>{experience?.manifest.presentation.navigation === 'pages' && <span className="page-label">Chats</span>}
     </button>
-    <button type="button" aria-label="Extensions" title="Extensions" aria-pressed={selectedView === 'extensions'} onClick={() => setSelectedView('extensions')}>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><path d="M17.25 13.5v7.5M13.5 17.25H21"/></svg>
+    <button type="button" data-openpane-essential="extensions" data-openpane-part="button" aria-label="Extensions" title="Extensions" aria-pressed={selectedView === 'extensions'} onClick={() => setSelectedView('extensions')}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><path d="M17.25 13.5v7.5M13.5 17.25H21"/></svg>{experience?.manifest.presentation.navigation === 'pages' && <span className="page-label">Extensions</span>}
     </button>
-    <button type="button" className="settings-view-button" aria-label="Settings" title="Settings" aria-pressed={selectedView === 'settings'} onClick={() => setSelectedView('settings')}>
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h4m4 0h8M4 12h8m4 0h4M4 18h2m4 0h10"/><circle cx="10" cy="6" r="2"/><circle cx="14" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></svg>
+    <button type="button" data-openpane-essential="settings" data-openpane-part="button" className="settings-view-button" aria-label="Settings" title="Settings" aria-pressed={selectedView === 'settings'} onClick={() => setSelectedView('settings')}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h4m4 0h8M4 12h8m4 0h4M4 18h2m4 0h10"/><circle cx="10" cy="6" r="2"/><circle cx="14" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></svg>{experience?.manifest.presentation.navigation === 'pages' && <span className="page-label">Settings</span>}
     </button>
   </nav>;
   if (personalization.readiness === 'loading') return <ThemeScope><p role="status">Loading local preferences…</p></ThemeScope>;
-  return <DesktopShell appearance={preferences.appearance === 'system' ? undefined : preferences.appearance} onRestoreAppearance={() => void personalizationSession.resetAppearance()} navigation={rail} activeView={selectedView} protectedContent={controls} defaultView={views} settingsView={settings}
+  return <DesktopShell experience={experience?.manifest} contentPalette={experience ? contentPalette : undefined} appearance={experience ? experience.manifest.theme.mode === 'system' ? undefined : experience.manifest.theme.mode : preferences.appearance === 'system' ? undefined : preferences.appearance} onRestoreAppearance={() => void personalizationSession.resetAppearance()} navigation={rail} activeView={selectedView} protectedContent={controls} defaultView={views} settingsView={settings}
     extensionsView={extensionsView} workspaceOpen={workspaceOpen} restoreMode={children === undefined ? 'managed' : 'remount'}
     onRestore={() => { void personalizationSession.restoreDefaultView(); setSelectedView('chats'); }}
     status={app.active ? <ConversationStatus active={app.active} /> : 'No conversation open'}

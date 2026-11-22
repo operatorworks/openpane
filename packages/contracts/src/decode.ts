@@ -38,3 +38,9 @@ export function utf8Bytes(value: string): number {
   }
   return bytes;
 }
+
+export function boundedText(value: unknown, max: number): string {
+  const text = nonempty(value);
+  if ([...text].length > max) throw new Error('Text exceeds character limit');
+  return text;
+}

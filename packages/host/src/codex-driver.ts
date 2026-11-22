@@ -19,6 +19,7 @@ import { messageParts } from './transcript-parts.js';
 
 export type CodexTranscriptEvent = TranscriptEvent;
 export interface CodexDriverOptions {
+  readonly uiContext?: (scope: ConversationScope) => string;
   readonly cwd: string;
   readonly version: string;
   readonly append: (scope: ConversationScope, output: HostOutput<CodexTranscriptEvent>) => void;
@@ -326,7 +327,8 @@ export function createCodexDriver(options: CodexDriverOptions): CodexDriver {
         image = { attachment, item: { type: 'image', url: `data:${attachment.mediaType};base64,${Buffer.from(bytes).toString('base64')}` } };
       } catch { return { kind: 'not-dispatched', reason: 'This image could not be read. Attach it again.' }; }
     }
-    const input = [...(command.body.text ? [{ type: 'text', text: command.body.text, text_elements: [] }] : []), ...(image ? [image.item] : [])];
+    const uiContext = options.uiContext?.(command.scope);
+    const input = [...(uiContext ? [{ type: 'text', text: uiContext, text_elements: [] }] : []), ...(command.body.text ? [{ type: 'text', text: command.body.text, text_elements: [] }] : []), ...(image ? [image.item] : [])];
     busy.add(key);
     let turn: ActiveTurn | null = null;
     let method = 'initialize';

@@ -1,10 +1,14 @@
+import { UiStore } from './ui-store.js';
+import { startUiControl } from './ui-control.js';
+import { UiRefusal } from './ui-protocol.js';
+import { uiEndpoint } from './ui-endpoint.js';
 import { createServer } from 'node:http';
 import { createPiSetup, piSetupEndpoint } from './pi-setup.js';
 import type { PiSetup } from './pi-setup.js';
 import { execFile } from 'node:child_process';
 import { stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import type { ConversationScope } from '@openpane/contracts';
 import { canonicalJson } from '@openpane/contracts';
@@ -48,8 +52,10 @@ export type { BrowserProviderExtension } from './provider-extensions.js';
 
 export interface BrowserHostOptions {
   readonly directory: string;
+  readonly uiCli?: { readonly node: string; readonly entry: string; readonly directory: string };
   readonly assetsDirectory: string;
   readonly hostArtifactDirectory?: string;
+  readonly hostSdkDirectory?: string;
   readonly port?: number;
   readonly progressMs?: number;
   readonly agentStartup: HostAgentStartup;
@@ -80,6 +86,7 @@ export type HostAgentStartup =
   | { readonly kind: 'extensions' };
 export async function startBrowserHost(options: BrowserHostOptions) {
   const startup = options.agentStartup;
+  const uiCli = options.uiCli;
   const configured = startup.kind === 'configured' || startup.kind === 'desktop' ? startup.configuration : startup.kind === 'provider'
     ? { default: 'default', agents: [{ ...startup.provider, name: 'default' }] } : null;
   if (startup.kind === 'provider' && startup.provider.kind === 'pi') piApiKey();
@@ -102,6 +109,9 @@ export async function startBrowserHost(options: BrowserHostOptions) {
   let feeds: FeedRegistry | undefined;
   const providers = createServerExtensions(options.operationDeadlineMs === undefined ? {} : { operationDeadlineMs: options.operationDeadlineMs });
   let control: Awaited<ReturnType<typeof startControl>> | undefined;
+  let uiStore: UiStore | undefined;
+  let uiControl: Awaited<ReturnType<typeof startUiControl>> | undefined;
+  let uiFault: string | null = null;
   let refresh: RefreshController | undefined;
   let resolveFatal!: () => void;
   const fatal = new Promise<void>(resolve => { resolveFatal = resolve; });
@@ -125,6 +135,7 @@ export async function startBrowserHost(options: BrowserHostOptions) {
         const results = [...drainResults, ...await Promise.allSettled([
           new Promise<void>(done => { http.close(() => done()); http.closeIdleConnections(); }),
           Promise.resolve().then(() => control?.close()),
+          Promise.resolve().then(() => uiControl?.close()),
           Promise.resolve().then(() => {
             if (drainFailed) return;
             host?.close();
@@ -136,6 +147,7 @@ export async function startBrowserHost(options: BrowserHostOptions) {
       } finally {
         clearTimeout(deadline);
       }
+      uiStore?.close();
       database.database.close();
       owner.close();
     })().finally(() => observability.close());
@@ -143,9 +155,11 @@ export async function startBrowserHost(options: BrowserHostOptions) {
   }
   try {
     const browser = readArtifactBytes(options.assetsDirectory, 'browser-development');
-    const artifact = readInstalledArtifact(options.hostArtifactDirectory ?? dirname(fileURLToPath(import.meta.url)));
+    const hostArtifactDirectory = options.hostArtifactDirectory ?? dirname(fileURLToPath(import.meta.url));
+    const artifact = readInstalledArtifact(hostArtifactDirectory);
+    const sdkUrl = pathToFileURL(join(options.hostSdkDirectory ?? dirname(fileURLToPath(import.meta.url)), 'sdk.js')).href;
     async function replaceExtensions(readyHost: LocalHost<TranscriptEvent, Transcript>, selected: ProviderExtensionSelection) {
-      const replacement = await providers.replace(providerExtensionSource(database, selected));
+      const replacement = await providers.replace(providerExtensionSource(database, selected, sdkUrl));
       if (replacement.kind !== 'replaced' || replacement.generation === null) return replacement;
       const generation = replacement.generation;
       const current = () => { const status = providers.status(); return !closing && status.kind === 'active' && status.generation === generation; };
@@ -259,7 +273,8 @@ export async function startBrowserHost(options: BrowserHostOptions) {
               if (version !== `codex-cli ${CODEX_RUNTIME.version}`) throw new Error(`Unsupported Codex version ${version}. This app requires Codex ${CODEX_RUNTIME.version}. Install that version and restart this host.`);
               if (startup.kind === 'desktop') await promisify(execFile)(provider.executable ?? 'codex', ['login', 'status'], { timeout: 5000, maxBuffer: 4096, env });
               const codex = createCodexDriver({ cwd: provider.cwd, version: CODEX_RUNTIME.version,
-                ...(provider.executable ? { executable: provider.executable } : {}), env, append, readImage });
+                ...(provider.executable ? { executable: provider.executable } : {}), env, append, readImage,
+                ...(uiCli ? { uiContext: (scope: ConversationScope) => `<openpane-ui version="1">\nThis host provides a UI CLI. argvPrefix: ${JSON.stringify([uiCli.node, uiCli.entry, 'ui', '--data-dir', uiCli.directory])}\nConversationScope: ${canonicalJson(scope)}\nAppend context or experience schema to argvPrefix to discover the contract. Author visual data in the user-requested workspace and apply through this CLI, with existing approvals. Publish display data only to this exact scope. Keep provider credentials out of UI data.\n</openpane-ui>` } : {}) });
               driver = codex;
               break;
             }
@@ -284,6 +299,12 @@ export async function startBrowserHost(options: BrowserHostOptions) {
       }
     }
     const hostId = database.hostId;
+    try { uiStore = new UiStore(join(owner.directory, 'ui.sqlite'), hostId, after => {
+      if (!host) throw new Error('Conversation catalog unavailable');
+      const scopes = host.listConversations(hostId, after, 50, { everySegment: true });
+      return { items: scopes.map(scope => ({ scope, label: scope.conversationId })), after: scopes.length === 50 ? scopes.at(-1)?.conversationId ?? null : null };
+    }); }
+    catch { uiFault = 'UI database unavailable; repair ui.sqlite without deleting conversation data. Builtin appearance remains available.'; }
     const readyHost = startup.kind === 'recorded'
       ? openRecordedHost({ path: join(owner.directory, 'host.sqlite'), backendPath: join(owner.directory, 'recorded.jsonl'),
         hostId, providers, ...(options.progressMs === undefined ? {} : { progressMs: options.progressMs }) })
@@ -320,8 +341,10 @@ export async function startBrowserHost(options: BrowserHostOptions) {
       extensions: { describe: providers.extensions, call: providers.callOperation } });
     const handler = serviceEndpoint({ client: 'browser-development', hostId, api, files: browser.files, isClosing, observability });
     const native = serviceEndpoint({ client: 'native', hostId, api, isClosing, observability });
+    const uiHandler = uiEndpoint(uiStore ?? null, uiFault, observability, isClosing);
     const setupHandler = piSetup && options.setupCapability ? piSetupEndpoint(piSetup, options.setupCapability, () => closing) : null;
     http.on('request', (request, response) => {
+      if (request.url === '/api/ui/v1' || request.url?.startsWith('/ui-assets/')) { void uiHandler(request, response).catch(() => response.destroy()); return; }
       if (request.url === '/setup/pi' && setupHandler) {
         void setupHandler(request, response).catch(() => response.destroy());
         return;
@@ -341,6 +364,12 @@ export async function startBrowserHost(options: BrowserHostOptions) {
     if (!address || typeof address === 'string') throw new Error('Invalid host address');
     const origin = `http://127.0.0.1:${address.port}`;
     control = await startControl(join(owner.directory, 'control.sock'), isClosing, selectionControl, providers.discover, refresh);
+    uiControl = await startUiControl(join(owner.directory, 'ui.sock'), async request => {
+      const startTime = performance.timeOrigin + performance.now(); let outcome: 'ok' | 'unavailable' = 'ok';
+      try { if (closing) throw new UiRefusal('unavailable', 'UI service is shutting down'); if (!uiStore) throw new UiRefusal('unavailable', uiFault ?? 'UI database unavailable'); return await uiStore.execute(request); }
+      catch (error) { outcome = 'unavailable'; throw error; }
+      finally { observability.record({ operation: 'ui', client: 'local-ui', outcome, startTime, statusCode: null }); }
+    });
     return { origin, hostId, close, fatal, discoverProviders: providers.discover,
       extensionStatus: providers.status, callOperation: providers.callOperation,
       async replaceProviderExtensions(selected: readonly BrowserProviderExtension[]) {
