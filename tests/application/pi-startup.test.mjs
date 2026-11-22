@@ -132,7 +132,8 @@ test('Pi startup advertises one runtime to browser and native clients and labels
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`${ready.origin}/browser.html`);
   await page.getByRole('button', { name: 'New conversation', exact: true }).click();
-  await page.getByPlaceholder('Write to Pi…').waitFor();
+  // The new-conversation screen shares the placeholder; wait for the conversation itself.
+  await page.getByRole('region', { name: 'Conversation', exact: true }).getByPlaceholder('Write to Pi…').waitFor();
   assert.match(await page.locator('.shell-footer').textContent(), /Pi · GLM 5.3 · OpenCode Go · Chat only · No tools/);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   assert.match(await page.locator('.application-status').textContent(), /Pi · GLM 5.3 · OpenCode Go/);
