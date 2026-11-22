@@ -52,19 +52,23 @@ export function Composer({ id, label = 'Message', text, onText, placeholder, rea
     observer.observe(node);
     return () => observer.disconnect();
   }, []); // The textarea element is stable for this composer's lifetime.
-  // Slide from where the composer was drawn last to where the new layout puts it (first, last, invert, play).
-  const placed = useRef<{ readonly centred: boolean; readonly top: number } | null>(null);
+  // Slide from where the composer stood to where the new layout puts it (first, last, invert, play). Layout is read only
+  // when the placement flips: the old position during the render that flips it, the new one after commit.
+  const placement = useRef(centred);
+  const from = useRef<number | null>(null);
+  if (placement.current !== centred) {
+    placement.current = centred;
+    from.current = form.current?.getBoundingClientRect().top ?? null;
+  }
   useLayoutEffect(() => {
-    const node = form.current;
-    if (!node) return;
-    const top = node.getBoundingClientRect().top, previous = placed.current;
-    placed.current = { centred, top };
-    if (!previous || previous.centred === centred || typeof node.animate !== 'function') return;
+    const node = form.current, start = from.current;
+    from.current = null;
+    if (!node || start === null || typeof node.animate !== 'function') return;
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-    const offset = previous.top - top;
+    const offset = start - node.getBoundingClientRect().top;
     if (Math.abs(offset) < 2) return;
     node.animate([{ transform: `translateY(${offset}px)` }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.2, .8, .2, 1)' });
-  });
+  }, [centred]);
   function submit(event: FormEvent): void {
     event.preventDefault();
     if (canSend) onSend();

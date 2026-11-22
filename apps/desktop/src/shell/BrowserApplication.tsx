@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { DesktopShell } from './Shell.js';
 import { HostStatusLabel } from './HostStatusLabel.js';
@@ -16,17 +16,55 @@ import { NewConversation } from '../application/NewConversation.js';
 import { continuationAnnouncement } from '../application/continuation-copy.js';
 import { ExtensionsList, ExtensionWorkspace, conversationSlots, extensionRows, openableRow } from '../application/ExtensionsView.js';
 import { conversationLabel } from '@openpane/contracts/conversation';
-import type { ApplicationController } from '../application/application-controller.js';
+import type { ApplicationController, OpenConversation } from '../application/application-controller.js';
 
 type ConnectionPresentation =
   | { readonly kind: 'browser' }
   | { readonly kind: 'native'; readonly controls: ReactElement; readonly reconnect: () => void };
 
-/** Applies a view change as one animated step where the platform supports view transitions, so shared parts morph. */
-function reveal(update: () => void): void {
+/** Resolves true once the store reports a live connection; false as soon as it leaves `connecting` any other way, or after `ms`. */
+function whenConnected(store: OpenConversation['store'], ms = 10_000): Promise<boolean> {
+  return new Promise(resolve => {
+    let settled = false, unsubscribe: (() => void) | null = null;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe?.();
+      resolve(value);
+    };
+    const check = () => {
+      const kind = store.getSnapshot().connection.kind;
+      if (kind === 'connected') finish(true);
+      else if (kind !== 'connecting') finish(false);
+    };
+    const timer = setTimeout(() => finish(false), ms);
+    unsubscribe = store.subscribe(check);
+    check();
+  });
+}
+
+/**
+ * Applies a view change as one animated step where the platform supports view transitions. The composer and greeting
+ * carry transition names only while `data-morphing` is set, so they are not a permanent stacking context.
+ */
+function reveal(update: () => void, after: () => void): void {
   const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (reduced || typeof document.startViewTransition !== 'function') return update();
-  document.startViewTransition(() => flushSync(update));
+  if (reduced || typeof document.startViewTransition !== 'function') {
+    flushSync(update);
+    after();
+    return;
+  }
+  const root = document.documentElement;
+  root.dataset.morphing = 'true';
+  try {
+    const transition = document.startViewTransition(() => { flushSync(update); after(); });
+    void transition.finished.catch(() => {}).finally(() => { delete root.dataset.morphing; });
+  } catch {
+    delete root.dataset.morphing;
+    flushSync(update);
+    after();
+  }
 }
 
 export function BrowserApplication({ children, artifact, controller: supplied, connection = { kind: 'browser' }, suspended = false }: {
@@ -39,6 +77,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   // screen stays up; the conversation replaces it in one step once its first message is on its way.
   const [launchText, setLaunchText] = useState('');
   const [opening, setOpening] = useState(false);
+  const openingGuard = useRef(false);
   useEffect(() => {
     // The webview receives OS file drops itself; a file dropped anywhere the conversation panel did not handle must
     // not navigate the window away from the app.
@@ -66,23 +105,35 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const setupPi = () => setSelectedView('settings');
   /** Starts a conversation from the new-conversation screen, carrying its text over as the draft or the first message. */
   async function startConversation(agentId: string | undefined, send: boolean): Promise<void> {
-    if (opening) return;
+    // The launch composer is read-only while this runs, so the text cannot change under it.
+    if (openingGuard.current) return;
+    openingGuard.current = true;
     const text = launchText, before = controller.getSnapshot().active;
-    let started = false;
+    let opened = false, carried = !text;
     setOpening(true);
     try {
       await controller.create(agentId);
       const active = controller.getSnapshot().active;
       // A refused creation reports its own error; the typed text stays where it was.
       if (!active || active === before) return;
-      started = true;
+      opened = true;
       if (text) await active.store.setDraft(text);
-      if (send && text.trim()) await controller.conversationActions(active).submit(() => active.store.send());
+      carried = true;
+      // Send only as the conversation's own Send would: connected, and an agent that takes messages. Otherwise the
+      // text waits in its draft.
+      if (send && text.trim() && active.agent.commands.includes('send') && await whenConnected(active.store))
+        await controller.conversationActions(active).submit(() => active.store.send());
     } catch {
-      // The conversation shows what happened to the draft and the send; nothing is lost.
+      // A failed send leaves the message in the conversation's outbox or draft; a failed draft write keeps the launch text.
     } finally {
+      openingGuard.current = false;
+      const swap = () => { setOpening(false); if (carried) setLaunchText(''); };
       // Clear the text in the same step that swaps the screens, so the composer morphs with its text still in it.
-      reveal(() => { setOpening(false); if (started) setLaunchText(''); });
+      if (!opened) swap();
+      else reveal(swap, () => {
+        const field = document.getElementById('message');
+        if (field && (document.activeElement === null || document.activeElement === document.body)) field.focus();
+      });
     }
   }
   const selected = choices.find(agent => agent.id === app.active?.agent.id && agent.availability.kind === 'ready')
@@ -128,7 +179,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const canStart = enabled && app.saved.pendingCreation === null && !opening;
   const conversation = !slots.workspace && activeConversation && !opening
     ? activeConversation
-    : <NewConversation text={launchText} onText={setLaunchText} placeholder={presentation.placeholder}
+    : <NewConversation text={launchText} onText={setLaunchText} placeholder={presentation.placeholder} opening={opening}
         note={app.host.kind === 'ready' && !selected ? 'No agents are available to start a conversation.'
           : app.host.kind !== 'ready' ? 'Connect to your local host, then start a conversation. Your chats and drafts stay here when you come back.' : null}
         canSend={canStart && Boolean(selected?.commands.includes('send')) && Boolean(launchText.trim())}
@@ -169,7 +220,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     {selectedView === 'extensions' && !workspaceOpen && creationRecovery}
     <div className="chat-navigation" hidden={selectedView !== 'chats'}>
       <div className="action-row">
-        <button disabled={!enabled || app.saved.pendingCreation !== null || selected?.availability.kind !== 'ready'} onClick={() => void controller.create(selected?.id)}>{selected && 'runtime' in selected && selected.runtime.engine === 'openpane-recorded' ? 'New recorded conversation' : 'New conversation'}</button>
+        <button disabled={!enabled || opening || app.saved.pendingCreation !== null || selected?.availability.kind !== 'ready'} onClick={() => void (app.active ? controller.create(selected?.id) : startConversation(selected?.id, false))}>{selected && 'runtime' in selected && selected.runtime.engine === 'openpane-recorded' ? 'New recorded conversation' : 'New conversation'}</button>
       </div>
       {creationRecovery}
       <ConversationSearch controller={controller} connectionKey={searchConnection} enabled={enabled} active={app.active?.scope ?? null}>
