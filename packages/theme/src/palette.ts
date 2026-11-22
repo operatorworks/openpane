@@ -14,6 +14,7 @@ export interface PaletteDocumentV1 {
 function record(value: unknown, keys: readonly string[], path: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${path}: expected an object.`);
   if (Object.keys(value).some(key => !keys.includes(key))) throw new TypeError(`${path}: unknown field.`);
+  for (const key of keys) if (!Object.hasOwn(value, key)) throw new TypeError(`${path}.${key}: required field.`);
   return value as Record<string, unknown>;
 }
 export function isPaletteLogicalName(value: unknown): value is PaletteLogicalName {

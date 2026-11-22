@@ -1,9 +1,12 @@
+import { palettes, type Appearance, type ThemeColors } from '@openpane/theme';
+import { ThemeScope } from '@openpane/ui-primitives/desktop';
 import { BuiltinColors } from './BuiltinColors.js';
 import { Suspense, type ReactNode } from 'react';
 import type { ConversationContentLayoutProps } from '@openpane/sdk/react';
 import { CustomizationBoundary, type ContentLayoutSelection } from './DesktopCustomizations.js';
 
-export function CustomizationContent({ selection, conversationKey, transcript, nativeTranscript, modules, before = null }: ConversationContentLayoutProps & {
+export function CustomizationContent({ contentPalette = palettes, selection, conversationKey, transcript, nativeTranscript, modules, before = null }: ConversationContentLayoutProps & {
+  readonly contentPalette?: Readonly<Record<Appearance, ThemeColors>>;
   readonly selection: ContentLayoutSelection;
   readonly conversationKey: string;
   readonly nativeTranscript: ReactNode;
@@ -24,5 +27,5 @@ export function CustomizationContent({ selection, conversationKey, transcript, n
       </CustomizationBoundary>
     </Suspense>;
   }
-  return <div className="conversation-content">{before}{content}</div>;
+  return <ThemeScope className="conversation-content" palette={contentPalette}>{before}{content}</ThemeScope>;
 }

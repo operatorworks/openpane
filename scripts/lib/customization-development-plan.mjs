@@ -25,7 +25,7 @@ export async function developmentPlan(sourceRoot) {
   if (parsed.local.manifest.sdkVersion !== EXTENSION_SDK_VERSION) throw new Error(`Preview requires SDK ${EXTENSION_SDK_VERSION}.`);
   const desktop = parsed.local.manifest.entries.find(entry => entry.kind === 'desktop');
   if (!desktop) throw new Error('Preview requires an executable desktop entry.');
-  return { kind: 'development', roots: [root], entries: [{ module: desktop.module, manifest: parsed.local.manifest,
+  return { kind: 'development', workingRoot: root, roots: [root], entries: [{ module: desktop.module, manifest: parsed.local.manifest,
     source: await realpath(resolve(root, parsed.local.sources.get(desktop.module))) }], identity: null };
 }
 

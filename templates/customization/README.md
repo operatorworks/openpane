@@ -19,7 +19,7 @@ node apps/host/dist/main.js codex \
 
 The existing `pi` and `browser-dev` commands also accept `--assets`. Without it, startup uses the ordinary installed browser artifact. Open the host's browser address and select a conversation. Open Extensions to find the Plan review module and its nested Review guidance section under Conversation tools. The template claims no global view slots. Its workspace and scoped transcript require a host provider under the `personal` namespace; the recorded browser-dev agent supports the module journey only. The host renders the declared Review the plan action and reports its result. Click **Review the plan** to submit the committed prompt. An accepted receipt means submitted, not completed. Uncertain outcomes use the existing conversation recovery controls.
 
-To remove the panel, open Settings, expand View options, and choose Restore default view. The current conversation and draft remain available. Reloading the artifact enables the panel again.
+To remove the panel, open View options and choose Restore default view. The current conversation and draft remain available. This choice is saved and survives reload. Re-enable executable UI customizations in Settings to restore the panel.
 
 Custom code has full browser privileges. This is not a sandbox. Only build code you trust.
 
@@ -56,7 +56,7 @@ CSS assets require package ancestry without object-valued `browser` metadata aro
 
 Source rules reject unsupported module lookups in authored code and installed dependencies. Runtime string evaluation is governed by the host CSP. An unused global-detection fallback inside a dependency is allowed.
 
-The builder reserves a fresh output directory and generates the ordinary artifact manifest. Chromium serves retained verified bytes with the host's headers and activates every entry through the app's lifecycle. That lifecycle checks SDK compatibility and contribution validity. Qualification checks panel namespace order and readiness. Off-origin requests are blocked during qualification. It also checks that `index.html` starts under the native CSP. Native-session activation, component rendering, and conversation operations are not exercised by this gate. The builder verifies the inventory again before publication. Failed builds remove their output and private staging. An existing output is never replaced.
+The builder reserves a fresh output directory and generates the ordinary artifact manifest. Chromium serves retained verified bytes with the host's headers and activates every entry through the app's lifecycle. That lifecycle checks SDK compatibility and contribution validity. Qualification checks sorted panel namespaces and readiness. Off-origin requests are blocked during qualification. It also checks that `index.html` starts under the native CSP. Native-session activation, component rendering, and conversation operations are not exercised by this gate. The builder verifies the inventory again before publication. Failed builds remove their output and private staging. An existing output is never replaced.
 
 The hashed `customization-identity.json` asset records the ordered package graph, committed input and npm identities, manifests, and selected desktop modules. Each entry references its package and module; package records own the manifests. It excludes temporary paths and repository addresses. The ordinary artifact manifest retains the OpenPane source and lock provenance. The host verifies and retains the artifact bytes at startup.
 

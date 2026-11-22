@@ -96,8 +96,13 @@ export async function revealRecovery(page) {
 export async function customRuntime(page, host, selection, breakDefault = false, extra = '', strict = false) {
   const bundled = await build({ stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client';
     import {BrowserApplication} from './apps/desktop/src/shell/BrowserApplication.tsx';
-    createRoot(document.getElementById('root')).render(${strict ? '<React.StrictMode><BrowserApplication /></React.StrictMode>' : '<BrowserApplication />'});`, resolveDir: root, loader: 'jsx' },
-    bundle: true, write: false, outfile: 'custom.js', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' },
+    import './apps/desktop/src/shell/styles.css';
+    function ReplayProbe() { React.useEffect(() => {
+      window.strictReplay ??= { setups: 0, cleanups: 0 }; window.strictReplay.setups++;
+      return () => { window.strictReplay.cleanups++; };
+    }, []); return null; }
+    createRoot(document.getElementById('root')).render(${strict ? '<React.StrictMode><ReplayProbe /><BrowserApplication /></React.StrictMode>' : '<BrowserApplication />'});`, resolveDir: root, loader: 'jsx' },
+    bundle: true, write: false, outfile: 'custom.js', jsx: 'automatic', define: { 'process.env.NODE_ENV': strict ? '"development"' : '"production"' },
     plugins: [{ name: 'custom-runtime-fixture', setup(plugin) {
       if (breakDefault) plugin.onLoad({ filter: /ConversationView\.tsx$/ }, async () => ({
         contents: `import { createElement } from 'react';\n` +
@@ -107,7 +112,9 @@ export async function customRuntime(page, host, selection, breakDefault = false,
         const manifest = { namespace: 'fixture', trust: 'full', sdkVersion: '0.13.0', entries: [{ kind: 'desktop', module: './desktop.js' }] };
         export default [{ manifest, ${selection} }${extra}];`, loader: 'tsx' }));
     } }] });
-  await page.route('**/custom.html', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div><script src="/custom.js"></script>' }));
+  const css = bundled.outputFiles.find(file => file.path.endsWith('.css'));
+  if (css) await page.route('**/custom.css', route => route.fulfill({ contentType: 'text/css', body: css.text }));
+  await page.route('**/custom.html', route => route.fulfill({ contentType: 'text/html', body: `${css ? '<link rel="stylesheet" href="/custom.css">' : ''}<div id="root"></div><script src="/custom.js"></script>` }));
   await page.route('**/custom.js', route => route.fulfill({ contentType: 'text/javascript', body: Buffer.from(bundled.outputFiles.find(file => file.path.endsWith('.js')).contents) }));
   await page.goto(`${host.origin}/custom.html`);
   if (!breakDefault) await connected(page);

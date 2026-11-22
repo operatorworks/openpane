@@ -173,7 +173,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const activeConversation = app.active && activeActions
     ? <ConversationView
         key={`${app.active.viewId}/${app.active.scope.hostId}/${app.active.scope.conversationId}`}
-        transcript={slots.transcript} activity={custom.activity} contentLayout={slots.contentLayout} modules={slots.modules} permissionState={app.permissionState} observation={app.observation} continuation={app.continuation} actions={activeActions} active={app.active} enabled={enabled} storageFailure={app.storageFailure} agent={agent} customizationNotices={customizationNotices}
+        contentPalette={contentPalette} transcript={slots.transcript} activity={custom.activity} contentLayout={slots.contentLayout} modules={slots.modules} permissionState={app.permissionState} observation={app.observation} continuation={app.continuation} actions={activeActions} active={app.active} enabled={enabled} storageFailure={app.storageFailure} agent={agent} customizationNotices={customizationNotices}
         composerControls={canSwitch => <ComposerAgentControls agents={slots.composerAgents} agent={app.active?.agent ?? null} hasConversation enabled={canSwitch && app.saved.pendingCreation === null} onStartConversation={id => void controller.create(id)} onSetupPi={setupPi} />}
       />
     : null;
@@ -210,8 +210,8 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   </div>;
   const extensionsView = <div className="extensions-view" inert={suspended}>
     {workspaceOpen
-      ? <ThemeScope palette={contentPalette} className="content-theme"><ExtensionWorkspace row={workspaceRow} metadata={metadata} workspaces={app.workspaces} active={app.active} controller={controller}
-          conversation={workspaceConversation} status={<>{hostAlerts}{creationRecovery}</>} onBack={() => setSelectedExtension(null)} /></ThemeScope>
+      ? <ExtensionWorkspace contentPalette={contentPalette} row={workspaceRow} metadata={metadata} workspaces={app.workspaces} active={app.active} controller={controller}
+          conversation={workspaceConversation} status={<>{hostAlerts}{creationRecovery}</>} onBack={() => setSelectedExtension(null)} />
       : <ExtensionsList rows={rows} enabled={!suspended} onOpen={setSelectedExtension}
           tools={toolsEligible ? <ThemeScope palette={contentPalette} className="content-theme">{moduleList('tools')}</ThemeScope> : null} conversation={toolsTarget} />}
   </div>;
@@ -298,7 +298,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     </button>
   </nav>;
   if (personalization.readiness === 'loading') return <ThemeScope><p role="status">Loading local preferences…</p></ThemeScope>;
-  return <DesktopShell appearance={preferences.appearance === 'system' ? undefined : preferences.appearance} contentPalette={contentPalette} onRestoreAppearance={() => void personalizationSession.resetAppearance()} navigation={rail} activeView={selectedView} protectedContent={controls} defaultView={views} settingsView={settings}
+  return <DesktopShell appearance={preferences.appearance === 'system' ? undefined : preferences.appearance} onRestoreAppearance={() => void personalizationSession.resetAppearance()} navigation={rail} activeView={selectedView} protectedContent={controls} defaultView={views} settingsView={settings}
     extensionsView={extensionsView} workspaceOpen={workspaceOpen} restoreMode={children === undefined ? 'managed' : 'remount'}
     onRestore={() => { void personalizationSession.restoreDefaultView(); setSelectedView('chats'); }}
     status={app.active ? <ConversationStatus active={app.active} /> : 'No conversation open'}

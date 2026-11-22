@@ -4,6 +4,10 @@ import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
+import { chromium } from 'playwright';
+import { repository, buildCustom } from '../customization/build/support.mjs';
+import { bundledPlan } from '../../scripts/bundled-extensions.mjs';
 import { startCustomizationPreview } from '../../scripts/customization-dev.mjs';
 import { connected, draft, extensionFixture, fixture, root, tools, wait } from './browser-support.mjs';
 import { ledgerExtension, ledgerService } from '../extensions/providers/conformance/ledger.mjs';
@@ -32,8 +36,13 @@ async function previewPage(host, running) {
 }
 
 test('working preview connects to a real recorded host, keeps manual reload and blocks unlabeled entry routes', { timeout: 90_000 }, async t => {
-  const host = await fixture(t), directory = await source(t), running = await preview(t, directory, host);
+  const host = await fixture(t), directory = await source(t);
+  const entry = join(directory, 'desktop/index.tsx'), css = join(directory, 'desktop/review.css');
+  const running = await preview(t, directory, host);
   const page = await previewPage(host, running), operations = [], navigations = [];
+  assert.deepEqual(await page.locator('.desktop-shell').evaluate(node => ({
+    color: getComputedStyle(node).color, background: getComputedStyle(node).backgroundColor,
+  })), { color: 'rgb(32, 36, 44)', background: 'rgb(248, 249, 251)' }, 'preview loads the same painted builtin shell styles as the ordinary browser bootstrap');
   page.on('request', request => { if (request.method() === 'POST') operations.push(request.postDataJSON()?.op); });
   page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigations.push(frame.url()); });
   for (const path of ['/', '/index.html', '/browser.html', '/provider-setup.html', '/anything.html']) {
@@ -54,20 +63,30 @@ test('working preview connects to a real recorded host, keeps manual reload and 
   await wait(() => operations.includes('pull'), 'real feed through preview');
   await toolPanel.getByRole('heading', { name: 'Plan review', exact: true }).waitFor();
   const oldHeading = await toolPanel.getByRole('heading', { name: 'Plan review', exact: true }).elementHandle();
-  const entry = join(directory, 'desktop/index.tsx'), css = join(directory, 'desktop/review.css');
+  const border = () => page.locator('.review-plan').evaluate(node => getComputedStyle(node).borderInlineStartWidth);
+  assert.equal(await border(), '2px');
   await writeFile(entry, (await readFile(entry, 'utf8')).replace("'Plan review'", "'Uncommitted review edit'"));
-  await writeFile(css, (await readFile(css, 'utf8')) + '\n.review-workspace { border-width: 3px; }\n');
+  await writeFile(css, (await readFile(css, 'utf8')).replace('border-inline-start: 2px', 'border-inline-start: 4px'));
   // Let Vite's watcher process both edits: neither JS nor CSS may update the running page.
   await new Promise(resolve => setTimeout(resolve, 350));
   assert.equal(navigations.length, 0);
+  assert.equal(await border(), '2px');
   assert.equal(await toolPanel.getByRole('heading', { name: 'Plan review', exact: true }).evaluate((node, before) => node === before, oldHeading), true);
   await page.reload(); await connected(page); await tools(page);
   await page.getByRole('heading', { name: 'Uncommitted review edit', exact: true }).waitFor();
   assert.equal(navigations.length, 1);
+  assert.equal(await border(), '4px');
   assert.equal(await page.getByRole('note').filter({ hasText: 'Unqualified local preview' }).count(), 1);
   await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByLabel('Appearance mode', { exact: true }).selectOption('dark');
   await wait(() => page.locator('.desktop-shell').getAttribute('data-appearance').then(value => value === 'dark'), 'saved dark appearance');
+  const palette = JSON.parse(await readFile(join(directory, 'review-palette.json'), 'utf8'));
+  await page.getByLabel('Palette JSON', { exact: true }).fill(JSON.stringify(palette));
+  await page.getByRole('button', { name: 'Preview palette', exact: true }).click();
+  await page.getByRole('button', { name: 'Import palette', exact: true }).click();
+  await page.getByRole('button', { name: /^Select Quiet review / }).click();
+  const accent = () => page.locator('.conversation-content').evaluate(node => getComputedStyle(node).getPropertyValue('--aui-color-accent').trim());
+  await wait(async () => await accent() === palette.colors.dark.accent, 'saved preview palette');
   const port = Number(new URL(running.origin).port);
   await running.server.close();
   const restarted = await startCustomizationPreview({ source: directory, hostUrl: host.origin, port });
@@ -75,6 +94,7 @@ test('working preview connects to a real recorded host, keeps manual reload and 
   assert.equal(restarted.url, running.url);
   await page.reload(); await connected(page);
   await wait(() => page.locator('.desktop-shell').getAttribute('data-appearance').then(value => value === 'dark'), 'dark appearance across consecutive previews');
+  await wait(async () => await accent() === palette.colors.dark.accent, 'palette choice across consecutive previews');
 });
 
 test('the template workspace uses a namespaced conformance provider and leaves host composer, decisions and draft intact', { timeout: 90_000 }, async t => {
@@ -148,7 +168,7 @@ test('preview routing validates origin before forwarding to the unchanged record
   assert.equal((await fetch(running.origin + '/browser.html')).status, 404);
   const page = await fetch(running.url);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /customization-preview-main\.tsx/);
+  assert.match(await page.text(), /assets\/preview-[^"]+\.js/);
 });
 
 test('preview source policy rejects ambient imports and escaping links without running author scripts', { timeout: 60_000 }, async t => {
@@ -180,4 +200,226 @@ test('preview source policy rejects ambient imports and escaping links without r
   running.server.moduleGraph.invalidateAll();
   const fixed = await running.server.transformRequest(`/@fs${entry}`);
   assert.match(fixed.code, /0\.13\.0/);
+  await writeFile(entry, 'export default { broken source');
+  const malformed = await fetch(running.url);
+  assert.equal(malformed.status, 500);
+  assert.match(await malformed.text(), /source diagnostic.*correct the entry.*reload/u);
+  await writeFile(entry, "export default { kind: 'desktop', sdkVersion: '0.13.0', activate() { return { modules: [], dispose() {} }; } };");
+  assert.equal((await fetch(running.url)).status, 200);
+});
+
+
+test('preview rejects choosing the upstream host port before binding a listener', async t => {
+  const directory = await source(t), port = await unusedPort();
+  let running;
+  t.after(() => running?.server.close());
+  await assert.rejects(async () => { running = await startCustomizationPreview({ source: directory, hostUrl: `http://127.0.0.1:${port}`, port }); }, /different.*port|same.*host/u);
+});
+
+test('preview JSON admission matches the host for both API endpoints', async t => {
+  let calls = 0;
+  const upstream = createHttpServer((req, res) => { calls++; req.resume(); res.end('{}'); });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => upstream.close(resolve)));
+  const directory = await source(t), running = await preview(t, directory, { origin: `http://127.0.0.1:${upstream.address().port}` });
+  for (const path of ['/api/v1', '/api/v1/images']) {
+    for (const type of ['application/json; charset=utf-8', 'Application/JSON']) {
+      const response = await fetch(running.origin + path, { method: 'POST', headers: { Origin: running.origin, 'Content-Type': type }, body: '{}' });
+      assert.equal(response.status, 415, type);
+    }
+    assert.equal(calls, path === '/api/v1' ? 0 : 1);
+    const response = await fetch(running.origin + path, { method: 'POST', headers: { Origin: running.origin, 'Content-Type': 'application/json' }, body: '{}' });
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), '{}');
+  }
+  assert.equal(calls, 2);
+});
+
+test('a truncated upstream response terminates promptly and the proxy serves the next request', { timeout: 15_000 }, async t => {
+  let calls = 0;
+  const upstream = createHttpServer((req, res) => {
+    req.resume(); calls++;
+    if (calls === 1) { res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': '100' }); res.write('{'); setTimeout(() => res.destroy(), 20); }
+    else res.end('{"recovered":true}');
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => upstream.close(resolve)));
+  const directory = await source(t), running = await preview(t, directory, { origin: `http://127.0.0.1:${upstream.address().port}` });
+  const browser = await chromium.launch(); t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.route('**/proxy-check', route => route.fulfill({ contentType: 'text/html', body: '<p>Proxy response fixture</p>' }));
+  await page.goto(running.origin + '/proxy-check');
+  const observed = await page.evaluate(async () => {
+    const abort = new AbortController();
+    const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' };
+    let deadline;
+    const response = await fetch('/api/v1', { ...options, signal: abort.signal });
+    const outcome = await Promise.race([response.text().then(() => 'completed', () => 'rejected'),
+      new Promise(resolve => { deadline = setTimeout(() => resolve('hung'), 1000); })]);
+    clearTimeout(deadline); abort.abort();
+    const next = await (await fetch('/api/v1', options)).json();
+    return { outcome, next };
+  });
+  assert.deepEqual(observed, { outcome: 'rejected', next: { recovered: true } });
+});
+
+test('an unopened lazy module stays with its document snapshot until explicit reload', { timeout: 90_000 }, async t => {
+  const host = await fixture(t), directory = await source(t);
+  const helper = join(directory, 'desktop/lazy.tsx'), css = join(directory, 'desktop/review.css');
+  await writeFile(css, '#root .preview-lazy-button { border-top: 1px solid red; }');
+  await writeFile(helper, "export default function Lazy() { return <p data-preview-lazy>Committed lazy label</p>; }");
+  await writeFile(join(directory, 'desktop/index.tsx'), `import { lazy, Suspense, useState } from 'react';
+    import { createFrontendToolGeneration, pinFrontendTools } from '@openpane/sdk/tools';
+    import './review.css';
+    const Lazy = lazy(() => import('./lazy.tsx'));
+    function Module() { const [open, setOpen] = useState(false); return <><button className="preview-lazy-button" onClick={() => setOpen(true)}>Open lazy content</button>
+      {open && <Suspense fallback={<p>Loading lazy module</p>}><Lazy /></Suspense>}</>; }
+    export default { kind: 'desktop', sdkVersion: '0.13.0', async activate() {
+      window.previewActivations = (window.previewActivations || 0) + 1;
+      const { generation } = await createFrontendToolGeneration({ namespace: 'personal', generation: 'preview-pin', platform: 'desktop',
+        activate({ frontendTools }) { frontendTools.add({ definition: { name: 'hold', description: 'Hold work during preview edits' },
+          decodeInput: value => value, async execute() { await new Promise(resolve => { window.finishPreviewTool = resolve; }); return 'original generation'; } }); return { dispose() {} }; }, capture: value => value });
+      window.previewPin = pinFrontendTools({ generations: [generation], platform: 'desktop', capabilities: { tools: { clientProvided: true } },
+        run: { conversation: { hostId: 'host', conversationId: 'conversation' }, runId: 'run', authority: { kind: 'remote-provider', binding: { namespace: 'recorded', installationId: 'fixture', opaqueSessionId: 'session' } } } });
+      const binding = window.previewPin.bindings[0];
+      window.pendingPreviewTool = window.previewPin.invoke(binding.name, {}, binding.activationId);
+      return { modules: [{ id: 'lazy', label: 'Lazy module', component: Module }], dispose() { window.previewDisposals = (window.previewDisposals || 0) + 1; window.previewPin.release(); return generation.retire(); } };
+    } };`);
+  const running = await preview(t, directory, host), page = await previewPage(host, running);
+  await page.getByRole('button', { name: 'New recorded conversation' }).click(); await connected(page);
+  await wait(() => page.evaluate(() => window.previewActivations === 1 && typeof window.finishPreviewTool === 'function'), 'pending frontend pin');
+  const binding = await page.evaluate(() => window.previewPin.bindings[0]);
+  const border = () => page.locator('.preview-lazy-button').evaluate(node => getComputedStyle(node).borderTopWidth);
+  assert.equal(await border(), '1px');
+  assert.equal(await page.locator('.preview-lazy-button').evaluate(node => getComputedStyle(node).borderTopColor), 'rgb(255, 0, 0)');
+  await writeFile(helper, (await readFile(helper, 'utf8')).replace('Committed lazy label', 'Dirty lazy label'));
+  await writeFile(css, '#root .preview-lazy-button { border-top: 3px solid red; }');
+  await new Promise(resolve => setTimeout(resolve, 350));
+  // A second document advances the snapshot without changing this document's unused import graph.
+  const second = await previewPage(host, running);
+  await second.close();
+  await tools(page);
+  await page.getByRole('button', { name: 'Open lazy content' }).click();
+  await page.locator('[data-preview-lazy]').waitFor();
+  assert.equal(await page.locator('[data-preview-lazy]').textContent(), 'Committed lazy label');
+  assert.equal(await page.getByText('Dirty lazy label', { exact: true }).count(), 0);
+  assert.deepEqual(await page.evaluate(() => [window.previewActivations, window.previewDisposals || 0]), [1, 0]);
+  assert.deepEqual(await page.evaluate(() => window.previewPin.bindings[0]), binding);
+  assert.equal(await border(), '1px');
+  await page.evaluate(() => window.finishPreviewTool());
+  assert.deepEqual(await page.evaluate(() => window.pendingPreviewTool), { kind: 'completed', output: 'original generation' });
+  await page.evaluate(() => window.previewPin.release());
+  await page.reload(); await connected(page); await tools(page);
+  await page.getByRole('button', { name: 'Open lazy content' }).click();
+  await page.getByText('Dirty lazy label', { exact: true }).waitFor();
+  assert.equal(await border(), '3px');
+});
+
+test('a dirty preview and a release of the same pinned source show their respective labels', { timeout: 90_000 }, async t => {
+  const custom = repository(); t.after(() => rm(custom.directory, { recursive: true, force: true }));
+  const commit = custom.commit();
+  const entry = join(custom.repo, 'desktop/index.tsx');
+  await writeFile(entry, (await readFile(entry, 'utf8')).replace("'Plan review'", "'Dirty preview label'"));
+  const host = await fixture(t), running = await preview(t, custom.repo, host), page = await previewPage(host, running);
+  await page.getByRole('button', { name: 'New recorded conversation' }).click(); await connected(page); await tools(page);
+  await page.getByRole('heading', { name: 'Dirty preview label', exact: true }).waitFor();
+  buildCustom(custom, commit);
+  const release = await fixture(t, join(custom.directory, 'browser')), released = await release.page();
+  await released.getByRole('button', { name: 'New recorded conversation' }).click(); await connected(released); await tools(released);
+  await released.getByRole('heading', { name: 'Plan review', exact: true }).waitFor();
+  assert.equal(await released.getByRole('heading', { name: 'Dirty preview label', exact: true }).count(), 0);
+});
+
+for (const [label, specifier] of [['script', 'package.json?raw'], ['CSS', 'src/desktop/styles.css'], ['asset', 'package.json?url']]) {
+  test(`working ${label} imports cannot escape into a bundled extension root`, async t => {
+    const directory = await source(t), bundled = bundledPlan(root).roots[0];
+    await symlink(join(bundled, specifier.split('?')[0]), join(directory, 'desktop/escape' + (label === 'CSS' ? '.css' : '.json')));
+    const entry = join(directory, 'desktop/index.tsx');
+    const suffix = specifier.includes('?') ? '?' + specifier.split('?')[1] : '';
+    await writeFile(entry, `import './escape${label === 'CSS' ? '.css' : '.json'}${suffix}'; export default {};`);
+    const running = await preview(t, directory, { origin: `http://127.0.0.1:${await unusedPort()}` });
+    await assert.rejects(running.server.transformRequest(`/@fs${join(running.source, 'desktop/index.tsx')}`), /contained customization source|customization asset/u);
+  });
+}
+
+
+for (const kind of ['CSS URL', 'literal asset URL']) test(`working ${kind} cannot escape to bundled files`, async t => {
+  const directory = await source(t), bundled = bundledPlan(root).roots[0];
+  await symlink(join(bundled, 'package.json'), join(directory, 'desktop/escape.json'));
+  const running = await preview(t, directory, { origin: `http://127.0.0.1:${await unusedPort()}` });
+  const entry = join(running.source, 'desktop/index.tsx'), css = join(running.source, 'desktop/review.css');
+  if (kind === 'CSS URL') await writeFile(css, '.test { background-image: url("./escape.json"); }');
+  else await writeFile(entry, 'export const asset = new URL("./escape.json", import.meta.url);');
+  await assert.rejects(running.server.transformRequest(`/@fs${kind === 'CSS URL' ? css : entry}`), /customization asset/u);
+});
+
+
+test('template workspace keeps composer, Stop and approval reachable with many reviews in short viewports', { timeout: 90_000 }, async t => {
+  const service = await ledgerService(t), ledger = ledgerExtension({ service: service.origin, key: service.key,
+    supports: { cancel: true, decide: true }, namespace: 'personal' });
+  const host = await extensionFixture(t, { extensions: [ledger.value] }), directory = await source(t), running = await preview(t, directory, host);
+  const page = await previewPage(host, running);
+  await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Extensions', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Plan review workspace' }).click();
+  const workspace = page.getByRole('region', { name: 'Plan review workspace', exact: true });
+  for (let index = 0; index < 16; index++) {
+    await workspace.getByRole('button', { name: 'Start review with Ledger desk' }).click();
+    await wait(() => service.effects.creates === index + 1, 'created review ' + index);
+  }
+  await connected(page);
+  await wait(async () => await workspace.getByRole('navigation', { name: 'Review conversations' }).getByRole('button').count() >= 18, 'many review entries');
+  await draft(page, 'Keep the short viewport draft');
+  await page.getByRole('button', { name: 'All extensions', exact: true }).click();
+  await page.getByRole('region', { name: 'Conversation tools', exact: true }).getByRole('button', { name: 'Review the plan' }).click();
+  await wait(() => service.effects.sends === 1, 'review running before resizing');
+  await page.getByRole('button', { name: 'Open Plan review workspace' }).click();
+  service.card('Short viewport approval');
+  await workspace.getByText('Short viewport approval', { exact: true }).waitFor();
+  const composer = workspace.getByRole('textbox', { name: 'Message', exact: true }), stop = workspace.getByRole('button', { name: 'Stop', exact: true });
+  async function wheelTo(target) {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const visible = await target.evaluate(node => {
+        const box = node.getBoundingClientRect(), x = box.left + box.width / 2, y = box.top + box.height / 2;
+        return box.top >= 0 && box.bottom <= innerHeight && node.contains(document.elementFromPoint(x, y));
+      });
+      if (visible) return true;
+      // Keep the pointer in the workspace; use ordinary wheel scrolling, never programmatic ancestor scrolling.
+      const box = await workspace.boundingBox(), viewport = page.viewportSize();
+      const top = Math.max(0, box.y), bottom = Math.min(box.y + box.height, viewport.height - 60);
+      await page.mouse.move(box.x + box.width / 2, (top + bottom) / 2);
+      await page.mouse.wheel(0, 500);
+      await page.waitForTimeout(40);
+    }
+    return false;
+  }
+  const observations = [];
+  for (const height of [480, 320]) {
+    await page.setViewportSize({ width: 360, height });
+    assert.equal(await workspace.locator('.conversation-panel').count(), 1);
+    assert.equal(await page.locator('#message').count(), 1);
+    const composerReachable = await wheelTo(composer), stopReachable = await wheelTo(stop);
+    const geometry = await workspace.evaluate(node => {
+      const conversation = node.querySelector('.conversation-panel'), composer = node.querySelector('#message');
+      return { workspaceHeight: node.clientHeight, workspaceScrollHeight: node.scrollHeight, workspaceScrollTop: node.scrollTop,
+        workspaceOverflow: getComputedStyle(node).overflowY, conversationScrollTop: conversation.scrollTop,
+        composerTop: composer.getBoundingClientRect().top, composerBottom: composer.getBoundingClientRect().bottom };
+    });
+    t.diagnostic(JSON.stringify({ height, composerReachable, stopReachable, ...geometry }));
+    observations.push({ height, composerReachable, stopReachable });
+    assert.equal(await composer.inputValue(), 'Keep the short viewport draft');
+    assert.equal(await workspace.getByText('Short viewport approval', { exact: true }).count(), 1);
+    assert.deepEqual(service.answers(), [null]);
+  }
+  for (const { height, composerReachable, stopReachable } of observations) {
+    assert.equal(composerReachable, true, `composer must be reachable by ordinary scrolling at 360x${height}`);
+    assert.equal(stopReachable, true, `Stop must be reachable by ordinary scrolling at 360x${height}`);
+  }
+  await workspace.getByRole('button', { name: 'Approve', exact: true }).click();
+  await wait(() => service.answers()[0] === 'approve', 'approval from short workspace');
+  assert.equal(await composer.inputValue(), 'Keep the short viewport draft');
+  await stop.click();
+  await wait(() => service.effects.cancels === 1, 'Stop from short workspace');
+  await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Chats', exact: true }).click();
+  assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Keep the short viewport draft');
+  assert.equal(await page.locator('#message').count(), 1);
 });

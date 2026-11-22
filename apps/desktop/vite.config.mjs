@@ -14,7 +14,9 @@ export function desktopConfig(mode, plan = bundledPlan(), { development = false 
   return {
     base: './',
     plugins: [cssUrlExpressions(), customizationPlugin(plan)],
-    build: mode === 'browser' ? { outDir: 'web-dist-browser', target: 'safari14', rollupOptions: {
+    build: development ? { write: false, target: 'safari14', rollupOptions: {
+      input: fileURLToPath(new URL('src/shell/customization-preview-main.tsx', import.meta.url)),
+    } } : mode === 'browser' ? { outDir: 'web-dist-browser', target: 'safari14', rollupOptions: {
       input: ['index.html', 'browser.html'].map(entry => fileURLToPath(new URL(entry, import.meta.url))),
     } } : { outDir: 'web-dist', target: 'safari14', rollupOptions: {
       input: ['index.html', 'provider-setup.html'].map(entry => fileURLToPath(new URL(entry, import.meta.url))),

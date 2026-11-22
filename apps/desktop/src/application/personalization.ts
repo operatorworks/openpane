@@ -47,7 +47,7 @@ export function parseDesktopPreferences(value: unknown): DesktopPreferencesV1 {
   const ui = record(input.ui, ['enabled', 'disabledNamespaces', 'slots'], 'preferences.ui');
   if (typeof ui.enabled !== 'boolean') throw new TypeError('preferences.ui.enabled: expected a boolean.');
   if (!Array.isArray(ui.disabledNamespaces)) throw new TypeError('preferences.ui.disabledNamespaces: expected a list.');
-  const disabledNamespaces = ui.disabledNamespaces.map(parseNamespace);
+  const disabledNamespaces = Array.from(ui.disabledNamespaces, parseNamespace);
   if (new Set(disabledNamespaces).size !== disabledNamespaces.length) throw new TypeError('preferences.ui.disabledNamespaces: duplicate namespace.');
   const slots = record(ui.slots, ['transcript', 'activity', 'contentLayout'], 'preferences.ui.slots');
   return { version: 1, appearance: input.appearance, palette, ui: { enabled: ui.enabled, disabledNamespaces,

@@ -1,3 +1,4 @@
+import './styles.css';
 import { createRoot } from 'react-dom/client';
 import { BrowserApplication } from './BrowserApplication.js';
 import { DesktopCustomizationProvider } from '../application/DesktopCustomizations.js';

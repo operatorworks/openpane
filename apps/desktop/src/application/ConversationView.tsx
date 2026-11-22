@@ -1,3 +1,6 @@
+import { createTheme, palettes, type Appearance, type ThemeColors } from '@openpane/theme';
+import { ThemeProvider, useTheme } from '@openpane/theme/react';
+import { toCssVariables } from '@openpane/ui-primitives/desktop';
 import { canRetryObservation } from '@openpane/contracts';
 import type { ConversationClosure, ObservationStopReason } from '@openpane/contracts';
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
@@ -45,7 +48,8 @@ export function ConversationStatus({ active }: { readonly active: OpenConversati
   return <span role="status">Conversation {view.connection.kind}{'reason' in view.connection ? ` · ${view.connection.reason}` : ''}</span>;
 }
 
-export function ConversationView({ actions, active, enabled, storageFailure, observation = null, continuation = null, permissionState, agent = 'recorded', composerControls, transcript = { kind: 'default' }, activity = { kind: 'default' }, contentLayout = { kind: 'default' }, modules = null, customizationNotices = false }: {
+export function ConversationView({ contentPalette = palettes, actions, active, enabled, storageFailure, observation = null, continuation = null, permissionState, agent = 'recorded', composerControls, transcript = { kind: 'default' }, activity = { kind: 'default' }, contentLayout = { kind: 'default' }, modules = null, customizationNotices = false }: {
+  readonly contentPalette?: Readonly<Record<Appearance, ThemeColors>>;
   readonly actions: ConversationActions; readonly active: OpenConversation; readonly enabled: boolean; readonly storageFailure: string; readonly agent?: keyof typeof AGENT_PRESENTATION;
   readonly permissionState?: PermissionState;
   readonly observation?: ConversationObservation | null;
@@ -247,7 +251,9 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
       context={{ ...context, updates: paused ? 'paused' : view.connection.kind === 'connected' ? 'connected' : 'reconnecting' }} />
   </div>;
 
-  return <section className="conversation-panel" aria-label="Conversation" data-empty={empty ? 'true' : undefined} {...dropHandlers}>
+  const inherited = useTheme();
+  const builtin = createTheme({ colors: palettes[inherited.appearance] }, inherited);
+  return <ThemeProvider colors={palettes[inherited.appearance]}><section style={toCssVariables(builtin)} className="aui-theme conversation-panel" aria-label="Conversation" data-empty={empty ? 'true' : undefined} {...dropHandlers}>
     <header className="visually-hidden"><p className="eyebrow">{agent === 'recorded' ? 'RECORDED CONVERSATION' : 'CONVERSATION'}</p><h1>Your conversation</h1><p className="agent-label">{active.agent.label}</p><p className="scope-label">{active.scope.conversationId}</p></header>
     {active.agent.availability.kind === 'unavailable' && <p role="status">{active.agent.availability.reason} Saved history remains available.</p>}
     {observationStatus?.kind === 'unknown' && <p role="status">Observation status unavailable. Reconnect to check for updates.</p>}
@@ -264,7 +270,7 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
       <p>This conversation ended: {CLOSURE_NOTICE[observationStatus.cause]}. Earlier messages and your draft stay available.</p>
       {continuation && <ContinuationChoices continuation={continuation} actions={actions} enabled={enabled && available} />}
     </div>}
-    <CustomizationContent before={continuation && <ContinuationHistory continuation={continuation} actions={actions} enabled={enabled} assistant={presentation.assistant} />}
+    <CustomizationContent contentPalette={contentPalette} before={continuation && <ContinuationHistory continuation={continuation} actions={actions} enabled={enabled} assistant={presentation.assistant} />}
       selection={contentLayout} conversationKey={conversationKey} modules={modules} nativeTranscript={nativeTranscript}
       transcript={<CustomizationTranscript selection={transcript} conversationKey={conversationKey}
         context={context}
@@ -306,5 +312,5 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
       controls={composerControls?.(enabled && editor.kind === 'saved' && !responding)}
       actions={run && run.kind !== 'ended' && !concluded && <button type="button" className="composer-setting" disabled={!connected || !active.agent.commands.includes('cancel') || stopping} onClick={stop}>{stopping ? 'Stopping…' : 'Stop'}</button>} />
     <CommandRecovery view={view} actions={actions} enabled={enabled} canRetry={available} retry={id => active.store.retry(id)} />
-  </section>;
+  </section></ThemeProvider>;
 }

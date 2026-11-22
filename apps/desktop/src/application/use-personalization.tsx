@@ -55,56 +55,78 @@ export class PersonalizationSession {
     }, 2000);
     void this.storage.readSnapshot();
   }
-  private authorize(saved: PersonalizationSnapshot): boolean {
-    if (this.closed || this.snapshot.saved !== saved || saved.preferences.kind !== 'valid') return false;
-    this.update(this.effective({ ...this.snapshot, readiness: 'ready', diagnostic: null, recovery: { appearance: 'none', view: 'none' } }));
+  private authorize(saved: PersonalizationSnapshot, resume: 'matching' | 'view' | 'all' = 'matching'): boolean {
+    const current = this.snapshot.saved?.preferences;
+    if (this.closed || saved.preferences.kind !== 'valid' || current?.kind !== 'valid' || current.epoch !== saved.preferences.epoch || current.revision < saved.preferences.revision) return false;
+    const recovery = resume === 'all' ? { appearance: 'none', view: 'none' } as const : {
+      appearance: this.snapshot.recovery.appearance === 'session' && current.document.appearance === 'system' && current.document.palette.kind === 'builtin' ? 'saved' as const : this.snapshot.recovery.appearance,
+      view: resume === 'view' ? 'none' as const : this.snapshot.recovery.view === 'session' && !current.document.ui.enabled ? 'saved' as const : this.snapshot.recovery.view,
+    };
+    this.update(this.effective({ ...this.snapshot, readiness: 'ready', diagnostic: null, recovery }));
     return true;
   }
   async retry(): Promise<PersonalizationSnapshot> {
     this.start();
     const operation = ++this.operation;
     const saved = await this.storage.readSnapshot();
-    if (operation === this.operation) this.authorize(saved);
+    if (operation === this.operation) this.authorize(saved, 'all');
     return saved;
   }
-  private async run(action: () => Promise<PersonalizationOutcome>, authorize = false): Promise<PersonalizationOutcome> {
+  private async run(action: () => Promise<PersonalizationOutcome>, authorization: 'none' | 'matching' | 'view' = 'none'): Promise<PersonalizationOutcome> {
     this.start();
     const operation = ++this.operation;
     const outcome = await action();
     if (this.closed) return outcome;
-    if (outcome.kind !== 'committed' && operation === this.operation) this.update({ ...this.snapshot, diagnostic: outcome.diagnostic });
-    else if (outcome.kind === 'committed' && authorize && operation === this.operation) this.authorize(outcome.snapshot);
+    if (operation !== this.operation) return outcome;
+    if (outcome.kind !== 'committed') this.update({ ...this.snapshot, diagnostic: outcome.diagnostic });
+    else {
+      if (authorization !== 'none') this.authorize(outcome.snapshot, authorization);
+      const recovery = this.snapshot.recovery;
+      const active = recovery.appearance === 'session' || recovery.view === 'session';
+      const diagnostic = active ? 'Change saved. Session recovery remains active. Retry saved preferences to resume saved choices.'
+        : this.snapshot.readiness === 'blocked' ? this.snapshot.diagnostic : null;
+      this.update({ ...this.snapshot, diagnostic });
+      if (diagnostic) return { ...outcome, diagnostic };
+    }
     return outcome;
   }
   patchPreferences(patch: PreferencePatch): Promise<PersonalizationOutcome> {
-    return this.run(() => this.storage.patchPreferences(patch), patch.kind === 'ui-enabled' && patch.enabled);
+    return this.run(() => this.storage.patchPreferences(patch), patch.kind === 'ui-enabled' && patch.enabled ? 'view' : 'none');
   }
-  replacePreferences(input: { readonly expectedRevision: number; readonly document: DesktopPreferencesV1 }): Promise<PersonalizationOutcome> {
-    return this.run(() => this.storage.replacePreferences(input), true);
+  replacePreferences(input: { readonly expectedEpoch: number; readonly expectedRevision: number; readonly document: DesktopPreferencesV1 }): Promise<PersonalizationOutcome> {
+    return this.run(() => this.storage.replacePreferences(input), 'matching');
   }
   importPalette(text: string): Promise<PersonalizationOutcome> { return this.run(() => this.storage.importPalette(text)); }
   selectPalette(digest: PaletteDigest | null): Promise<PersonalizationOutcome> { return this.run(() => this.storage.selectPalette(digest)); }
-  removePalette(digest: string): Promise<PersonalizationOutcome> { return this.run(() => this.storage.removePalette(digest)); }
+  removePalette(key: IDBValidKey): Promise<PersonalizationOutcome> { return this.run(() => this.storage.removePalette(key)); }
+  private confirmedRecovery(outcome: PersonalizationOutcome, scope: 'appearance' | 'view'): boolean {
+    const current = this.snapshot.saved?.preferences;
+    if (outcome.kind !== 'committed' || outcome.revision === null || current?.kind !== 'valid' || current.epoch !== outcome.epoch || current.revision < outcome.revision) return false;
+    return scope === 'appearance' ? current.document.appearance === 'system' && current.document.palette.kind === 'builtin' : !current.document.ui.enabled;
+  }
   async resetAppearance(): Promise<PersonalizationOutcome> {
     const recovery = ++this.appearanceRecovery;
     this.update(this.effective({ ...this.snapshot, recovery: { ...this.snapshot.recovery, appearance: 'session' }, diagnostic: 'Default appearance is active for this session. Saving…' }));
-    const outcome = await this.run(() => this.storage.resetAppearance());
-    if (recovery === this.appearanceRecovery && outcome.kind === 'committed' && this.snapshot.saved === outcome.snapshot && outcome.snapshot.preferences.kind === 'valid'
-      && outcome.snapshot.preferences.document.appearance === 'system' && outcome.snapshot.preferences.document.palette.kind === 'builtin') {
+    const pending = this.run(() => this.storage.resetAppearance());
+    const operation = this.operation;
+    const outcome = await pending;
+    if (recovery === this.appearanceRecovery && this.confirmedRecovery(outcome, 'appearance')) {
       this.update(this.effective({ ...this.snapshot, recovery: { ...this.snapshot.recovery, appearance: 'saved' }, diagnostic: 'Default appearance saved.' }));
-    } else if (recovery === this.appearanceRecovery && !this.closed) this.update({ ...this.snapshot, diagnostic: 'Default appearance is active for this session. Could not save this change.' });
-    return outcome;
+    } else if (recovery === this.appearanceRecovery && operation === this.operation && !this.closed) this.update({ ...this.snapshot, diagnostic: 'Default appearance is active for this session. Could not save this change.' });
+    return outcome.kind === 'committed' && this.snapshot.diagnostic ? { ...outcome, diagnostic: this.snapshot.diagnostic } : outcome;
   }
   async restoreDefaultView(): Promise<PersonalizationOutcome> {
     const recovery = ++this.viewRecovery;
     this.update(this.effective({ ...this.snapshot, recovery: { ...this.snapshot.recovery, view: 'session' }, diagnostic: 'Default view is active for this session. Saving…' }));
-    const outcome = await this.run(() => this.storage.restoreDefaultView());
-    if (recovery === this.viewRecovery && outcome.kind === 'committed' && this.snapshot.saved === outcome.snapshot && outcome.snapshot.preferences.kind === 'valid' && !outcome.snapshot.preferences.document.ui.enabled) {
+    const pending = this.run(() => this.storage.restoreDefaultView());
+    const operation = this.operation;
+    const outcome = await pending;
+    if (recovery === this.viewRecovery && this.confirmedRecovery(outcome, 'view')) {
       this.update(this.effective({ ...this.snapshot, recovery: { ...this.snapshot.recovery, view: 'saved' }, diagnostic: 'Default view saved.' }));
-    } else if (recovery === this.viewRecovery && !this.closed) this.update({ ...this.snapshot, diagnostic: 'Default view is active for this session. Could not save this change.' });
-    return outcome;
+    } else if (recovery === this.viewRecovery && operation === this.operation && !this.closed) this.update({ ...this.snapshot, diagnostic: 'Default view is active for this session. Could not save this change.' });
+    return outcome.kind === 'committed' && this.snapshot.diagnostic ? { ...outcome, diagnostic: this.snapshot.diagnostic } : outcome;
   }
-  resetPersonalization(): Promise<PersonalizationOutcome> { return this.run(() => this.storage.resetPersonalization(), true); }
+  resetPersonalization(): Promise<PersonalizationOutcome> { return this.run(() => this.storage.resetPersonalization(), 'matching'); }
   close(): void {
     if (this.closed) return;
     this.closed = true; this.operation++;

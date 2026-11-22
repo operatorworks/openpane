@@ -1,3 +1,5 @@
+import { ThemeScope } from '@openpane/ui-primitives/desktop';
+import { palettes, type Appearance, type ThemeColors } from '@openpane/theme';
 import { Suspense, useEffect, type ReactNode } from 'react';
 import type { ConversationScope, Json } from '@openpane/contracts';
 import { sameScope } from '@openpane/contracts';
@@ -78,8 +80,8 @@ export function extensionRows({ customizations, activations, enabled, disabledNa
         desktopState: activation?.kind === 'failed' ? 'Failed' : !bundled.has(namespace) ? 'No desktop code' : !enabled || disabledNamespaces.includes(namespace) ? 'Disabled' : activation?.kind === 'ready' ? 'Ready' : 'Loading',
         hostState: metadata === null ? 'Unknown' : !descriptor ? 'Not configured' : descriptor.state === 'failed' ? 'Failed' : descriptor.installations.length === 0 ? 'Not configured' : descriptor.installations.every(item => item.status === 'unavailable') ? 'Unavailable' : 'Available' });
     if (!bundled.has(namespace)) return row(descriptor?.state === 'failed' ? 'Failed' : 'No view', descriptor?.state === 'failed' ? SERVER_FAILURE : null);
-    if (!enabled || disabledNamespaces.includes(namespace)) return row('Disabled', 'Executable UI is off. Enable this desktop UI in Settings to open it.');
     if (activation?.kind === 'failed') return row('Failed', activation.message);
+    if (!enabled || disabledNamespaces.includes(namespace)) return row('Disabled', 'Executable UI is off. Enable this desktop UI in Settings to open it.');
     if (descriptor?.state === 'failed') return row('Failed', SERVER_FAILURE);
     if (!activation || activation.kind === 'loading') return row('Loading');
     if (!workspace) return row('No view');
@@ -127,7 +129,8 @@ export function ExtensionsList({ rows, onOpen, enabled, tools = null, conversati
   </section>;
 }
 
-export function ExtensionWorkspace({ row, metadata, workspaces, active, controller, conversation, status, onBack }: {
+export function ExtensionWorkspace({ contentPalette = palettes, row, metadata, workspaces, active, controller, conversation, status, onBack }: {
+  readonly contentPalette?: Readonly<Record<Appearance, ThemeColors>>;
   readonly row: OpenableRow;
   readonly metadata: ServiceMetadata | null;
   readonly workspaces: Readonly<Record<string, WorkspaceConversations>>;
@@ -194,7 +197,7 @@ export function ExtensionWorkspace({ row, metadata, workspaces, active, controll
     <div className="extension-workspace" data-extension-workspace={namespace}>
       <Suspense fallback={<p role="status" className="extension-loading">Loading {row.label}…</p>}>
         <CustomizationBoundary key={row.owner.lifetime} fail={row.owner.fail} fallback={<p role="alert">{row.label} could not load.</p>}>
-          <View {...props} />
+          <ThemeScope palette={contentPalette} className="content-theme"><View {...props} /></ThemeScope>
         </CustomizationBoundary>
       </Suspense>
     </div>

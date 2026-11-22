@@ -35,3 +35,7 @@ for (const namespace of ['a', 'example-123', 'a'.repeat(32), '', 'A', '-bad', 'b
     assert.equal(valid(() => parsePaletteDocument({ ...starterPalette(), name: namespace })), sdk);
   });
 }
+
+test('palette JSON fields must be present rather than inherited', () => {
+  assert.throws(() => parsePaletteDocument(Object.create(starterPalette())), /required field/);
+});

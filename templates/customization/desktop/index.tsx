@@ -46,7 +46,7 @@ function ReviewWorkspace(props: WorkspaceViewProps) {
 }
 function ReviewPlan(props: ConversationModuleProps) {
   const unresolved = decisions(props);
-  return createElement(Surface, null,
+  return createElement(Surface, { className: 'review-plan' },
     createElement(Text, { as: 'h2' }, 'Plan review'),
     createElement(Text, null, 'Ask the current agent to review the plan and suggest a next step.'),
     createElement(Text, null, `${unresolved.length} possible unresolved decisions in this conversation.`));

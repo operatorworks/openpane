@@ -169,3 +169,37 @@ test('a descendant render failure isolates its extension and restore disposes on
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await page.getByRole('heading', { name: 'Approval required', exact: true }).waitFor();
 });
+
+test('choosing another namespace layout preserves an unresolved module action across placement changes', { timeout: 45_000 }, async t => {
+  const host = await fixture(t), page = await host.page();
+  await page.getByRole('button', { name: 'New recorded conversation' }).click(); await connected(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByLabel('Content layout owner', { exact: true }).selectOption({ label: 'Builtin' }); await chats(page);
+  await customRuntime(page, host, entry(`window.calls = 0; window.activations = { module: 1 }; window.disposals = 0;
+    return { modules: [{ id: 'parent', label: 'Parent', component() { return null; }, children: [{ id: 'child', label: 'Child', component() { return null; },
+      actions: [{ id: 'run', label: 'Deferred module action', run() { window.calls++; return new Promise(resolve => { window.finishAction = resolve; }); } }] }] }],
+      dispose() { window.disposals++; } };`), false,
+    `, { manifest: { ...manifest, namespace: 'layout' }, ${entry(`window.activations.layout = (window.activations.layout || 0) + 1;
+      return { modules: [], contentLayout: ({ transcript, modules }) => <section aria-label="Chosen layout">{transcript}{modules}</section>, dispose() { window.disposals++; } };`)} }`);
+  await tools(page); await page.getByRole('button', { name: 'Deferred module action', exact: true }).click();
+  await status(page, 'Deferred module action').filter({ hasText: 'Submitting…' }).waitFor();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByLabel('Content layout owner', { exact: true }).selectOption({ label: 'layout' }); await chats(page);
+  const action = page.getByRole('region', { name: 'Chosen layout' }).getByRole('button', { name: 'Deferred module action', exact: true });
+  await action.waitFor();
+  await action.evaluate(button => button.click()); assert.equal(await page.evaluate(() => window.calls), 1, 'moving the same action cannot invoke it twice');
+  assert.equal(await action.isDisabled(), true, 'moving the same action cannot reopen its pending guard');
+  await status(page, 'Deferred module action').filter({ hasText: 'Submitting…' }).waitFor();
+  await page.evaluate(() => window.finishAction({ kind: 'rejected', reason: 'First action settled' }));
+  await status(page, 'Deferred module action').filter({ hasText: 'First action settled' }).waitFor();
+  await action.click(); assert.equal(await page.evaluate(() => window.calls), 2);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByLabel('Content layout owner', { exact: true }).selectOption({ label: 'Builtin' });
+  await tools(page);
+  assert.equal(await page.getByRole('button', { name: 'Deferred module action', exact: true }).isDisabled(), true);
+  await status(page, 'Deferred module action').filter({ hasText: 'Submitting…' }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.activations), { module: 1, layout: 1 });
+  assert.equal(await page.evaluate(() => window.disposals), 0);
+  await page.evaluate(() => window.finishAction({ kind: 'rejected', reason: 'Second action settled' }));
+  await status(page, 'Deferred module action').filter({ hasText: 'Second action settled' }).waitFor();
+});

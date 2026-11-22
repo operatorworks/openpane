@@ -23,3 +23,8 @@ for (const [label, modify, match] of [
   ['unknown slot', d => ({ ...d, ui: { ...d.ui, slots: { ...d.ui.slots, foo: { kind: 'automatic' } } } }), /slots/],
   ['invalid slot selection', d => ({ ...d, ui: { ...d.ui, slots: { ...d.ui.slots, transcript: { kind: 'automatic', namespace: 'test' } } } }), /slots.transcript/],
 ]) test(`preferences reject ${label}`, () => assert.throws(() => parseDesktopPreferences(modify(defaultDesktopPreferences)), match));
+
+test('preferences reject sparse namespace arrays rather than serializing invalid holes', () => {
+  assert.throws(() => parseDesktopPreferences({ ...defaultDesktopPreferences,
+    ui: { ...defaultDesktopPreferences.ui, disabledNamespaces: Array(1) } }), /namespace/);
+});

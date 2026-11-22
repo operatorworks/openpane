@@ -314,3 +314,5 @@
 .palette-list li { overflow-wrap: anywhere; }
 .personalization-controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 .palette-preview { padding: 1rem; border: 1px solid var(--aui-color-border); background: var(--aui-color-canvas); color: var(--aui-color-text); }
+
+.builtin-colors > * { background: var(--aui-color-canvas); color: var(--aui-color-text); }

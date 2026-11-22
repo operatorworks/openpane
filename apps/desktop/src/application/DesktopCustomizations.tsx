@@ -30,6 +30,9 @@ export type ActivitySelection = SlotSelection<'activity'>;
 export type ContentLayoutSelection = SlotSelection<'contentLayout'>;
 const DEFAULT_SLOT: { readonly kind: 'default' } = { kind: 'default' };
 type SlotPreference = import('./personalization.js').SlotPreference;
+const BUILTIN_SLOTS: Readonly<Record<Slot, SlotPreference>> = {
+  transcript: { kind: 'builtin' }, activity: { kind: 'builtin' }, contentLayout: { kind: 'builtin' },
+};
 export function selectSlot<S extends Slot>(owners: readonly NamespaceActivation[], slot: S, preference: SlotPreference = { kind: 'automatic' }): SlotSelection<S> {
   if (preference.kind === 'builtin') return DEFAULT_SLOT;
   if (preference.kind === 'extension') {
@@ -89,13 +92,17 @@ export function useDesktopCustomizations({ customizations, enabled, sink, disabl
   const [local] = useState(() => new DesktopExtensionLifecycle());
   const owner = provided ?? local;
   useLifecycleLifetime(provided ? null : local);
-  const namespaces = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
+  const snapshot = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
+  const namespaces = snapshot.filter(activation => activation.kind === 'failed' || enabled && !loading
+    && !disabledNamespaces.includes(activation.namespace)
+    && customizations.some(entry => entry.manifest.namespace === activation.namespace));
   useLayoutEffect(() => {
     if (!loading) owner.reconcile(enabled ? customizations.filter(item => !disabledNamespaces.includes(item.manifest.namespace)) : []);
     if (sink) owner.attach(sink);
   }, [owner, customizations, enabled, sink, disabledNamespaces, loading]);
-  return { namespaces, transcript: selectSlot(namespaces, 'transcript', slots?.transcript), activity: selectSlot(namespaces, 'activity', slots?.activity),
-    contentLayout: selectSlot(namespaces, 'contentLayout', slots?.contentLayout), generations: namespaces.flatMap(item => item.kind === 'ready' ? [item.generation] : []) };
+  const effectiveSlots = enabled ? slots : BUILTIN_SLOTS;
+  return { namespaces, transcript: selectSlot(namespaces, 'transcript', effectiveSlots?.transcript), activity: selectSlot(namespaces, 'activity', effectiveSlots?.activity),
+    contentLayout: selectSlot(namespaces, 'contentLayout', effectiveSlots?.contentLayout), generations: namespaces.flatMap(item => item.kind === 'ready' ? [item.generation] : []) };
 }
 
 export function CustomizationActivity({ selection, context, fallback, conversationKey }: {

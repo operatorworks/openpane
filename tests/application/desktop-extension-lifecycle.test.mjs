@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DesktopExtensionLifecycle } from '../../apps/desktop/dist/application/desktop-extension-lifecycle.js';
 import { createGenerationSource } from '../../apps/desktop/dist/application/frontend-sends.js';
-import { pinFrontendTools } from '@openpane/sdk/tools';
+import { pinFrontendTools, retainFrontendTools } from '@openpane/sdk/tools';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => Promise.withResolvers();
 const manifest = namespace => ({ namespace, trust: 'full', sdkVersion: '0.13.0', entries: [{ kind: 'desktop', module: './entry.js' }] });
@@ -59,7 +59,10 @@ test('withdrawn namespace cannot serve new pins while an existing tool binding d
   });
   owner.attach(source); owner.reconcile([a]); await tick();
   const pin = pinFrontendTools({ generations: source.snapshot().generations, platform: 'desktop', run, capabilities: { tools: { clientProvided: true } } });
-  owner.reconcile([]); await tick(); assert.deepEqual(source.snapshot().generations, []); assert.equal(disposals, 0);
+  const savedGeneration = source.snapshot().generations[0];
+  owner.reconcile([]);
+  assert.throws(() => retainFrontendTools({ generations: [savedGeneration], platform: 'desktop' }), /retired/, 'withdrawal closes fresh retention in the same turn');
+  await tick(); assert.deepEqual(source.snapshot().generations, []); assert.equal(disposals, 0);
   assert.deepEqual(await pin.invoke('alpha__echo', {}, pin.bindings[0].activationId), { kind: 'completed', output: 'original' });
   pin.release(); await tick(); assert.equal(disposals, 1); await owner.close();
 });
@@ -71,4 +74,30 @@ test('a render-failed retired generation can be disabled and reenabled after cle
   assert.equal(owner.getSnapshot()[0].kind, 'failed');
   owner.reconcile([]); await tick(); owner.reconcile([a]); await tick();
   assert.equal(calls, 2); assert.equal(owner.getSnapshot()[0].kind, 'ready'); await owner.close();
+});
+
+for (const phase of ['load', 'activation', 'presentation']) test(`producer AggregateError during ${phase} remains retryable without a cleanup failure`, async () => {
+  const owner = new DesktopExtensionLifecycle(); let attempts = 0;
+  const failure = () => { attempts++; throw new AggregateError([new Error('producer failure')], 'ordinary activation problem'); };
+  const a = phase === 'load' ? { manifest: manifest('alpha'), load: failure } : fixture('alpha', phase === 'activation' ? failure : () => {
+    attempts++; return { get modules() { throw new AggregateError([], 'producer presentation failed'); }, dispose() {} };
+  });
+  owner.reconcile([a]); await tick();
+  assert.equal(owner.getSnapshot()[0].kind, 'failed');
+  owner.reconcile([]); await tick(); owner.reconcile([a]); await tick();
+  assert.equal(attempts, 2, 'an author AggregateError alone does not require a process restart');
+  await owner.close();
+});
+
+test('presentation failure with rejected acquired cleanup remains unavailable after reenable', async () => {
+  const owner = new DesktopExtensionLifecycle(); let attempts = 0, disposals = 0;
+  const a = fixture('alpha', () => {
+    attempts++;
+    return { get modules() { throw new Error('presentation failed'); }, dispose() { disposals++; throw new Error('cleanup rejected'); } };
+  });
+  owner.reconcile([a]); await tick();
+  assert.equal(owner.getSnapshot()[0].kind, 'failed');
+  owner.reconcile([]); await tick(); owner.reconcile([a]); await tick();
+  assert.equal(attempts, 1); assert.equal(disposals, 1); assert.match(owner.getSnapshot()[0].message, /Restart/);
+  await owner.close();
 });

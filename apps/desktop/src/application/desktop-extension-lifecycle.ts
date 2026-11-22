@@ -61,10 +61,11 @@ export class DesktopExtensionLifecycle {
     this.owners.set(namespace, owner);
     const fail = (error: unknown) => {
       owner.state = { kind: 'failed', namespace, message: `Executable UI failed. ${customizationMessage(error)}` };
-      this.publish();
       if (owner.generation) this.retire(owner);
+      this.publish();
     };
     owner.activation = (async () => {
+      let primaryFailure: { readonly error: unknown } | undefined;
       try {
         const imported = await entry.load();
         if (!owner.wanted) return;
@@ -72,13 +73,14 @@ export class DesktopExtensionLifecycle {
         if (compatibility.kind !== 'compatible') throw new Error(compatibility.reason);
         const executable = imported.default as UiExtensionEntry<'desktop'>;
         const active = await createUiExtensionGeneration({ namespace, generation: String(owner.id), platform: 'desktop',
-          activate: context => executable.activate(context), onFailure: fail });
+          activate: context => executable.activate(context), onFailure: error => { primaryFailure = { error }; fail(error); } });
         owner.generation = active.generation;
         if (owner.wanted) owner.state = { kind: 'ready', namespace, lifetime: owner.id, generation: active.generation, presentation: active.presentation, fail };
       } catch (error) {
+        // The SDK rethrows the primary failure unchanged when cleanup succeeds.
+        // A distinct rejection after our nonthrowing observer means acquired cleanup failed.
+        if (primaryFailure && !Object.is(error, primaryFailure.error)) this.cleanupFailures.add(namespace);
         fail(error);
-        // A rejected creation has already awaited its acquired lifetime's cleanup.
-        if (error instanceof AggregateError) this.cleanupFailures.add(namespace);
       }
       this.publish();
     })();
@@ -86,13 +88,12 @@ export class DesktopExtensionLifecycle {
 
   private retire(owner: Lifetime): void {
     if (owner.retirement) { void owner.retirement.then(() => this.releaseRemoved(owner)); return; }
-    // Mark before awaiting activation: a late generation is acquired and retired by this same barrier.
-    owner.retirement = owner.activation.then(async () => {
-      try { await owner.generation?.retire(); }
-      catch (error) {
-        owner.state = { kind: 'failed', namespace: owner.entry.manifest.namespace, message: `Executable UI cleanup failed. ${customizationMessage(error)} Restart the app before enabling this namespace.` };
-        this.cleanupFailures.add(owner.entry.manifest.namespace);
-      }
+    // Close retention immediately for a published generation; only pending acquisition waits.
+    const retiring = owner.generation ? owner.generation.retire() : owner.activation.then(() => owner.generation?.retire());
+    owner.retirement = retiring.catch(error => {
+      owner.state = { kind: 'failed', namespace: owner.entry.manifest.namespace, message: `Executable UI cleanup failed. ${customizationMessage(error)} Restart the app before enabling this namespace.` };
+      this.cleanupFailures.add(owner.entry.manifest.namespace);
+    }).then(() => {
       const namespace = owner.entry.manifest.namespace;
       if (owner.wanted && owner.state.kind !== 'failed') {
         owner.state = { kind: 'failed', namespace, message: 'Executable UI failed. Disable and re-enable this namespace to retry.' };

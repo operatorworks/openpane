@@ -1,7 +1,7 @@
 import { Component, useState, type ReactNode } from 'react';
 import { Button, Surface, Text, ThemeScope } from '@openpane/ui-primitives/desktop';
 
-import { palettes, type Appearance, type ThemeColors } from '@openpane/theme';
+import { palettes, type Appearance } from '@openpane/theme';
 
 type ContentState = { readonly kind: 'ready' } | { readonly kind: 'failed' };
 
@@ -55,9 +55,8 @@ function DefaultView() {
   </div>;
 }
 
-export function DesktopShell({ appearance, contentPalette = palettes, onRestoreAppearance, children, defaultView, settingsView, extensionsView, workspaceOpen = false, protectedContent, navigation, activeView, onRestore, restoreMode = 'remount', status, buildLabel }: {
+export function DesktopShell({ appearance, onRestoreAppearance, children, defaultView, settingsView, extensionsView, workspaceOpen = false, protectedContent, navigation, activeView, onRestore, restoreMode = 'remount', status, buildLabel }: {
   readonly appearance?: Appearance | undefined;
-  readonly contentPalette?: Readonly<Record<Appearance, ThemeColors>>;
   readonly onRestoreAppearance?: () => void;
   readonly children?: ReactNode;
   readonly defaultView?: ReactNode;
@@ -92,7 +91,7 @@ export function DesktopShell({ appearance, contentPalette = palettes, onRestoreA
     <main id="main-content">
       <div className="shell-view" hidden={showSettings || showExtensions}>
         <ContentBoundary key={boundaryKey} revision={revision}>
-          <ThemeScope palette={contentPalette} className="content-theme">{view.kind === 'initial' ? children ?? defaultView ?? <DefaultView /> : defaultView ?? <DefaultView />}</ThemeScope>
+          <ThemeScope palette={palettes} className="content-theme">{view.kind === 'initial' ? children ?? defaultView ?? <DefaultView /> : defaultView ?? <DefaultView />}</ThemeScope>
         </ContentBoundary>
       </div>
       {settingsView !== undefined && <div className="shell-view" hidden={!showSettings}>

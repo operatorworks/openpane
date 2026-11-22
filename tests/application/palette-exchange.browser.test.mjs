@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { canonicalPaletteText, palettes, starterPalette } from '@openpane/theme';
-import { fixture, connected, draft, wait } from './browser-support.mjs';
+import { fixture, connected, draft, wait, customRuntime } from './browser-support.mjs';
 const settings = page => page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Settings', exact: true }).click();
 const chats = page => page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Chats', exact: true }).click();
 const rootAppearance = page => page.locator('.desktop-shell').getAttribute('data-appearance');
@@ -22,8 +23,8 @@ test('palette exchange persists without activating code and recovery stays built
   await page.getByRole('button', { name: 'Preview palette', exact: true }).click();
   await page.getByRole('button', { name: 'Import palette', exact: true }).click();
   const select = page.getByRole('button', { name: /^Select Exchange palette / }); await select.waitFor();
-  assert.equal((await colors(page, '.chat-view')).accent, palettes.dark.accent, 'import alone does not select');
-  await select.click(); await wait(async () => (await colors(page, '.chat-view')).accent === '#cc55aa', 'selected content palette');
+  assert.equal((await colors(page, '.conversation-content')).accent, palettes.dark.accent, 'import alone does not select');
+  await select.click(); await wait(async () => (await colors(page, '.conversation-content')).accent === '#cc55aa', 'selected content palette');
   assert.deepEqual(await colors(page, '.desktop-shell'), palettes.dark);
   assert.deepEqual(await colors(page, '.settings-panel'), palettes.dark);
   assert.deepEqual(await colors(page, '.recovery-menu summary'), palettes.dark);
@@ -34,13 +35,13 @@ test('palette exchange persists without activating code and recovery stays built
   assert.equal(exported, canonicalPaletteText(document));
   await page.getByRole('button', { name: /^Remove palette / }).click();
   await wait(async () => await page.getByRole('button', { name: /^Select Exchange palette / }).count() === 0, 'removed resource');
-  assert.equal((await colors(page, '.chat-view')).accent, palettes.dark.accent);
+  assert.equal((await colors(page, '.conversation-content')).accent, palettes.dark.accent);
   await page.getByLabel('Palette JSON', { exact: true }).fill(exported);
   await page.getByRole('button', { name: 'Preview palette', exact: true }).click(); await page.getByRole('button', { name: 'Import palette', exact: true }).click();
   await page.getByRole('button', { name: /^Select Exchange palette / }).click();
   await chats(page); assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'keep this draft');
   await page.locator('.recovery-menu summary').click(); await page.getByRole('button', { name: 'Restore default appearance', exact: true }).first().click();
-  await wait(async () => (await colors(page, '.chat-view')).accent === palettes.light.accent, 'appearance recovery');
+  await wait(async () => (await colors(page, '.conversation-content')).accent === palettes.light.accent, 'appearance recovery');
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'keep this draft');
   await page.emulateMedia({ colorScheme: 'dark' }); await wait(async () => await rootAppearance(page) === 'dark', 'live OS appearance');
   assert.deepEqual(await colors(page, '.recovery-menu summary'), palettes.dark);
@@ -60,4 +61,86 @@ test('JSON editor retains a stale draft and refuses to overwrite another window'
   await page.getByRole('button', { name: 'Save JSON', exact: true }).click();
   await wait(async () => /changed|stale|newer|another/i.test(await page.locator('[role="status"]').allTextContents().then(x => x.join(' '))), 'stale editor diagnostic');
   assert.equal(await editor.inputValue(), original); assert.equal(await rootAppearance(page), 'dark');
+});
+
+test('the same JSON editor advances its own saved base across consecutive successful edits', async t => {
+  const host = await fixture(t), page = await host.page(); await settings(page);
+  await page.getByRole('button', { name: 'Edit preferences JSON', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Preferences JSON', exact: true });
+  const original = JSON.parse(await editor.inputValue());
+  for (const appearance of ['dark', 'light']) {
+    const text = JSON.stringify({ ...original, appearance }, null, 2);
+    await editor.fill(text); await page.getByRole('button', { name: 'Save JSON', exact: true }).click();
+    await wait(async () => await rootAppearance(page) === appearance, `saved ${appearance} in the same editor`);
+    assert.equal(await editor.inputValue(), text);
+    assert.equal(await page.getByRole('status').filter({ hasText: 'Saved locally.' }).count(), 1);
+  }
+  const saved = await page.evaluate(async () => {
+    const opening = indexedDB.open('openpane-personalization', 1), db = await new Promise(resolve => { opening.onsuccess = () => resolve(opening.result); });
+    const request = db.transaction('preferences').objectStore('preferences').get('current');
+    const row = await new Promise(resolve => { request.onsuccess = () => resolve(request.result); }); db.close(); return row;
+  });
+  assert.equal(saved.revision, 2);
+  assert.equal(saved.document.appearance, 'light');
+});
+
+test('valid preferences larger than the palette limit export and import in a fresh profile', async t => {
+  const host = await fixture(t), page = await host.page(); await settings(page);
+  await page.getByRole('button', { name: 'Edit preferences JSON', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Preferences JSON', exact: true });
+  const original = JSON.parse(await editor.inputValue());
+  const document = { ...original, appearance: 'dark', ui: { ...original.ui, enabled: false,
+    disabledNamespaces: Array.from({ length: 5000 }, (_, index) => `namespace-${index.toString(36).padStart(4, '0')}`) } };
+  await editor.fill(JSON.stringify(document)); await page.getByRole('button', { name: 'Save JSON', exact: true }).click();
+  await wait(async () => await rootAppearance(page) === 'dark', 'large preference save');
+  await page.getByRole('button', { name: 'Export preferences', exact: true }).click();
+  const exported = await page.getByRole('textbox', { name: 'Exported JSON', exact: true }).inputValue();
+  assert.ok(Buffer.byteLength(exported, 'utf8') > 65536, 'actual exported file exceeds the palette-specific limit');
+  assert.deepEqual(JSON.parse(exported), document);
+  assert.deepEqual(Object.keys(JSON.parse(exported)), ['version', 'appearance', 'palette', 'ui']);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download JSON', exact: true }).click()]);
+  const downloaded = await download.path();
+  assert.equal(await readFile(downloaded, 'utf8'), exported);
+  const context = await host.browser.newContext(); t.after(() => context.close());
+  const fresh = await context.newPage(); await fresh.goto(`${host.origin}/browser.html`); await settings(fresh);
+  await fresh.getByLabel('Import preferences file', { exact: true }).setInputFiles(downloaded);
+  assert.equal(await fresh.getByRole('textbox', { name: 'Preferences JSON', exact: true }).inputValue(), exported);
+  await fresh.getByRole('button', { name: 'Save JSON', exact: true }).click();
+  await wait(async () => await rootAppearance(fresh) === 'dark', 'large preference import committed');
+  await fresh.getByRole('button', { name: 'Export preferences', exact: true }).click();
+  assert.deepEqual(JSON.parse(await fresh.getByRole('textbox', { name: 'Exported JSON', exact: true }).inputValue()), document);
+  assert.equal(await fresh.getByLabel('Enable executable UI customizations', { exact: true }).isChecked(), false);
+});
+
+test('reserved mode names remain selectable as explicit extension namespaces after reload', async t => {
+  const host = await fixture(t), page = await host.page();
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  const entry = namespace => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+    return { modules: [], overrides: { transcript() { return <p>${namespace} claimant transcript</p>; } }, dispose() {} };
+  } } })`;
+  await customRuntime(page, host, entry('fixture'), false,
+    `, {manifest:{...manifest,namespace:'builtin'},${entry('builtin')}}, {manifest:{...manifest,namespace:'automatic'},${entry('automatic')}}`);
+  for (const namespace of ['builtin', 'automatic']) {
+    await settings(page);
+    const select = page.getByLabel('Transcript owner', { exact: true });
+    await select.selectOption({ label: namespace });
+    await chats(page); await page.getByText(`${namespace} claimant transcript`, { exact: true }).waitFor();
+    await page.reload(); await connected(page); await settings(page);
+    assert.equal(await select.inputValue(), `extension:${namespace}`);
+    await page.getByRole('button', { name: 'Export preferences', exact: true }).click();
+    const saved = JSON.parse(await page.getByRole('textbox', { name: 'Exported JSON', exact: true }).inputValue());
+    assert.deepEqual(saved.ui.slots.transcript, { kind: 'extension', namespace });
+    await chats(page); await page.getByText(`${namespace} claimant transcript`, { exact: true }).waitFor();
+  }
+});
+
+test('Copy JSON explains the selectable fallback when clipboard capability is absent', async t => {
+  const host = await fixture(t), page = await host.page(); await settings(page);
+  await page.getByRole('button', { name: 'Export starter palette', exact: true }).click();
+  const exported = page.getByRole('textbox', { name: 'Exported JSON', exact: true });
+  const text = await exported.inputValue();
+  await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true }));
+  await page.getByRole('button', { name: 'Copy JSON', exact: true }).click();
+  assert.match((await page.getByRole('status').allTextContents()).join('\n'), /Select and copy the exported JSON\./);
+  assert.equal(await exported.inputValue(), text);
 });

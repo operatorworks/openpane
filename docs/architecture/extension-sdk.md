@@ -416,15 +416,15 @@ return { contentLayout: ReviewLayout, modules, dispose() {} };
 ```
 
 This arrangement is opt-in. The [Plan review template](../../templates/customization/desktop/index.tsx) uses a namespace workspace and scoped transcript without claiming a global content layout.
-The host supplies one scroll viewport and an inline-size container. The template stacks its columns at or below 640px of available content width.
+The host supplies one scroll viewport and an inline-size container. An opt-in content layout can use container queries to adapt to the available content width.
 Permissions, approvals, the composer, Stop, command recovery, and navigation remain outside the layout.
 Activation, failure, suspension, and restore preserve those controls for the same selected conversation.
 Navigation retains the existing conversation identity and command checks. Layouts do not create independently active conversations.
 
 The host captures `contentLayout` once with the same function, memo, forwardRef, and lazy rules as transcript components.
 Automatic layout selection waits for admitted namespaces to settle. Multiple ready claims produce sorted diagnostics and builtin presentation. Explicit and builtin selection follow the same persisted choice rules as transcript/activity.
-An omitted layout uses builtin presentation with Conversation tools in Extensions. Without an active conversation, namespace diagnostics remain visible in customization catalog order and layouts do not render.
-Layout activation, conflict changes, and render failure can remount module and transcript views. Pending action feedback and duplicate-click suppression do not survive a remount.
+An omitted layout uses builtin presentation with Conversation tools in Extensions. Without an active conversation, namespace diagnostics remain visible in stable namespace order and layouts do not render.
+Layout activation, conflict changes, and render failure can remount module and transcript views. Host-owned pending action feedback and duplicate-click suppression survive presentation remounts for the same namespace generation, conversation, and complete module/action path. A different conversation or namespace generation has separate action state. Authored component React state may still remount.
 Pending commands retain their original identities in the conversation outbox.
 
 While a layout suspends, the host shows native messages, command and file activity, and a loading notice.
