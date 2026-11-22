@@ -94,7 +94,6 @@ export function ComposerAgentControls({ agents, agent, hasConversation, enabled,
       trigger.current = event.currentTarget;
       setPicker(previous => previous.kind === 'model' ? { kind: 'closed' } : { kind: 'model', harness: currentHarness });
     }}>{currentModel}<Chevron /></button>
-    <button type="button" className="composer-setting composer-effort" aria-label="Effort, Default. Managed by the host." title="Effort is managed by the host. This host does not offer effort settings." disabled>Default<Chevron /></button>
     {open && <div id={id} ref={dialog} className="composer-picker" role="dialog" aria-label={picker.kind === 'harness' ? 'Choose harness' : 'Choose model'} tabIndex={-1}>
       <div className="composer-picker-heading"><strong>{picker.kind === 'harness' ? 'Harness' : 'Select model'}</strong><button type="button" aria-label="Close chat settings" onClick={() => close(true)}>×</button></div>
       {picker.kind === 'harness' && <p>{hasConversation ? 'Choosing a different harness starts a new chat. Your draft stays here.' : 'Choose a harness to start a new chat.'}</p>}

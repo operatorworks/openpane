@@ -148,7 +148,7 @@ test('real browser selection and send render a growing reply, completion, and pe
   await page.getByRole('button', { name: 'Provider', exact: true }).click();
   await page.getByRole('button', { name: 'Start new chat with Streaming provider', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'Conversation connected' }).first().waitFor();
-  assert.doesNotMatch(await page.locator('.composer-footer').textContent(), /not available|later update/);
+  assert.doesNotMatch(await page.locator('.shell-footer').textContent(), /not available|later update/);
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).getAttribute('placeholder'), 'Write to your provider…');
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('A real provider reply');
   await page.getByRole('button', { name: 'Send', exact: true }).click();

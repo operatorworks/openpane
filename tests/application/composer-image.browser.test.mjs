@@ -152,3 +152,52 @@ test('model-less capable picker follows operation capability and retains Retry a
   await page.waitForFunction(() => document.querySelector('.message-user img')?.naturalWidth === 1);
   assert.deepEqual(await page.evaluate(() => globalThis.reads), ['00000000-0000-4000-8000-aaaaaaaaaaaa']);
 });
+
+/** The ConversationView harness with the app stylesheet, inside a panel-sized column, with an empty conversation delivered. */
+async function quietConversation(t) {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const assets = { '/': ['text/html', '<!doctype html><link rel="stylesheet" href="/app.css"><main id="conversation" style="height:100dvh;display:flex"></main><script src="/app.js"></script>'],
+    '/app.css': ['text/css', css], '/app.js': ['text/javascript', bundle.outputFiles[0].text] };
+  await page.route('**/*', async route => {
+    const asset = assets[new URL(route.request().url()).pathname];
+    await (asset ? route.fulfill({ contentType: asset[0], body: asset[1], headers: { 'content-security-policy': HOST_CSP } }) : route.abort());
+  });
+  await page.goto('https://image.test/');
+  await page.waitForFunction(() => typeof globalThis.deliver === 'function');
+  await page.evaluate(() => globalThis.deliver({ kind: 'snapshot', snapshot: { scope: { hostId: 'host', conversationId: 'image' }, projectionVersion: 4, cursor: 0,
+    document: { domain: { messages: [], currentRun: null }, receipts: {}, decisions: {} } } }));
+  return page;
+}
+
+test('a new conversation is a greeting over one quiet composer', async t => {
+  const page = await quietConversation(t);
+  const panel = page.locator('.conversation-panel');
+  await page.getByText('A conversation that stays with you.', { exact: true }).waitFor();
+  assert.equal(await panel.getAttribute('data-empty'), 'true');
+  assert.equal(await page.getByText(/Send a message to begin/).count(), 0);
+  assert.equal(await page.getByRole('heading', { name: 'Your conversation', exact: true }).count(), 1);
+  const header = await page.locator('.conversation-panel > header.visually-hidden').boundingBox();
+  assert.ok(header.width <= 1 && header.height <= 1);
+  assert.equal(await page.locator('.composer-disclosure').count(), 0);
+  const composer = page.locator('.composer'), message = page.getByRole('textbox', { name: 'Message', exact: true });
+  const [panelBox, composerBox] = [await panel.boundingBox(), await composer.boundingBox()];
+  assert.ok(composerBox.y > panelBox.y + panelBox.height * 0.25, 'the empty composer sits away from the top');
+  await message.click();
+  assert.equal(await composer.evaluate(node => getComputedStyle(node).boxShadow), 'none');
+  assert.deepEqual(await message.evaluate(node => [getComputedStyle(node).outlineStyle, getComputedStyle(node).resize]), ['none', 'none']);
+  const single = await message.evaluate(node => node.clientHeight);
+  await message.fill('one\ntwo\nthree');
+  await page.waitForFunction(height => document.querySelector('#message').clientHeight > height, single);
+  await message.fill(Array.from({ length: 80 }, (_, line) => `line ${line}`).join('\n'));
+  const capped = await message.evaluate(node => ({ height: node.getBoundingClientRect().height, max: parseFloat(getComputedStyle(node).maxHeight), scroll: node.scrollHeight > node.clientHeight }));
+  assert.ok(Math.abs(capped.height - capped.max) <= 1 && capped.scroll, JSON.stringify(capped));
+  await message.fill('');
+  await page.waitForFunction(height => document.querySelector('#message').clientHeight <= height, single);
+  await page.evaluate(() => globalThis.deliver({ kind: 'events', events: [{ scope: { hostId: 'host', conversationId: 'image' }, sequence: 1, event: { kind: 'domain', event: {
+    kind: 'message-updated', messageId: 'first', revision: 1, role: 'user', text: 'Hello', complete: true } } }] }));
+  await page.locator('.message-user').waitFor();
+  assert.equal(await panel.getAttribute('data-empty'), null);
+  assert.equal(await page.getByText('A conversation that stays with you.', { exact: true }).count(), 0);
+});

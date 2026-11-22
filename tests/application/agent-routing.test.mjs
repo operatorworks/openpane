@@ -142,12 +142,12 @@ test('authorized agent API and browser route two recorded agents and retain unav
   const message = page.getByRole('textbox', { name: 'Message', exact: true });
   assert.equal(await page.getByRole('combobox', { name: 'Agent for new chat', exact: true }).count(), 0);
   await open('a');
-  assert.match(await page.locator('.composer-footer').textContent(), /Local Codex/);
-  assert.deepEqual(await page.getByRole('group', { name: 'Chat settings', exact: true }).getByRole('button').allTextContents(), ['Codex', 'Select model', 'Default']);
-  assert.equal(await page.getByRole('button', { name: 'Effort, Default. Managed by the host.', exact: true }).isDisabled(), true);
+  assert.match(await page.locator('.shell-footer').textContent(), /Local Codex/);
+  assert.deepEqual(await page.getByRole('group', { name: 'Chat settings', exact: true }).getByRole('button').allTextContents(), ['Codex', 'Select model']);
+  assert.equal(await page.getByRole('button', { name: /^Effort/ }).count(), 0);
   await message.fill('Draft for Codex');
   await open('b');
-  assert.match(await page.locator('.composer-footer').textContent(), /Claude.*Sonnet/);
+  assert.match(await page.locator('.shell-footer').textContent(), /Claude.*Sonnet/);
   await message.fill('Draft for Sonnet');
   await page.screenshot({ path: '.audit/mvp/native-agent-routing-sonnet.png' });
   await open('a');
@@ -188,7 +188,7 @@ test('authorized agent API and browser route two recorded agents and retain unav
   await page.getByRole('button', { name: 'Claude', exact: true }).click();
   assert.equal(await page.getByRole('button', { name: `Start new chat with ${opus.label}`, exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('button', { name: `Start new chat with ${sonnet.label}`, exact: true }).isEnabled(), true);
-  assert.match(await page.locator('.composer-footer').textContent(), /Local Codex/);
+  assert.match(await page.locator('.shell-footer').textContent(), /Local Codex/);
   assert.equal(await message.inputValue(), 'Draft for Codex');
   let loseCreate = true, dropCreate = false, droppedScope;
   const createRequests = [], recoveryResponses = [];
@@ -208,7 +208,7 @@ test('authorized agent API and browser route two recorded agents and retain unav
   await page.getByRole('button', { name: 'Recover creation', exact: true }).waitFor();
   assert.equal(await page.getByRole('combobox', { name: 'Agent for pending creation', exact: true }).count(), 0);
   await page.getByRole('button', { name: 'Recover creation', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.composer-footer')?.textContent?.includes('Sonnet'));
+  await page.waitForFunction(() => document.querySelector('.shell-footer')?.textContent?.includes('Sonnet'));
   await page.getByRole('heading', { name: 'Plan review', exact: true }).waitFor();
   await message.fill('Unsent selected Sonnet draft');
   await page.getByRole('button', { name: 'Review the plan', exact: true }).click();
@@ -281,7 +281,7 @@ test('authorized agent API and browser route two recorded agents and retain unav
   await harness.click();
   await page.getByRole('button', { name: 'Claude', exact: true }).click();
   await page.getByRole('button', { name: `Start new chat with ${sonnet.label}`, exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.creation-recovery') === null && document.querySelector('.composer-footer')?.textContent?.includes('Sonnet'));
+  await page.waitForFunction(() => document.querySelector('.creation-recovery') === null && document.querySelector('.shell-footer')?.textContent?.includes('Sonnet'));
   const newScope = createRequests.at(-1).scope;
   assert.notDeepEqual(newScope, droppedScope);
   assert.equal(createRequests.at(-1).agentId, sonnet.id);
@@ -294,7 +294,7 @@ test('authorized agent API and browser route two recorded agents and retain unav
   assert.equal(await page.getByRole('button', { name: 'Send', exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('button', { name: 'Review the plan', exact: true }).isDisabled(), true);
   assert.equal(await page.getByText('Draft for Codex', { exact: true }).count(), 1);
-  assert.match(await page.locator('.composer-footer').textContent(), /Local Codex/);
+  assert.match(await page.locator('.shell-footer').textContent(), /Local Codex/);
   await model.click();
   assert.equal(await page.getByRole('button', { name: 'Codex, current model', exact: true }).count(), 0);
   await page.keyboard.press('Escape');

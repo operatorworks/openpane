@@ -4,7 +4,7 @@ import { HostStatusLabel } from './HostStatusLabel.js';
 import { applicationEnabled } from '../application/application-controller.js';
 import { useApplication } from '../application/use-application.js';
 import { ConversationStatus, ConversationView } from '../application/ConversationView.js';
-import { agentPresentation } from '../application/agent-presentation.js';
+import { agentPresentation, conversationPresentation } from '../application/agent-presentation.js';
 import '../application/application.css';
 import customization from '../application/customization-selection.js';
 import { useDesktopCustomizations } from '../application/DesktopCustomizations.js';
@@ -59,14 +59,17 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const workspaceOpen = selectedView === 'extensions' && workspaceRow !== null;
   // One element, placed in one slot: the Chats view, or the open workspace of the active conversation's namespace.
   const slots = conversationSlots({ row: workspaceOpen ? workspaceRow : null, active: app.active, metadata, custom, modules, agents: choices });
+  const customizationNotices = custom.namespaces.some(owner => owner.kind === 'loading' || owner.kind === 'failed');
   const activeConversation = app.active && activeActions
     ? <ConversationView
         key={`${app.active.viewId}/${app.active.scope.hostId}/${app.active.scope.conversationId}`}
-        transcript={slots.transcript} activity={custom.activity} contentLayout={slots.contentLayout} modules={slots.modules} permissionState={app.permissionState} observation={app.observation} continuation={app.continuation} actions={activeActions} active={app.active} enabled={enabled} storageFailure={app.storageFailure} agent={agent}
+        transcript={slots.transcript} activity={custom.activity} contentLayout={slots.contentLayout} modules={slots.modules} permissionState={app.permissionState} observation={app.observation} continuation={app.continuation} actions={activeActions} active={app.active} enabled={enabled} storageFailure={app.storageFailure} agent={agent} customizationNotices={customizationNotices}
         composerControls={canSwitch => <ComposerAgentControls agents={slots.composerAgents} agent={app.active?.agent ?? null} hasConversation enabled={canSwitch && app.saved.pendingCreation === null} onStartConversation={id => void controller.create(id)} onSetupPi={setupPi} />}
       />
     : null;
   const workspaceConversation = slots.workspace ? activeConversation : null;
+  // The footer carries the conversation's disclosure wherever its composer is on screen.
+  const composerVisible = Boolean(activeConversation) && ((selectedView === 'chats' && !slots.workspace) || (workspaceOpen && Boolean(slots.workspace)));
   const conversation = !slots.workspace && activeConversation
     ? activeConversation
     : <section className="conversation-panel empty-workspace">
@@ -175,5 +178,5 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     extensionsView={extensionsView} workspaceOpen={workspaceOpen} restoreMode={children === undefined ? 'managed' : 'remount'}
     onRestore={() => { setCustomizationEnabled(false); setSelectedView('chats'); }}
     status={app.active ? <ConversationStatus active={app.active} /> : 'No conversation open'}
-    buildLabel={presentation.buildLabel}>{children}</DesktopShell>;
+    buildLabel={composerVisible && app.active ? conversationPresentation(app.active.agent, agent).footer : presentation.buildLabel}>{children}</DesktopShell>;
 }

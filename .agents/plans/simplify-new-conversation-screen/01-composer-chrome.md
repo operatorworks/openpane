@@ -21,10 +21,10 @@ The conversation panel shows a transcript and one quiet composer. While a conver
 ### `ConversationView.tsx`
 
 1. **Header.** Change `<header>` to `<header className="visually-hidden">`. Keep its children unchanged, so tests and the heading outline stay intact. Remove the `border-bottom` rule at `application.css:92`.
-2. **Empty-state paragraph.** Delete the paragraph at line 137. When `empty` (below) is true, render `<p className="conversation-greeting">A conversation that stays with you.</p>` as the panel's first visible child, before `CustomizationContent`. It is a paragraph, not a heading: the visually hidden h1 stays the page heading.
+2. **Empty-state paragraph.** Delete the paragraph at line 137. Render `<p className="conversation-greeting">A conversation that stays with you.</p>` inside the native transcript whenever the conversation has no messages, which is the condition the old paragraph used. Implementation note: rendering it only when `empty` left an empty, zero-height `Messages` region while customizations loaded, and the browser tests that wait for that region timed out. It is a paragraph, not a heading: the visually hidden h1 stays the page heading.
 3. **Empty predicate** (proposed local `const empty`). The panel is empty only when all of these hold:
    - `view.document.domain.messages.length === 0`;
-   - `!continuation`;
+   - `!continuation?.boundary`. The continuation object always exists; its history renders only when `boundary` is set (`ContinuationNotice.tsx:29`);
    - `Object.keys(view.document.decisions).length === 0`;
    - `observationStatus` is absent or its kind is `'not-applicable'` or `'observing'`. These are the kinds that render no notice. `ProviderObservationStatus` is defined at `packages/contracts/src/observation.ts:19-22`, and the controller adds `'unknown'` at `application-controller.ts:37`;
    - `active.agent.availability.kind === 'ready'`;

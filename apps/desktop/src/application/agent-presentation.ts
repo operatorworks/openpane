@@ -44,6 +44,11 @@ export const AGENT_PRESENTATION = {
 };
 export type Agent = keyof typeof AGENT_PRESENTATION;
 
+/** The presentation one open conversation uses; the composer and the shell footer must agree on it. */
+export function conversationPresentation(agent: AgentDescriptor, fallback: Agent) {
+  return 'kind' in agent ? agentPresentation(agent).presentation : AGENT_PRESENTATION[fallback];
+}
+
 export function agentPresentation(runtime: NativeRuntimeIdentity | Extract<AgentDescriptor, { kind: 'provider' }> | null) {
   if (runtime && 'kind' in runtime) return { agent: 'provider' as const, presentation: {
     ...AGENT_PRESENTATION.provider, assistant: runtime.label, hostLabel: runtime.label,

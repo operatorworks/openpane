@@ -260,12 +260,14 @@ export function createApplicationController(deps: {
   function stalePermissions(reason: string): void {
     permissionRead++;
     const previous = state.permissionState;
+    // Support belongs to the conversation, not the connection: a disconnect does not make it report permissions.
+    if (previous.kind === 'unsupported') return;
     publish({ permissionState: { kind: 'stale', listing: 'listing' in previous ? previous.listing : null, reason } });
   }
   async function readPermissions(owner: Session, target: OpenConversation): Promise<ConversationPermissions> {
     requireTarget(owner, target);
     const version = ++permissionRead, previous = state.permissionState;
-    publish({ permissionState: { kind: 'loading', listing: 'listing' in previous ? previous.listing : null, reason: 'Refreshing permissions…' } });
+    if (previous.kind !== 'unsupported') publish({ permissionState: { kind: 'loading', listing: 'listing' in previous ? previous.listing : null, reason: 'Refreshing permissions…' } });
     try {
       const result = await current(owner, owner.connection.conversationPermissions(target.scope));
       requireTarget(owner, target);
