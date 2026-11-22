@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BROWSER_RUNTIME, parseArtifactManifest } from '@agentui/contracts/artifact';
-import { EXTENSION_SDK_VERSION, SERVICE_WIRE_VERSION } from '@agentui/contracts/compatibility';
+import { BROWSER_RUNTIME, parseArtifactManifest } from '@openpane/contracts/artifact';
+import { EXTENSION_SDK_VERSION, SERVICE_WIRE_VERSION } from '@openpane/contracts/compatibility';
 
 function fixture(platform) {
   return {

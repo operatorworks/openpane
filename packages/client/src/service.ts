@@ -1,10 +1,10 @@
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import type { ServiceConnection } from '@agentui/contracts/service';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import type { ServiceConnection } from '@openpane/contracts/service';
 import { createServiceConnection } from './service-engine.js';
 import type { ServiceConnectionOptions } from './service-engine.js';
 
-export type { ServiceConnection, ServiceMetadata } from '@agentui/contracts/service';
-export { ServiceError } from '@agentui/contracts/service';
+export type { ServiceConnection, ServiceMetadata } from '@openpane/contracts/service';
+export { ServiceError } from '@openpane/contracts/service';
 export { ServiceConnectionLost, ServiceProtocolError } from './service-engine.js';
 export type { ServiceConnectionOptions } from './service-engine.js';
 export interface BrowserConnectionOptions extends ServiceConnectionOptions {

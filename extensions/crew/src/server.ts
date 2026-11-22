@@ -1,5 +1,5 @@
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { ServerExtensionEntry } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { ServerExtensionEntry } from '@openpane/sdk';
 import { crewOperations } from './operations.js';
 import { registerCrewProvider } from './provider.js';
 

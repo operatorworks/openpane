@@ -1,7 +1,7 @@
 # Author an extension
 
-The existing `@agentui/sdk` package exposes server contracts at its root and UI contracts at `@agentui/sdk/react`.
-The `@agentui/sdk/react-tools` entry combines UI presentation capture with frontend tool generations.
+The existing `@openpane/sdk` package exposes server contracts at its root and UI contracts at `@openpane/sdk/react`.
+The `@openpane/sdk/react-tools` entry combines UI presentation capture with frontend tool generations.
 Installed server code runs with host process privileges.
 Installed UI code runs with client process privileges.
 Extensions are full trust. There is no sandbox or isolation promise.
@@ -17,7 +17,7 @@ Call `parseExtensionManifest` on unknown metadata, then `checkExtensionEntrypoin
 An incompatible result names an unsupported version, an undeclared or mismatched target, or an invalid entry export.
 Parsing accepts declared version strings within the currently known manifest field shape so compatibility checking can report unsupported versions separately.
 It does not parse speculative future manifest shapes.
-Manifest path checking validates syntax. `loadServerExtension` from `@agentui/host/extensions` checks filesystem containment and existence.
+Manifest path checking validates syntax. `loadServerExtension` from `@openpane/host/extensions` checks filesystem containment and existence.
 It checks manifest compatibility before import and requires a regular file beneath the real installation directory.
 Symlinks that escape that directory are rejected. The imported default export must pass the SDK entry check.
 Use immutable revision directories. Node caches each module URL, so changing bytes at an existing path does not select a new revision.
@@ -98,7 +98,7 @@ The production CLI selects installed server entries and verified server artifact
 
 The returned host exposes `discoverProviders()`, `extensionStatus()`, `replaceProviderExtensions(selection)`, and `close()`.
 An empty selection disables local extensions. It does not send a provider cancel, delete, or other remote command.
-The owner in `@agentui/host/extensions` manages one whole provider registry generation at a time.
+The owner in `@openpane/host/extensions` manages one whole provider registry generation at a time.
 The host supplies its `prepare()` callback only after replacement admission and successful old cleanup.
 Preparation loads all entries before creating authorities and closes any authorities acquired before a preparation failure.
 A custom host using `createServerExtensions()` must follow that same preparation ownership contract.
@@ -138,7 +138,7 @@ Each cause has one fixed, sanitized reason; provider-supplied reasons and errors
 Healthy installations stay selectable. The chooser lists an unavailable installation as a disabled entry labeled with its namespace and installation ID, and existing conversations show its reason instead of "no longer configured".
 Every cause except `invalid-installation` is retried on the next discovery: a refused connection holds nothing and reconnects, a reported `version-unsupported` closes its connection so the reconnect probes capabilities again, and other reported causes keep their connection.
 When metadata or conversation reads find that the last discovery started at least 30 seconds ago, the host starts one background discovery without waiting for it. This both recovers retryable outages and reports outages that begin after a healthy discovery. No timer runs, and shutdown waits for that discovery.
-An `authentication-failed` installation recovers automatically when the credential is fixed on the provider. AgentUI reads its own extension secret once at startup, so changing that secret needs a host restart.
+An `authentication-failed` installation recovers automatically when the credential is fixed on the provider. OpenPane reads its own extension secret once at startup, so changing that secret needs a host restart.
 `providers-refresh` (`node apps/host/dist/main.js providers-refresh --data-dir /private/host`) discovers immediately and returns every installation's status.
 An `invalid-installation` closes that installation's connection and recovers only after the configuration is fixed and the extension is replaced, normally by restarting the host.
 Transient and durable serving keep running through provider discovery failures.
@@ -191,7 +191,7 @@ The version 2 extension configuration has this shape:
 	"version": 2,
 	"ownership": "transient",
 	"extensions": [{
-		"directory": "/absolute/path/to/agentui/extensions/crew",
+		"directory": "/absolute/path/to/openpane/extensions/crew",
 		"installations": [{
 			"id": "personal",
 			"instance": {
@@ -204,7 +204,7 @@ The version 2 extension configuration has this shape:
 			"expectedAuthority": "remote-provider",
 			"authentication": {
 				"kind": "environment",
-				"variable": "AGENTUI_EXTENSION_CREW_TOKEN",
+				"variable": "OPENPANE_EXTENSION_CREW_TOKEN",
 				"revision": "rotation-1"
 			}
 		}]
@@ -237,12 +237,12 @@ To select a [built server artifact](../customization/server-artifacts.md), use a
 Put this object in the `extensions` array. The `artifactId` must be the exact lowercase hexadecimal ID printed by the builder. A catalog can contain several extension namespaces. Each installation grant names a namespace in that catalog. Installed entries and artifact entries can appear together under transient ownership. Use `"ownership": "durable-artifacts"` for journaled next-start selection.
 
 `directory` resolves relative to the selection file's directory. Absolute directories are also accepted.
-Each installed package supplies its canonical manifest at `package.json.agentui.extension`:
+Each installed package supplies its canonical manifest at `package.json.openpane.extension`:
 
 ```json
 {
-	"name": "agentui-extension-crew",
-	"agentui": {
+	"name": "openpane-extension-crew",
+	"openpane": {
 		"extension": {
 			"namespace": "crew",
 			"trust": "full",
@@ -253,17 +253,17 @@ Each installed package supplies its canonical manifest at `package.json.agentui.
 }
 ```
 
-Package metadata outside `agentui.extension` is ignored.
+Package metadata outside `openpane.extension` is ignored.
 Selection objects, grants, authentication objects, identities, and manifests reject extra or missing fields.
 Empty `extensions` and `installations` arrays are valid.
 Selected namespaces, grant IDs within a package, and complete provider identities must be unique.
 Under transient ownership, each grant's namespace must match a manifest in its selected package or artifact catalog.
 [Durable selection](#durable-selection-and-explicit-live-application) retains unused startup grants when an artifact is disabled.
-`expectedAuthority` accepts `agentui-host` or `remote-provider`.
+`expectedAuthority` accepts `openpane-host` or `remote-provider`.
 `service` must be an HTTP or HTTPS origin without credentials, a query, a fragment, or a non-root path.
 
 `authentication` accepts either the environment reference shown above or exactly `{ "kind": "unauthenticated" }`.
-Environment names follow `AGENTUI_EXTENSION_[A-Za-z0-9_]+` and have at most 1024 characters.
+Environment names follow `OPENPANE_EXTENSION_[A-Za-z0-9_]+` and have at most 1024 characters.
 Missing or blank secrets fail startup. The host captures the original secret bytes without trimming.
 After the entire selection passes validation, the host removes only referenced variables from its environment before extension activation and native child startup.
 Extensions access the captured value through the existing credential authority. The host persists only grant metadata.
@@ -377,11 +377,11 @@ Controls are disabled when the conversation is unavailable, disconnected, busy, 
 Captured commands still validate the active conversation and availability at invocation; a saved callback cannot bypass those checks.
 The client owns command IDs, persisted intent, and retries of captured commands.
 The SDK supplies no second command identity mechanism and never retries arbitrary extension action callbacks.
-Theme and platform controls remain direct imports from `@agentui/theme/react` and `@agentui/ui-primitives/desktop` or `/native`.
+Theme and platform controls remain direct imports from `@openpane/theme/react` and `@openpane/ui-primitives/desktop` or `/native`.
 
 ## Bundled in-repo extensions
 
-Every package under the repository's `extensions/` directory is first-party. Its `package.json.agentui.extension` is its canonical manifest, its package name stays outside the `@agentui/` scope, and the default desktop build bundles its `desktop` entry through `agentui.sources` (`scripts/bundled-extensions.mjs`). Its server entry loads as an installed entry from the working tree through `serve --extensions` or `desktop --extensions`; the [launcher](../development/launcher.md#load-server-extensions-on-a-local-host) passes the file when every token variable is set. Restart the host after rebuilding an extension: Node keeps the module it imported.
+Every package under the repository's `extensions/` directory is first-party. Its `package.json.openpane.extension` is its canonical manifest, its package name stays outside the `@openpane/` scope, and the default desktop build bundles its `desktop` entry through `openpane.sources` (`scripts/bundled-extensions.mjs`). Its server entry loads as an installed entry from the working tree through `serve --extensions` or `desktop --extensions`; the [launcher](../development/launcher.md#load-server-extensions-on-a-local-host) passes the file when every token variable is set. Restart the host after rebuilding an extension: Node keeps the module it imported.
 
 ## Contribute a workspace view
 
@@ -406,7 +406,7 @@ Inspecting, cloning, or rendering these elements' props is unsupported and does 
 The typed layout props add no commands, draft editor, conversation selector, or lifetime API.
 
 ```tsx
-import type { ConversationContentLayoutProps } from '@agentui/sdk/react';
+import type { ConversationContentLayoutProps } from '@openpane/sdk/react';
 
 function ReviewLayout({ transcript, modules }: ConversationContentLayoutProps) {
 	return <div className="review-layout"><div>{transcript}</div><aside>{modules}</aside></div>;
@@ -439,13 +439,13 @@ The UI context exposes `frontendTools.add(tool)`.
 Each contribution supplies a protocol tool definition, a decoder from `unknown`, and an async handler returning a string.
 The handler receives the pinned conversation scope.
 The factory supplies the validated namespace and registration sink in an immutable activation context.
-The `@agentui/sdk/react-tools` adapter includes tool validation.
+The `@openpane/sdk/react-tools` adapter includes tool validation.
 The root and React presentation entries stay lightweight.
 Import the adapter and the pin runtime from their separate entries:
 
 ```ts
-import { createUiExtensionGeneration } from '@agentui/sdk/react-tools';
-import { pinFrontendTools } from '@agentui/sdk/tools';
+import { createUiExtensionGeneration } from '@openpane/sdk/react-tools';
+import { pinFrontendTools } from '@openpane/sdk/tools';
 
 const { generation, presentation } = await createUiExtensionGeneration({
   namespace: manifest.namespace, generation: 'activation-1', platform: 'desktop',

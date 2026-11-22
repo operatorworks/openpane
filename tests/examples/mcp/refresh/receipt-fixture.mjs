@@ -1,4 +1,4 @@
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 
 export function syntheticReceipt() {
   const hash = 'a'.repeat(64), request = { id: 'original', reference: { repository: '/source', commit: 'b'.repeat(40) }, expectedSelectionRevision: 0 };

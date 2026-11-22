@@ -10,8 +10,8 @@ import { createInterface } from 'node:readline';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import { CODEX_RUNTIME, SERVICE_WIRE_VERSION } from '@agentui/contracts/compatibility';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import { CODEX_RUNTIME, SERVICE_WIRE_VERSION } from '@openpane/contracts/compatibility';
 import { createCrewFixture } from '../extensions/providers/contracts/crew.ts';
 import { setup as setupServerArtifact, extension as artifactExtension, write as writeArtifactSource, resigned } from '../customization/build/server-support.mjs';
 
@@ -20,7 +20,7 @@ const instance = { namespace: 'example-crew', installationId: 'personal', genera
 const secret = 'PRIVATE_CLI_EXTENSION_SECRET_94';
 const privateError = 'PRIVATE_EXTENSION_ERROR_17';
 async function fixture(t, service = 'https://example.com') {
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-extension-cli-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-extension-cli-'));
   const config = join(directory, 'agents.json'), selection = join(directory, 'extensions.json');
   const installed = join(directory, 'crew-v1'), marker = join(directory, 'imported'), lifecycle = join(directory, 'lifecycle');
   await mkdir(installed);
@@ -29,11 +29,11 @@ async function fixture(t, service = 'https://example.com') {
   ] }));
   const manifest = { namespace: instance.namespace, trust: 'full', sdkVersion: EXTENSION_SDK_VERSION, entries: [{ kind: 'server', module: './server.mjs' }] };
   const input = { version: 2, ownership: 'transient', extensions: [{ directory: './crew-v1', installations: [
-    { id: 'service', instance: { ...instance }, service, expectedAuthority: 'remote-provider', authentication: { kind: 'environment', variable: 'AGENTUI_EXTENSION_CREW_TOKEN', revision: 'first' } },
+    { id: 'service', instance: { ...instance }, service, expectedAuthority: 'remote-provider', authentication: { kind: 'environment', variable: 'OPENPANE_EXTENSION_CREW_TOKEN', revision: 'first' } },
   ] }] };
   const module = `import { appendFileSync, writeFileSync } from 'node:fs';
     import { createCrewFixture } from ${JSON.stringify(new URL('../extensions/providers/contracts/crew.ts', import.meta.url).href)};
-    writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ credentialPresent: Object.hasOwn(process.env, 'AGENTUI_EXTENSION_CREW_TOKEN') }));
+    writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ credentialPresent: Object.hasOwn(process.env, 'OPENPANE_EXTENSION_CREW_TOKEN') }));
     const instance = ${JSON.stringify(instance)};
     const fixture = createCrewFixture(instance);
     export default { kind: 'server', sdkVersion: ${JSON.stringify(EXTENSION_SDK_VERSION)}, activate(context) {
@@ -61,14 +61,14 @@ async function fixture(t, service = 'https://example.com') {
       return { async dispose() { appendFileSync(${JSON.stringify(lifecycle)}, 'dispose\\n'); } };
     } };`;
   const save = async () => {
-    await writeFile(join(installed, 'package.json'), JSON.stringify({ name: '@example/crew', version: '1.0.0', agentui: { extension: manifest, sources: ['ignored'] } }));
+    await writeFile(join(installed, 'package.json'), JSON.stringify({ name: '@example/crew', version: '1.0.0', openpane: { extension: manifest, sources: ['ignored'] } }));
     await writeFile(selection, JSON.stringify(input));
   };
   await save(); await writeFile(join(installed, 'server.mjs'), module);
   const children = [];
   const launch = (args, environment = {}) => {
     const child = spawn(process.execPath, [main, ...args, '--data-dir', join(directory, 'data')], {
-      cwd: directory, env: { ...process.env, AGENTUI_EXTENSION_CREW_TOKEN: secret, ...environment }, stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: directory, env: { ...process.env, OPENPANE_EXTENSION_CREW_TOKEN: secret, ...environment }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';
     child.stdout.setEncoding('utf8').on('data', text => { stdout += text; });
@@ -105,7 +105,7 @@ async function stop(running) {
   running.child.kill('SIGTERM'); assert.equal(await running.exited, 0, running.stderr);
 }
 function privateDiagnostics(running) {
-  assert.doesNotMatch(running.stdout + running.stderr, /PRIVATE_CLI_EXTENSION_SECRET|PRIVATE_EXTENSION_ERROR|AGENTUI_EXTENSION_CREW_TOKEN|not-installed|server\.mjs/);
+  assert.doesNotMatch(running.stdout + running.stderr, /PRIVATE_CLI_EXTENSION_SECRET|PRIVATE_EXTENSION_ERROR|OPENPANE_EXTENSION_CREW_TOKEN|not-installed|server\.mjs/);
 }
 
 test('bundled serve selects an installed public provider, creates and sends with host credentials, then disposes on SIGTERM', { timeout: 20000 }, async t => {
@@ -128,11 +128,11 @@ test('bundled serve selects an installed public provider, creates and sends with
     import { writeFileSync } from 'node:fs';
     if (process.argv.includes('--version')) {
       writeFileSync(${JSON.stringify(nativeEnvironment)}, JSON.stringify({
-        credentialPresent: Object.hasOwn(process.env, 'AGENTUI_EXTENSION_CREW_TOKEN'),
-        unselected: process.env.AGENTUI_EXTENSION_UNSELECTED,
+        credentialPresent: Object.hasOwn(process.env, 'OPENPANE_EXTENSION_CREW_TOKEN'),
+        unselected: process.env.OPENPANE_EXTENSION_UNSELECTED,
         nativeKeyPresent: Object.hasOwn(process.env, 'OPENCODE_GO_API_KEY'),
-        setupCapabilityPresent: Object.hasOwn(process.env, 'AGENTUI_SETUP_CAPABILITY'),
-        anthropicKey: process.env.AGENTUI_ANTHROPIC_API_KEY, path: process.env.PATH, sentinel: process.env.AGENTUI_ENV_SENTINEL,
+        setupCapabilityPresent: Object.hasOwn(process.env, 'OPENPANE_SETUP_CAPABILITY'),
+        anthropicKey: process.env.OPENPANE_ANTHROPIC_API_KEY, path: process.env.PATH, sentinel: process.env.OPENPANE_ENV_SENTINEL,
       }));
       console.log(${JSON.stringify('codex-cli ' + CODEX_RUNTIME.version)});
       process.exitCode = 1;
@@ -141,9 +141,9 @@ test('bundled serve selects an installed public provider, creates and sends with
   await writeFile(f.config, JSON.stringify({ version: 1, default: 'native', agents: [
     { name: 'native', kind: 'codex', workspace: f.directory, executable },
   ] }));
-  const environment = { AGENTUI_EXTENSION_UNSELECTED: 'unselected', OPENCODE_GO_API_KEY: 'native-key',
-    AGENTUI_SETUP_CAPABILITY: 'synthetic-setup-capability',
-    AGENTUI_ANTHROPIC_API_KEY: 'anthropic-key', PATH: process.env.PATH, AGENTUI_ENV_SENTINEL: 'preserved' };
+  const environment = { OPENPANE_EXTENSION_UNSELECTED: 'unselected', OPENCODE_GO_API_KEY: 'native-key',
+    OPENPANE_SETUP_CAPABILITY: 'synthetic-setup-capability',
+    OPENPANE_ANTHROPIC_API_KEY: 'anthropic-key', PATH: process.env.PATH, OPENPANE_ENV_SENTINEL: 'preserved' };
   const running = f.start([], environment), info = await ready(running);
   assert.equal(info.mode, 'serve');
   assert.deepEqual(JSON.parse(await readFile(f.marker, 'utf8')), { credentialPresent: false });
@@ -174,11 +174,11 @@ test('bundled serve selects an installed public provider, creates and sends with
   assert.equal(sent.value.receipt.state.kind, 'completed');
   assert.ok(requests.includes('/agents')); assert.equal(requests.filter(path => path === '/create').length, 1);
   assert.equal(requests.filter(path => path === '/send').length, 1);
-  assert.doesNotMatch(JSON.stringify(payloads), /PRIVATE_CLI_EXTENSION_SECRET|AGENTUI_EXTENSION_CREW_TOKEN|opaqueHandle|not-installed/);
+  assert.doesNotMatch(JSON.stringify(payloads), /PRIVATE_CLI_EXTENSION_SECRET|OPENPANE_EXTENSION_CREW_TOKEN|opaqueHandle|not-installed/);
   const db = new DatabaseSync(join(f.directory, 'data', 'host.sqlite'), { readOnly: true });
   try {
     const rows = db.prepare('SELECT * FROM service_provider_credentials').all(); assert.equal(rows.length, 1);
-    assert.equal(rows[0].revision, 'first'); assert.doesNotMatch(JSON.stringify(rows), /PRIVATE_CLI_EXTENSION_SECRET|AGENTUI_EXTENSION_CREW_TOKEN/);
+    assert.equal(rows[0].revision, 'first'); assert.doesNotMatch(JSON.stringify(rows), /PRIVATE_CLI_EXTENSION_SECRET|OPENPANE_EXTENSION_CREW_TOKEN/);
   } finally { db.close(); }
   await stop(running); assert.equal(await readFile(f.lifecycle, 'utf8'), 'close\ndispose\n');
   privateDiagnostics(running);
@@ -211,13 +211,13 @@ for (const [name, change] of [
   ['manifest SDK', (f, second, manifest) => { manifest.sdkVersion = '99.0.0'; }],
   ['manifest server declaration', (f, second, manifest) => { manifest.entries[0].kind = 'desktop'; }],
   ['grant', (f, second) => { second.installations[0].service = `https://example.com/private?token=${secret}`; }],
-  ['environment', (f, second) => { second.installations[0].authentication.variable = 'AGENTUI_EXTENSION_MISSING_CLI_TOKEN_94'; }],
+  ['environment', (f, second) => { second.installations[0].authentication.variable = 'OPENPANE_EXTENSION_MISSING_CLI_TOKEN_94'; }],
 ]) test(`later invalid ${name} prevents every selected import and listener announcement`, { timeout: 10000 }, async t => {
   const f = await fixture(t), second = structuredClone(f.input.extensions[0]), manifest = structuredClone(f.manifest);
   second.directory = './second'; second.installations[0].instance.namespace = 'second'; manifest.namespace = 'second';
   const directory = join(f.directory, 'second'); await mkdir(directory);
   change(f, second, manifest); f.input.extensions.push(second); await f.save();
-  await writeFile(join(directory, 'package.json'), JSON.stringify({ agentui: { extension: manifest } }));
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ openpane: { extension: manifest } }));
   await writeFile(join(directory, 'server.mjs'), f.module);
   const failed = f.start(); assert.equal(await failed.exited, 1);
   assert.equal(failed.stdout, ''); assert.match(failed.stderr, /Invalid server extension configuration/);
@@ -312,7 +312,7 @@ for (const [name, change] of [
   const f = await fixture(t); await change(f);
   const running = f.launch(['serve', '--extensions', f.selection, '--port', '0']);
   const info = await ready(running);
-  const client = (await import('@agentui/client/service')).createBrowserConnection({ fetch: (path, init) => fetch(info.origin + path, {
+  const client = (await import('@openpane/client/service')).createBrowserConnection({ fetch: (path, init) => fetch(info.origin + path, {
     ...init, headers: { ...init.headers, Origin: info.origin },
   }) });
   const metadata = await client.metadata();
@@ -335,7 +335,7 @@ async function artifactFixture(t) {
     .replace("create: operation => request('/create', operation)", 'create: operation => fixture.crewBackend.create(operation)')
     .replace("submit: operation => request('/send', operation)", 'submit: operation => fixture.crewBackend.submit(operation)');
   const build = await setupServerArtifact(t, source);
-  await writeArtifactSource(build.repo.directory, 'package.json', { type: 'module', agentui: artifactExtension(instance.namespace) });
+  await writeArtifactSource(build.repo.directory, 'package.json', { type: 'module', openpane: artifactExtension(instance.namespace) });
   await writeArtifactSource(build.repo.directory, 'crew.ts', await readFile(new URL('../extensions/providers/contracts/crew.ts', import.meta.url), 'utf8'));
   const artifact = await build.build();
   f.input.extensions[0] = { kind: 'artifact', directory: artifact.directory, artifactId: artifact.manifest.artifactId,
@@ -386,7 +386,7 @@ for (const [name, mutate] of [
   await mutate(f);
   f.input.extensions.unshift({ directory: f.installed, installations: [] });
   const installedManifest = { ...f.manifest, namespace: 'earlier' };
-  await writeFile(join(f.installed, 'package.json'), JSON.stringify({ agentui: { extension: installedManifest } }));
+  await writeFile(join(f.installed, 'package.json'), JSON.stringify({ openpane: { extension: installedManifest } }));
   await writeFile(f.selection, JSON.stringify(f.input));
   const running = f.launch(['serve', '--extensions', f.selection, '--port', '0']);
   assert.equal(await running.exited, 1); assert.equal(running.stdout, '');
@@ -407,7 +407,7 @@ test('packaged SDK facade and host use one emitted runtime module graph', async 
 test('later selected import failure releases an earlier artifact hook before process cleanup', { timeout: 15000 }, async t => {
   const f = await artifactFixture(t), cleanup = join(f.directory, 'module-cleanup');
   const catalog = await readFile(join(f.artifact.directory, 'entries.mjs'), 'utf8');
-  const code = catalog + "\nglobalThis.agentuiArtifactCleanupProbe = () => import('./cleanup-probe.mjs');\n";
+  const code = catalog + "\nglobalThis.openpaneArtifactCleanupProbe = () => import('./cleanup-probe.mjs');\n";
   const lazy = 'export const value = 1;';
   const inventory = (path, bytes) => ({ path, sha256: createHash('sha256').update(bytes).digest('hex'), size: Buffer.byteLength(bytes) });
   const manifest = resigned(f.artifact.manifest, value => {
@@ -420,10 +420,10 @@ test('later selected import failure releases an earlier artifact hook before pro
   await writeFile(join(f.artifact.directory, 'customization.json'), JSON.stringify(manifest));
   f.input.extensions[0].artifactId = manifest.artifactId;
   f.input.extensions.push({ directory: f.installed, installations: [] });
-  await writeFile(join(f.installed, 'package.json'), JSON.stringify({ agentui: { extension: { ...f.manifest, namespace: 'later' } } }));
+  await writeFile(join(f.installed, 'package.json'), JSON.stringify({ openpane: { extension: { ...f.manifest, namespace: 'later' } } }));
   await writeFile(join(f.installed, 'server.mjs'), `import {writeFileSync} from 'node:fs';
     setImmediate(async () => {
-      try { await globalThis.agentuiArtifactCleanupProbe(); writeFileSync(${JSON.stringify(cleanup)}, 'leaked'); }
+      try { await globalThis.openpaneArtifactCleanupProbe(); writeFileSync(${JSON.stringify(cleanup)}, 'leaked'); }
       catch { writeFileSync(${JSON.stringify(cleanup)}, 'released'); }
     });
     throw new Error('PRIVATE_LATER_IMPORT_FAILURE');`);
@@ -455,7 +455,7 @@ test('durable journal refuses mixed, empty and omitted transient startup before 
   await ready(durable); await stop(durable);
   const artifact = structuredClone(f.input.extensions[0]);
   const marker = await nativeMarker(f);
-  await writeFile(join(f.installed, 'package.json'), JSON.stringify({ agentui: { extension: { ...f.manifest, namespace: 'extra' } } }));
+  await writeFile(join(f.installed, 'package.json'), JSON.stringify({ openpane: { extension: { ...f.manifest, namespace: 'extra' } } }));
   await writeFile(join(f.installed, 'server.mjs'), `throw new Error('Must not import');`);
   for (const selection of [[artifact, { directory: f.installed, installations: [] }], [], null]) {
     await rm(f.marker, { force: true });

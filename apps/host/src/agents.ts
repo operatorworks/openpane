@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { canonicalJson } from '@agentui/contracts';
-import { CLAUDE_SDK_CHAT_LABELS, CLAUDE_SDK_RUNTIMES, CODEX_RUNTIME, CODEX_SDK_CHAT_LABEL, CODEX_SDK_MODEL, CODEX_SDK_RUNTIME, PI_CHAT_LABEL, PI_RUNTIME, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
-import type { AgentDescriptor, NativeAgentDescriptor } from '@agentui/contracts/service';
-import { codexInstallationModel, providerInstallationKey, providerUnavailableReasons } from '@agentui/host';
-import type { ConversationInstallation, Installation, ProviderInstallation, UnavailableProvider } from '@agentui/host';
-import type { ConversationProvider } from '@agentui/contracts/service';
+import { canonicalJson } from '@openpane/contracts';
+import { CLAUDE_SDK_CHAT_LABELS, CLAUDE_SDK_RUNTIMES, CODEX_RUNTIME, CODEX_SDK_CHAT_LABEL, CODEX_SDK_MODEL, CODEX_SDK_RUNTIME, PI_CHAT_LABEL, PI_RUNTIME, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
+import type { AgentDescriptor, NativeAgentDescriptor } from '@openpane/contracts/service';
+import { codexInstallationModel, providerInstallationKey, providerUnavailableReasons } from '@openpane/host';
+import type { ConversationInstallation, Installation, ProviderInstallation, UnavailableProvider } from '@openpane/host';
+import type { ConversationProvider } from '@openpane/contracts/service';
 
 export interface InstalledAgent {
   readonly name?: string;

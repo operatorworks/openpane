@@ -1,21 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ServiceError, ServiceProtocolError } from '@agentui/client/service';
-import { createMacConnection, macConnect } from '@agentui/client/mac';
-import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
+import { ServiceError, ServiceProtocolError } from '@openpane/client/service';
+import { createMacConnection, macConnect } from '@openpane/client/mac';
+import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
 
 const access = { observation: 'current' };
 
 test('native connection failures give safe recovery for the reported category on connect and execution', async () => {
   const secret = 'private-host-response-and-profile-path';
-  const generic = 'Native connection unavailable. Reconnect, or restart AgentUI if the problem continues. Local work is retained.';
+  const generic = 'Native connection unavailable. Reconnect, or restart OpenPane if the problem continues. Local work is retained.';
   const guidance = [
-    ['forbidden', /installed AgentUI app/],
+    ['forbidden', /installed OpenPane app/],
     ['profile-unavailable', /local profile.*access/i],
-    ['profile-in-use', /other AgentUI instance/],
+    ['profile-in-use', /other OpenPane instance/],
     ['network-failed', /host is running/],
     ['stale', /host connection changed.*Reconnect/],
-    ['host-changed', /different AgentUI host.*Reconnect/],
+    ['host-changed', /different OpenPane host.*Reconnect/],
     ...[secret, new Error(secret), { message: secret }, `network-failed ${secret}`, 'keychain-denied', null].map(cause => [cause, generic]),
   ];
   for (const [cause, expected] of guidance) {

@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
-import type { ConversationScope } from '@agentui/contracts';
-import type { WorkspaceAgent, WorkspaceViewProps } from '@agentui/sdk/react';
-import { useTheme } from '@agentui/theme/react';
-import { ThemeScope } from '@agentui/ui-primitives/desktop';
+import type { ConversationScope } from '@openpane/contracts';
+import type { WorkspaceAgent, WorkspaceViewProps } from '@openpane/sdk/react';
+import { useTheme } from '@openpane/theme/react';
+import { ThemeScope } from '@openpane/ui-primitives/desktop';
 import { CoworkerContext, initials } from './shared.js';
 import { coworkersListOutput, type CoworkerSummary } from '../operation-output.js';
 
-const CONFIGURATION = '~/.local/share/agentui/extensions.json';
-const TOKEN = 'AGENTUI_EXTENSION_COWORKERS_TOKEN';
+const CONFIGURATION = '~/.local/share/openpane/extensions.json';
+const TOKEN = 'OPENPANE_EXTENSION_COWORKERS_TOKEN';
 const NEWER = 'Requires a newer Coworkers service';
 /** A neutral grey surface with an indigo accent. Layout and colour idiom only. */
 const PALETTE = {
@@ -83,8 +83,8 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   if (!installation) {
     return <div className="coworkers-workspace coworkers-setup" role="region" aria-label="Coworkers setup">
       <h2>Connect Coworkers</h2>
-      <p>Coworkers is not configured on this host. Add a Coworkers installation to <code>{CONFIGURATION}</code> with its service address and the token variable <code>{TOKEN}</code>, export that variable in the launcher's shell, and restart AgentUI.</p>
-      <p>The service must listen on an address this host can reach. See <code>docs/extensions/coworkers.md</code> in the AgentUI repository.</p>
+      <p>Coworkers is not configured on this host. Add a Coworkers installation to <code>{CONFIGURATION}</code> with its service address and the token variable <code>{TOKEN}</code>, export that variable in the launcher's shell, and restart OpenPane.</p>
+      <p>The service must listen on an address this host can reach. See <code>docs/extensions/coworkers.md</code> in the OpenPane repository.</p>
     </div>;
   }
   if (!available) {

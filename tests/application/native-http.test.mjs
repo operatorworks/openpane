@@ -1,5 +1,5 @@
 import { describeAgent } from '../../apps/host/build/tsc/agents.js';
-import { recordedInstallation } from '@agentui/host/recorded';
+import { recordedInstallation } from '@openpane/host/recorded';
 const recordedAgentId = describeAgent(recordedInstallation, { kind: 'ready' }, { kind: 'unsupported', reason: 'Recorded text-only fixture.' }).id;
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -13,7 +13,7 @@ import test from 'node:test';
 
 const root = new URL('../../', import.meta.url);
 async function fixture(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-native-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-native-'));
   const children = [];
   const launch = (args, ipc = false) => {
     const child = spawn(process.execPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe', ...(ipc ? ['ipc'] : [])] });
@@ -73,7 +73,7 @@ test('native loopback route admits the owner directly and rejects noncanonical r
   assert.equal(staleBearer.status, 200);
   assert.equal(staleBearer.body.value.principalId, 'trusted-owner');
   for (const headers of [
-    { Cookie: 'agentui=1' }, { Origin: '' }, { Origin: f.origin }, { Cookie: '' },
+    { Cookie: 'openpane=1' }, { Origin: '' }, { Origin: f.origin }, { Cookie: '' },
     { Host: 'foreign.example' }, { Host: 'localhost' }, { 'Content-Type': 'application/json; charset=utf-8' }, { 'Content-Type': 'text/plain' },
   ]) denied(await f.call('/native/v1', { op: 'metadata' }, headers));
   denied(await f.call('/native/v1', { op: 'metadata' }, {}, 'PUT'));

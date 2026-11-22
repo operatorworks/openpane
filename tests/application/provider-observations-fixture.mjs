@@ -4,10 +4,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { createProviderRegistry, openLocalHost } from '@agentui/host';
-import { frontendToolsFor } from '@agentui/host/frontend-tools';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { createProviderRegistry, openLocalHost } from '@openpane/host';
+import { frontendToolsFor } from '@openpane/host/frontend-tools';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { controlledProvider, instance } from './fixtures/provider-observations.ts';
 import { until } from '../host/fixture.mjs';
 export const actor = { id: 'owner', platform: 'desktop', authorized: () => true };
@@ -33,7 +33,7 @@ export async function observationFixture(t, options = {}) {
     let body = ''; for await (const bytes of request) body += bytes;
     const input = JSON.parse(body); requests.push({ path: request.url, input });
     if (request.url === '/create') {
-      binding = { kind: 'agentui-created', creation: input, authority: { kind: 'remote-provider', binding: { namespace: instance.namespace, installationId: instance.installationId, opaqueSessionId: options.sessionId ?? 'original' } } };
+      binding = { kind: 'openpane-created', creation: input, authority: { kind: 'remote-provider', binding: { namespace: instance.namespace, installationId: instance.installationId, opaqueSessionId: options.sessionId ?? 'original' } } };
       respond(response, binding);
     } else if (request.url === '/snapshot') respond(response, { cursor: `snapshot-${serial}`, state: { histories } });
     else if (request.url === '/submit') {

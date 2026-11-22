@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 test('packed core installs and imports with no React present', t => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-core-consumer-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-core-consumer-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const root = fileURLToPath(new URL('../../', import.meta.url));
   const cache = join(directory, 'npm-cache');
@@ -15,8 +15,8 @@ test('packed core installs and imports with no React present', t => {
   assert.equal(installedHash.name, 'fast-sha256');
   assert.equal(installedHash.version, '1.3.0');
   const archives = [
-    ['./packages/contracts', '@agentui/contracts', '0.0.0'],
-    ['./packages/client', '@agentui/client', '0.0.0'],
+    ['./packages/contracts', '@openpane/contracts', '0.0.0'],
+    ['./packages/client', '@openpane/client', '0.0.0'],
     ['./node_modules/fast-sha256', installedHash.name, installedHash.version],
   ].map(([source, name, version]) => {
     const packed = JSON.parse(execFileSync('npm', ['pack', source, '--pack-destination', directory, '--json', '--ignore-scripts', '--offline', '--cache', cache], { cwd: root, encoding: 'utf8' }));
@@ -29,9 +29,9 @@ test('packed core installs and imports with no React present', t => {
   execFileSync('npm', ['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--cache', cache, ...archives], { cwd: directory, stdio: 'pipe' });
   execFileSync(process.execPath, ['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
-    import { createConversationStore } from '@agentui/client';
-    import { createBrowserConnection, ServiceProtocolError } from '@agentui/client/service';
-    import { parseOutputId } from '@agentui/contracts';
+    import { createConversationStore } from '@openpane/client';
+    import { createBrowserConnection, ServiceProtocolError } from '@openpane/client/service';
+    import { parseOutputId } from '@openpane/contracts';
     assert.equal(typeof createConversationStore, 'function');
     const scope = { hostId: 'host', conversationId: 'conversation' };
     const outputId = parseOutputId('output-' + 'a'.repeat(64));
@@ -44,9 +44,9 @@ test('packed core installs and imports with no React present', t => {
     assert.deepEqual(result.bytes, Uint8Array.of(65));
     output.sha256 = '0'.repeat(64);
     await assert.rejects(client.readOutput(scope, outputId), ServiceProtocolError);
-    for (const dependency of ['react', '@ag-ui/core', 'zod', '@agentui/host']) await assert.rejects(import(dependency), { code: 'ERR_MODULE_NOT_FOUND' });
+    for (const dependency of ['react', '@ag-ui/core', 'zod', '@openpane/host']) await assert.rejects(import(dependency), { code: 'ERR_MODULE_NOT_FOUND' });
   `], { cwd: directory, stdio: 'pipe' });
-  writeFileSync(join(directory, 'consumer.ts'), `import { createConversationStore } from '@agentui/client'; import type { FrontendDefinition } from '@agentui/contracts'; export const factory = createConversationStore; export const tool: FrontendDefinition = { name: 'demo__echo', description: 'Echo', parameters: { type: 'object' } };`);
+  writeFileSync(join(directory, 'consumer.ts'), `import { createConversationStore } from '@openpane/client'; import type { FrontendDefinition } from '@openpane/contracts'; export const factory = createConversationStore; export const tool: FrontendDefinition = { name: 'demo__echo', description: 'Echo', parameters: { type: 'object' } };`);
   writeFileSync(join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2023', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, exactOptionalPropertyTypes: true, noEmit: true, skipLibCheck: false, types: [], lib: ['ES2023'] }, files: ['consumer.ts'] }));
   execFileSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '-p', join(directory, 'tsconfig.json')], { cwd: directory, stdio: 'pipe' });
 });

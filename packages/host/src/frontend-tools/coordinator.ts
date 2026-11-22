@@ -1,9 +1,9 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { EventSchema, ToolSchema } from '@ag-ui/core/schemas';
 import { z } from 'zod';
-import { canonicalJson, parseRunIdentity, sameScope } from '@agentui/contracts';
-import type { ConversationScope, Json, RunIdentity } from '@agentui/contracts';
-import type { FrontendPlatform, FrontendToolOutcome } from '@agentui/sdk/tools';
+import { canonicalJson, parseRunIdentity, sameScope } from '@openpane/contracts';
+import type { ConversationScope, Json, RunIdentity } from '@openpane/contracts';
+import type { FrontendPlatform, FrontendToolOutcome } from '@openpane/sdk/tools';
 import type { SqliteStore } from '../sqlite-store.js';
 import type { FrontendRegistration, FrontendRunKey, FrontendReceipt, FrontendRunView, FrontendTools, FrontendToolProducer } from './index.js';
 import { nonempty } from '../codec.js';

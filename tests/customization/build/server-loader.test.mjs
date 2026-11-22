@@ -3,9 +3,9 @@ import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
-import * as SDK from '@agentui/sdk';
-import { loadServerArtifact } from '@agentui/host/extensions';
-import { parseServerCustomizationArtifact, readServerCustomizationArtifact } from '@agentui/host/customization';
+import * as SDK from '@openpane/sdk';
+import { loadServerArtifact } from '@openpane/host/extensions';
+import { parseServerCustomizationArtifact, readServerCustomizationArtifact } from '@openpane/host/customization';
 import { setup, expectation, resigned } from './server-support.mjs';
 
 async function retained(t, catalog, lazy = 'export const value = 17;') {
@@ -18,44 +18,44 @@ async function retained(t, catalog, lazy = 'export const value = 17;') {
   await writeFile(join(built.directory, 'customization.json'), JSON.stringify(manifest));
   return { directory: built.directory, verified: await readServerCustomizationArtifact({ directory: built.directory, expected: expectation(manifest) }) };
 }
-const entry = body => `import {parseExtensionManifest, EXTENSION_SDK_VERSION} from '@agentui/sdk';
+const entry = body => `import {parseExtensionManifest, EXTENSION_SDK_VERSION} from '@openpane/sdk';
   export const entries = [{kind:'server', sdkVersion:EXTENSION_SDK_VERSION, activate() { ${body} }}];`;
 
 test('retained loader preserves bytes, lazy imports, SDK identity and unrelated host imports until disposal', async t => {
   const f = await retained(t, entry("return {sdk:parseExtensionManifest, lazy:() => import('./lazy.mjs'), dispose(){}};"));
   await writeFile(join(f.directory, 'entries.mjs'), "throw new Error('MUTATED_CATALOG');");
   await writeFile(join(f.directory, 'lazy.mjs'), "throw new Error('MUTATED_LAZY');");
-  const [loaded] = await loadServerArtifact(f.verified, import.meta.resolve('@agentui/sdk'));
+  const [loaded] = await loadServerArtifact(f.verified, import.meta.resolve('@openpane/sdk'));
   const lifetime = loaded.entry.activate({});
   assert.equal(lifetime.sdk, SDK.parseExtensionManifest);
   assert.equal((await lifetime.lazy()).value, 17);
   assert.equal((await import('node:path')).join('a', 'b'), 'a/b');
-  assert.equal((await import('@agentui/host')).providerIdentity instanceof Function, true);
+  assert.equal((await import('@openpane/host')).providerIdentity instanceof Function, true);
   await loaded.dispose();
   await loaded.dispose();
-  const [second] = await loadServerArtifact(f.verified, import.meta.resolve('@agentui/sdk'));
+  const [second] = await loadServerArtifact(f.verified, import.meta.resolve('@openpane/sdk'));
   assert.notEqual(second.entry, loaded.entry);
   await second.dispose();
 });
 
 test('loader deregisters after import and export failures and denies nonartifact imports', async t => {
-  for (const source of ["throw new Error('PRIVATE_IMPORT_FAILURE')", 'export const entries = [];', "import 'node:module'; export const entries = [];", "import '@agentui/host'; export const entries = [];"]) {
+  for (const source of ["throw new Error('PRIVATE_IMPORT_FAILURE')", 'export const entries = [];', "import 'node:module'; export const entries = [];", "import '@openpane/host'; export const entries = [];"]) {
     const f = await retained(t, source);
-    await assert.rejects(loadServerArtifact(f.verified, import.meta.resolve('@agentui/sdk')), { message: 'Server artifact loading failed' });
-    assert.equal((await import('@agentui/sdk')).parseExtensionManifest, SDK.parseExtensionManifest);
+    await assert.rejects(loadServerArtifact(f.verified, import.meta.resolve('@openpane/sdk')), { message: 'Server artifact loading failed' });
+    assert.equal((await import('@openpane/sdk')).parseExtensionManifest, SDK.parseExtensionManifest);
     assert.equal((await import('node:module')).isBuiltin('node:fs'), true);
   }
 });
 
 test('retained loader applies the shared SDK, builtin, and forbidden import policy', async t => {
   const f = await retained(t, entry('return {load:specifier => import(specifier), dispose(){}};'));
-  const [loaded] = await loadServerArtifact(f.verified, import.meta.resolve('@agentui/sdk'));
+  const [loaded] = await loadServerArtifact(f.verified, import.meta.resolve('@openpane/sdk'));
   try {
     const lifetime = loaded.entry.activate({});
-    assert.equal((await lifetime.load('@agentui/sdk')).parseExtensionManifest, SDK.parseExtensionManifest);
+    assert.equal((await lifetime.load('@openpane/sdk')).parseExtensionManifest, SDK.parseExtensionManifest);
     assert.equal(typeof (await lifetime.load('fs')).readFile, 'function');
     assert.equal((await lifetime.load('node:path')).basename('/fixture/allowed'), 'allowed');
-    for (const specifier of ['module', 'node:module', '@agentui/host', 'node:unknown', 'ordinary', 'toString']) {
+    for (const specifier of ['module', 'node:module', '@openpane/host', 'node:unknown', 'ordinary', 'toString']) {
       await assert.rejects(lifetime.load(specifier), { message: 'Unsupported server artifact import' });
     }
   } finally { await loaded.dispose(); }
@@ -63,7 +63,7 @@ test('retained loader applies the shared SDK, builtin, and forbidden import poli
 
 test('lazy imports remain available through lifetime disposal and are unavailable after module disposal', async t => {
   const f = await retained(t, entry("return {lazy:() => import('./unused.mjs'), async dispose(){return (await import('./lazy.mjs')).value}};"));
-  const [loaded] = await loadServerArtifact(f.verified, import.meta.resolve('@agentui/sdk'));
+  const [loaded] = await loadServerArtifact(f.verified, import.meta.resolve('@openpane/sdk'));
   const lifetime = loaded.entry.activate({});
   assert.equal(await lifetime.dispose(), 17);
   await loaded.dispose();
@@ -73,8 +73,8 @@ test('lazy imports remain available through lifetime disposal and are unavailabl
 test('simultaneous artifacts isolate identical relative filenames and dispose independently', async t => {
   const a = await retained(t, entry("return {lazy:() => import('./lazy.mjs'), dispose(){}};"), 'export const value = 1;');
   const b = await retained(t, entry("return {lazy:() => import('./lazy.mjs'), dispose(){}};"), 'export const value = 2;');
-  const [first] = await loadServerArtifact(a.verified, import.meta.resolve('@agentui/sdk'));
-  const [second] = await loadServerArtifact(b.verified, import.meta.resolve('@agentui/sdk'));
+  const [first] = await loadServerArtifact(a.verified, import.meta.resolve('@openpane/sdk'));
+  const [second] = await loadServerArtifact(b.verified, import.meta.resolve('@openpane/sdk'));
   assert.equal((await first.entry.activate({}).lazy()).value, 1);
   await first.dispose();
   assert.equal((await second.entry.activate({}).lazy()).value, 2);
@@ -82,13 +82,13 @@ test('simultaneous artifacts isolate identical relative filenames and dispose in
 });
 
 test('provider registry retains module ownership through lifetime cleanup and cleans activation failures once', async t => {
-  const { createProviderRegistry } = await import('@agentui/host');
-  const f = await retained(t, `import {EXTENSION_SDK_VERSION} from '@agentui/sdk';
+  const { createProviderRegistry } = await import('@openpane/host');
+  const f = await retained(t, `import {EXTENSION_SDK_VERSION} from '@openpane/sdk';
     const trace=[];
     export const entries=[{kind:'server',sdkVersion:EXTENSION_SDK_VERSION,trace,probe:()=>import('./unused.mjs'),
       activate(){ return {async dispose(){trace.push((await import('./lazy.mjs')).value)}} }}];`);
   for (const fails of [false, true]) {
-    const [loaded] = await loadServerArtifact(f.verified, import.meta.resolve('@agentui/sdk'));
+    const [loaded] = await loadServerArtifact(f.verified, import.meta.resolve('@openpane/sdk'));
     let releases = 0;
     const provider = { ...loaded, authority: { credentials: {}, issue(){ throw new Error('unused'); }, async close() {} },
       async dispose() { releases++; await loaded.dispose(); } };

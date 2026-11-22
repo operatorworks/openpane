@@ -7,19 +7,19 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 test('genuine first-party archives run with copied third-party runtime closure outside the checkout', t => {
-  const root = fileURLToPath(new URL('../../../', import.meta.url)), directory = realpathSync(mkdtempSync(join(tmpdir(), 'agentui-packed-reports-')));
+  const root = fileURLToPath(new URL('../../../', import.meta.url)), directory = realpathSync(mkdtempSync(join(tmpdir(), 'openpane-packed-reports-')));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8')).packages;
   const pinned = source => {
     const pkg = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8'));
     assert.equal(pkg.version, lock[relative(root, source)]?.version, 'copied dependency matches lockfile version');
   };
-  const modules = join(directory, 'node_modules'); mkdirSync(join(modules, '@agentui'), { recursive: true });
+  const modules = join(directory, 'node_modules'); mkdirSync(join(modules, '@openpane'), { recursive: true });
   writeFileSync(join(directory, 'package.json'), '{"private":true,"type":"module"}');
   const firstParty = new Set(['contracts', 'protocol', 'sdk', 'host', 'example-generated-text-output']);
   for (const name of readdirSync(join(root, 'node_modules'))) {
     if (name.startsWith('.')) continue;
-    if (name === '@agentui') {
+    if (name === '@openpane') {
       for (const child of readdirSync(join(root, 'node_modules', name))) {
         if (child.startsWith('switchboard-')) symlinkSync(realpathSync(join(root, 'node_modules', name, child)), join(modules, name, child), 'dir');
       }
@@ -34,7 +34,7 @@ test('genuine first-party archives run with copied third-party runtime closure o
   const hostLocal = join(root, 'packages/host/node_modules'), hostCopies = [];
   if (existsSync(hostLocal)) {
     for (const scope of readdirSync(hostLocal)) for (const name of readdirSync(join(hostLocal, scope))) { pinned(join(hostLocal, scope, name)); hostCopies.push(scope + '/' + name); }
-    cpSync(hostLocal, join(modules, '@agentui/host/node_modules'), { recursive: true, dereference: true });
+    cpSync(hostLocal, join(modules, '@openpane/host/node_modules'), { recursive: true, dereference: true });
   }
   const consumer = readFileSync(new URL('./packed-consumer.mjs', import.meta.url), 'utf8');
   writeFileSync(join(directory, 'consumer.mjs'), consumer);
@@ -53,13 +53,13 @@ test('genuine first-party archives run with copied third-party runtime closure o
     const marker = '/node_modules/', at = path.lastIndexOf(marker);
     assert.ok(at >= 0, 'no checkout first-party runtime escape: ' + path);
     const tail = path.slice(at + marker.length).split('/'), name = tail[0].startsWith('@') ? tail.slice(0, 2).join('/') : tail[0];
-    assert.ok(!name.startsWith('@agentui/') || name.startsWith('@agentui/switchboard-'), 'no first-party checkout escape');
+    assert.ok(!name.startsWith('@openpane/') || name.startsWith('@openpane/switchboard-'), 'no first-party checkout escape');
     const source = path.slice(0, at + marker.length) + name;
     const destination = source.startsWith(join(root, 'node_modules') + '/') ? join(modules, relative(join(root, 'node_modules'), source)) : join(modules, name);
     pinned(source); copies.set(destination, source);
   }
   for (const name of readdirSync(modules)) {
-    if (name === '@agentui') {
+    if (name === '@openpane') {
       for (const child of readdirSync(join(modules, name))) if (!firstParty.has(child)) rmSync(join(modules, name, child), { recursive: true, force: true });
     } else rmSync(join(modules, name), { recursive: true, force: true });
   }

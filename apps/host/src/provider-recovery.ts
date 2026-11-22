@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { canonicalJson } from '@agentui/contracts';
-import type { Transcript, TranscriptEvent } from '@agentui/contracts/conversation';
-import { HostCapacityError } from '@agentui/host';
-import type { Installation, LocalHost } from '@agentui/host';
+import { canonicalJson } from '@openpane/contracts';
+import type { Transcript, TranscriptEvent } from '@openpane/contracts/conversation';
+import { HostCapacityError } from '@openpane/host';
+import type { Installation, LocalHost } from '@openpane/host';
 
 interface RecoveryPolicy {
   readonly displayName: string;
@@ -10,13 +10,13 @@ interface RecoveryPolicy {
   readonly continuationAdvice: string;
 }
 export const PROVIDER_RECOVERY = {
-  codex: { displayName: 'Codex', warningCode: 'AGENTUI_CODEX_RECOVERY_CAPACITY',
+  codex: { displayName: 'Codex', warningCode: 'OPENPANE_CODEX_RECOVERY_CAPACITY',
     continuationAdvice: 'Check any unconfirmed actions before retrying them.' },
-  'codex-sdk': { displayName: 'Codex', warningCode: 'AGENTUI_CODEX_SDK_RECOVERY_CAPACITY',
+  'codex-sdk': { displayName: 'Codex', warningCode: 'OPENPANE_CODEX_SDK_RECOVERY_CAPACITY',
     continuationAdvice: 'You can send another message to continue.' },
-  'claude-sdk': { displayName: 'Claude', warningCode: 'AGENTUI_CLAUDE_SDK_RECOVERY_CAPACITY',
+  'claude-sdk': { displayName: 'Claude', warningCode: 'OPENPANE_CLAUDE_SDK_RECOVERY_CAPACITY',
     continuationAdvice: 'You can send another message to continue.' },
-  pi: { displayName: 'Pi', warningCode: 'AGENTUI_PI_RECOVERY_CAPACITY',
+  pi: { displayName: 'Pi', warningCode: 'OPENPANE_PI_RECOVERY_CAPACITY',
     continuationAdvice: 'You can send another message to continue.' },
 } satisfies Record<'codex' | 'codex-sdk' | 'claude-sdk' | 'pi', RecoveryPolicy>;
 

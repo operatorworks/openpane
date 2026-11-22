@@ -1,6 +1,6 @@
 # Codex dependency assessment
 
-Assessed on 2026-11-15 against AgentUI `d81f04eec198095475b04c8abe118d142e78963b`.
+Assessed on 2026-11-15 against OpenPane `d81f04eec198095475b04c8abe118d142e78963b`.
 Keep the working direct Codex bridge for the solo-user MVP until Switchboard
 provides a public Codex adapter. The final integration belongs on that shared
 adapter, with Codex protocol parsing and process ownership in Switchboard.
@@ -24,20 +24,20 @@ Its interrupt descriptor reports representability with undeclared native
 availability and qualification. A bump to the development artifact supplies none
 of the missing native mechanics.
 
-AgentUI's [native contract](../../../packages/contracts/src/compatibility.ts)
+OpenPane's [native contract](../../../packages/contracts/src/compatibility.ts)
 and [host instructions](../../development/codex-host.md) require Codex **0.167.2**
 with format `codex-app-server-v2`.
-Upstream's [selection at source 56e5bfd](https://github.com/mattsp1290/switchboard/blob/56e5bfd033d12a7d9e773af3997baae6b2ac4175/docs/qualification/codex-selection.md)
+Upstream's [selection at source 56e5bfd](https://github.com/operatorworks/switchboard/blob/56e5bfd033d12a7d9e773af3997baae6b2ac4175/docs/qualification/codex-selection.md)
 selects **0.169.0** and resolves the historical unknown-file omission selection
 blocker. That clean local source revision was also verified on GitHub.
 It is separate from both installed artifacts. This assessment does not package
 that source or rerun its native qualification. Selection does not establish a
-public adapter or qualify the AgentUI integration.
+public adapter or qualify the OpenPane integration.
 
 ## Bounded dependency handoff
 
 Upstream `switchboard-x9av` owns session execution and `switchboard-118i` owns
-action delivery and cancellation. AgentUI `agentui-yr72` and `agentui-iezb`
+action delivery and cancellation. OpenPane `agentui-yr72` and `agentui-iezb`
 remain open and depend on that delivery. The needed public adapter must own process
 lifecycle, create, turn submission, resume, native event translation, command
 and file Allow and Deny, and interrupt. It must retain typed native identifiers
@@ -46,7 +46,7 @@ and distinguish rejection from uncertain delivery without blind retries.
 Replace [createCodexDriver](../../../packages/host/src/codex-driver.ts) behind
 the existing `ProviderDriver` boundary once that adapter exists. Route its shared
 AG-UI output into the host transcript and remove the replaced local Codex wire
-parser and translation. Do not copy private upstream transport into AgentUI.
+parser and translation. Do not copy private upstream transport into OpenPane.
 The host keeps authorization, the conversation catalog, durable command
 admission, receipts, replay, and reconnect recovery.
 
@@ -58,7 +58,7 @@ matrix are outside this MVP handoff.
 
 ## Owned history and the version transition
 
-List only AgentUI's stored conversation catalog and resume only its saved session
+List only OpenPane's stored conversation catalog and resume only its saved session
 references. Never import native history or accept arbitrary client thread IDs.
 The current driver stores format-version-1 `SessionReference` values with the
 native thread ID in `opaque`. It selects installation `codex-local-v1`.
@@ -70,7 +70,7 @@ and recovery compare stored installations exactly. A blind CLI bump changes that
 installation. Old conversations then fail dispatch and recovery skips them.
 Establish whether the public adapter can accept the existing references before
 changing versions. If the binding must change, use a narrow, explicit transition
-for AgentUI-owned records that preserves saved transcripts and receipts.
+for OpenPane-owned records that preserves saved transcripts and receipts.
 Transition a record's installation before relying on the existing
 [recovery path](../../../apps/host/src/provider-recovery.ts) to expire process-bound
 approvals. Keep unknown outcomes unknown. Resume compatibility across 0.167.2

@@ -1,6 +1,6 @@
 import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from 'node:http';
-import { canonicalJson } from '@agentui/contracts';
-import { SERVICE_MAX_RESPONSE_BYTES } from '@agentui/contracts/service';
+import { canonicalJson } from '@openpane/contracts';
+import { SERVICE_MAX_RESPONSE_BYTES } from '@openpane/contracts/service';
 
 export async function readJson(request: IncomingMessage, limit: number, timeoutMs?: number): Promise<unknown> {
   const declared = request.headers['content-length'];

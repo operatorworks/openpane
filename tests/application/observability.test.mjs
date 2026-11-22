@@ -8,7 +8,7 @@ import { assertBoundedRequestSpans, attributes, receiver } from './support/obser
 import { browserRequest, control, exitWithin, hostRequest, launchProcess, startup, within } from './support/host-process.mjs';
 
 async function fixture(t, environment = {}, direct = false) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-observability-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-observability-'));
   const launch = (args, env = environment) => launchProcess(t, args, env);
   const cliArgs = args => ['apps/host/dist/main.js', ...args, '--data-dir', directory];
   const cli = (args, env) => launch(cliArgs(args), env);
@@ -61,7 +61,7 @@ test('host OTLP export contains only bounded request facts and ignores incoming 
     OTEL_TRACES_EXPORTER: 'otlp', OTEL_EXPORTER_OTLP_ENDPOINT: collector.endpoint,
     OTEL_EXPORTER_OTLP_HEADERS: 'x-collector-token=general,x-general-token=general%20token',
     OTEL_EXPORTER_OTLP_TRACES_HEADERS: 'x-collector-token=collector%20token%3Dvalue',
-    OTEL_SERVICE_NAME: 'agentui-observability-test',
+    OTEL_SERVICE_NAME: 'openpane-observability-test',
     OTEL_RESOURCE_ATTRIBUTES: `private.resource=${canaries[2]},service.name=${canaries[5]}`,
   });
   canaries.push(f.hostId);
@@ -70,8 +70,8 @@ test('host OTLP export contains only bounded request facts and ignores incoming 
   const expected = [];
   const check = (response, operation, credential, outcome, status) => {
     assert.equal(response.status, status, JSON.stringify(response.body));
-    expected.push({ 'agentui.operation': operation, 'agentui.credential_class': credential,
-      'agentui.outcome': outcome, 'http.response.status_code': status });
+    expected.push({ 'openpane.operation': operation, 'openpane.credential_class': credential,
+      'openpane.outcome': outcome, 'http.response.status_code': status });
     return response;
   };
   const metadata = check(await f.browser({ op: 'metadata' }, '', headers), 'metadata', 'browser-development', 'ok', 200);
@@ -87,7 +87,7 @@ test('host OTLP export contains only bounded request facts and ignores incoming 
   assert.equal((await f.call('/favicon.ico', undefined, { Host: 'wrong-host.invalid' }, 'GET')).status, 400);
   await f.stop();
   assertBoundedRequestSpans(collector.received, {
-    serviceName: 'agentui-observability-test',
+    serviceName: 'openpane-observability-test',
     collectorHeaders: { 'x-collector-token': 'collector token=value', 'x-general-token': 'general token' },
     expected, canaries,
   });
@@ -103,7 +103,7 @@ test('signal-specific OTLP endpoint is used verbatim with the default service id
   await f.stop();
   assert.equal(collector.received.length, 1);
   assert.equal(collector.received[0].path, '/custom/trace-intake');
-  assert.deepEqual(attributes(collector.received[0].body.resourceSpans[0].resource.attributes), { 'service.name': 'agentui-host' });
+  assert.deepEqual(attributes(collector.received[0].body.resourceSpans[0].resource.attributes), { 'service.name': 'openpane-host' });
 });
 
 test('enabled tracing releases failed startup and memoizes successful host shutdown', { timeout: 15_000 }, async t => {
@@ -121,12 +121,12 @@ test('response serialization failure exports a sanitized unavailable outcome aft
   const [{ openAccessDatabase }, { serviceEndpoint }, { createHostObservability }, { SERVICE_MAX_RESPONSE_BYTES }] = await Promise.all([
     import('../../apps/host/build/tsc/access-database.js'),
     import('../../apps/host/build/tsc/service-endpoint.js'), import('../../apps/host/build/tsc/observability.js'),
-    import('@agentui/contracts/service'),
+    import('@openpane/contracts/service'),
   ]);
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-observability-framing-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-observability-framing-'));
   const access = openAccessDatabase(join(directory, 'host.sqlite'));
   const privateDiagnostic = 'private-serialization-diagnostic-e88e24';
-  const observability = createHostObservability({ kind: 'otlp', endpoint: `${collector.endpoint}/v1/traces`, headers: {}, serviceName: 'agentui-host', datadogLlmObservability: false });
+  const observability = createHostObservability({ kind: 'otlp', endpoint: `${collector.endpoint}/v1/traces`, headers: {}, serviceName: 'openpane-host', datadogLlmObservability: false });
   const handler = serviceEndpoint({ client: 'native', hostId: access.hostId, observability, isClosing: () => false,
     api: async () => ({ diagnostic: privateDiagnostic.padEnd(SERVICE_MAX_RESPONSE_BYTES, 'x') }) });
   const server = createServer((incoming, outgoing) => { void handler(incoming, outgoing).catch(() => outgoing.destroy()); });
@@ -149,8 +149,8 @@ test('response serialization failure exports a sanitized unavailable outcome aft
   await closing;
   const spans = collector.received.flatMap(value => value.body.resourceSpans.flatMap(resource => resource.scopeSpans.flatMap(scope => scope.spans)));
   assert.equal(spans.length, 1);
-  assert.deepEqual(attributes(spans[0].attributes), { 'agentui.operation': 'metadata', 'agentui.credential_class': 'native',
-    'agentui.outcome': 'unavailable', 'http.response.status_code': 503 });
+  assert.deepEqual(attributes(spans[0].attributes), { 'openpane.operation': 'metadata', 'openpane.credential_class': 'native',
+    'openpane.outcome': 'unavailable', 'http.response.status_code': 503 });
   assert.equal(spans[0].status.code, 2);
   for (const privateValue of [privateDiagnostic, 'trusted-owner', access.hostId]) {
     assert.equal(JSON.stringify(collector.received).includes(privateValue), false);
@@ -197,7 +197,7 @@ test('observability configuration selects explicit HTTP JSON traces and validate
     { OTEL_TRACES_EXPORTER: 'invalid', OTEL_SDK_DISABLED: 'true', OTEL_EXPORTER_OTLP_HEADERS: 'invalid' }]) {
     assert.deepEqual(read(environment), { kind: 'disabled' });
   }
-  const defaults = { kind: 'otlp', endpoint: 'http://127.0.0.1:4318/v1/traces', headers: {}, serviceName: 'agentui-host', datadogLlmObservability: false };
+  const defaults = { kind: 'otlp', endpoint: 'http://127.0.0.1:4318/v1/traces', headers: {}, serviceName: 'openpane-host', datadogLlmObservability: false };
   assert.deepEqual(read({ OTEL_TRACES_EXPORTER: 'otlp' }), defaults);
   assert.deepEqual(read({ OTEL_TRACES_EXPORTER: 'otlp', OTEL_EXPORTER_OTLP_ENDPOINT: 'https://collector.example/otlp/' }),
     { ...defaults, endpoint: 'https://collector.example/otlp/v1/traces' });

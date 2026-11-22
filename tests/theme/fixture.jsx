@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Button, Text, Surface, TextField, ThemeScope } from '@agentui/ui-primitives/desktop';
-import '@agentui/ui-primitives/styles.css';
+import { Button, Text, Surface, TextField, ThemeScope } from '@openpane/ui-primitives/desktop';
+import '@openpane/ui-primitives/styles.css';
 import './fixture.css';
 
 function Workbench() {
@@ -11,7 +11,7 @@ function Workbench() {
   const [submissions, setSubmissions] = useState(0);
   return <ThemeScope appearance={appearance} data-testid="system">
     <header className="workbench-header">
-      <strong>AgentUI <span className="separator">/</span> Theme workbench</strong>
+      <strong>OpenPane <span className="separator">/</span> Theme workbench</strong>
       <nav aria-label="Appearance">
         {['System', 'Light', 'Dark'].map((name) => <Button key={name} tone="secondary"
           aria-pressed={name.toLowerCase() === (appearance ?? 'system')}
@@ -24,7 +24,7 @@ function Workbench() {
         <Text variant="title" as="h2">Make room for the work.</Text>
         <Text variant="muted">A reference for the conversation client we are building.</Text>
         <div className="thread-list">
-          <Surface><Text variant="label">AgentUI defaults</Text><Text variant="muted">Theme and primitive fixtures</Text></Surface>
+          <Surface><Text variant="label">OpenPane defaults</Text><Text variant="muted">Theme and primitive fixtures</Text></Surface>
           <Text variant="muted">Agent integrations arrive in later tasks.</Text>
         </div>
         <Text variant="code">LOCAL DESIGN FIXTURE</Text>
@@ -32,7 +32,7 @@ function Workbench() {
       <main>
         <div className="conversation-heading"><Text variant="muted">DESIGN / FOUNDATIONS</Text><Text variant="title" as="h1">A clearer place to think.</Text></div>
         <Surface className="message">
-          <Text variant="label">AgentUI</Text>
+          <Text variant="label">OpenPane</Text>
           <Text>The same colors and spacing belong on desktop and mobile. Each platform keeps its own controls.</Text>
           <Text variant="muted">Light and dark palettes, readable text, and keyboard focus are part of the default.</Text>
         </Surface>
@@ -54,7 +54,7 @@ function Workbench() {
           </form>
           <Text variant="muted" role="status">Actions {sent}. Form submissions {submissions}. This fixture runs no agents.</Text>
         </Surface>
-        <footer><Text variant="muted">Original AgentUI primitives. Design patterns informed by T3 Code.</Text></footer>
+        <footer><Text variant="muted">Original OpenPane primitives. Design patterns informed by T3 Code.</Text></footer>
       </main>
     </div>
   </ThemeScope>;

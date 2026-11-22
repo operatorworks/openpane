@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { secretResolver } from '@agentui/host';
+import { secretResolver } from '@openpane/host';
 import { openAccessDatabase } from '../../apps/host/build/tsc/access-database.js';
 import { createProviderAuthority } from '../../apps/host/build/tsc/provider-credentials.js';
 
@@ -12,7 +12,7 @@ const service = 'http://127.0.0.1:12345';
 const secret = 'PRIVATE_PROVIDER_SENTINEL_71';
 const installation = { expectedAuthority: 'remote-provider', id: 'service', instance, service, authentication: { kind: 'secret', revision: 'revision-1', resolve: async () => secret } };
 function database(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-provider-credentials-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-provider-credentials-'));
   const path = join(directory, 'host.sqlite');
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   return { path, state: openAccessDatabase(path) };

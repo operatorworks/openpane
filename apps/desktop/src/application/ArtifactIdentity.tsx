@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { parseArtifactManifest, artifactIdentityText, assertArtifactId } from '@agentui/contracts/artifact';
+import { parseArtifactManifest, artifactIdentityText, assertArtifactId } from '@openpane/contracts/artifact';
 
 interface Identity {
   readonly artifactId: string;

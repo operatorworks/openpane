@@ -1,8 +1,8 @@
 import { type ReactNode } from 'react';
 import { Pressable, Text as NativeText, TextInput, View, type PressableProps, type TextProps as NativeTextProps, type TextInputProps, type ViewProps } from 'react-native';
-import { buttonTones, textVariantColor, control, type ButtonTone, type TextVariant } from '@agentui/theme';
-import { useTheme } from '@agentui/theme/react';
-export { ThemeProvider } from '@agentui/theme/react';
+import { buttonTones, textVariantColor, control, type ButtonTone, type TextVariant } from '@openpane/theme';
+import { useTheme } from '@openpane/theme/react';
+export { ThemeProvider } from '@openpane/theme/react';
 
 export interface TextProps extends Omit<NativeTextProps, 'allowFontScaling'> { readonly variant?: TextVariant }
 export function Text({ variant = 'body', style, ...props }: TextProps) {

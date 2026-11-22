@@ -1,4 +1,4 @@
-import { canonicalJson } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { join } from 'node:path';

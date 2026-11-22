@@ -1,4 +1,4 @@
-import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, CODEX_SDK_RUNTIME, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
+import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, CODEX_SDK_RUNTIME, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
 import { createApplicationController } from '../../apps/desktop/dist/application/application-controller.js';
 
 export const scope = { hostId: 'host', conversationId: 'conversation' };

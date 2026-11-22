@@ -15,7 +15,7 @@ const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   const flag = args[i];
   if (flag === '--help') {
-    process.stdout.write('Usage: node scripts/verify-agentui-launch.mjs [--target local|USER@HOST]... [--workspace PATH] [--output DIRECTORY]\nRuns real Pi GLM 5.3 chats and verifies history after restarting each launcher. Build first with ./agentui.\n');
+    process.stdout.write('Usage: node scripts/verify-openpane-launch.mjs [--target local|USER@HOST]... [--workspace PATH] [--output DIRECTORY]\nRuns real Pi GLM 5.3 chats and verifies history after restarting each launcher. Build first with ./openpane.\n');
     process.exit(0);
   }
   if (!['--target', '--workspace', '--output'].includes(flag) || !args[i + 1] || args[i + 1].startsWith('--')) throw new Error(`Invalid argument: ${flag}`);
@@ -47,7 +47,7 @@ function launch(target, logPath) {
   const launchArgs = ['--skip-build', '--no-open', '--agent', 'pi'];
   if (target !== 'local') launchArgs.push('--ssh', target);
   if (options.workspace) launchArgs.push('--workspace', options.workspace);
-  const child = spawn(join(root, 'agentui'), launchArgs, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(join(root, 'openpane'), launchArgs, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   const log = createWriteStream(logPath);
   let tail = '', lines = '', resolveReady, rejectReady, stopped;
   const ready = new Promise((resolveReadyValue, rejectReadyValue) => { resolveReady = resolveReadyValue; rejectReady = rejectReadyValue; });
@@ -164,7 +164,7 @@ try {
       session = await openClient(info);
       result.runtime = session.metadata.compatibility.nativeRuntime;
       result.hostId = session.metadata.hostId;
-      const token = `AGENTUI_VERIFY_${randomBytes(6).toString('hex').toUpperCase()}`;
+      const token = `OPENPANE_VERIFY_${randomBytes(6).toString('hex').toUpperCase()}`;
       result.token = token;
       await session.page.getByRole('button', { name: 'New conversation', exact: true }).click();
       await session.page.getByRole('textbox', { name: 'Message', exact: true }).waitFor();

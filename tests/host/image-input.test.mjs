@@ -3,7 +3,7 @@ import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { PNG } from 'pngjs';
 import { verifyImageUpload } from '../../packages/host/dist/image-input.js';
-import { IMAGE_MAX_BYTES, parseImageAttachment, parseImageId, parseUploadId, parseImageName } from '@agentui/contracts/image';
+import { IMAGE_MAX_BYTES, parseImageAttachment, parseImageId, parseUploadId, parseImageName } from '@openpane/contracts/image';
 import { chunk, png, screenshotPng, screenshotJpeg, replaceChunk } from './image-fixtures.mjs';
 
 const verify = bytes => verifyImageUpload('Screenshot.png', bytes);

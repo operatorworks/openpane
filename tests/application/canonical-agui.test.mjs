@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canonicalJson } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
 import { parseProviderCapture, providerObservation } from '../../packages/host/dist/provider-commands.js';
 import { fixture, create, stored, send, offered, unavailable, aguiExtension } from './provider-send-fixture.mjs';
 

@@ -71,7 +71,7 @@ Prerequisite state: WP5 merged.
 
 - `src/desktop/index.tsx`: replace the placeholder with the real entry. Return `{ modules: [], workspace: { label: 'Crew', component: CrewWorkspace, transcript: CrewTranscript }, dispose }`.
 - `src/desktop/CrewWorkspace.tsx`, `CrewTranscript.tsx`, `MemberForm.tsx`, `styles.css` (all new). The stylesheet follows `customizationCssPolicy` in `scripts/local-customization.mjs` and the cases in `tests/customization/build/css-url-expressions.test.mjs`. It is imported from the entry and ships as a file. Every selector starts with `[data-extension-workspace="crew"]`.
-- Imports stay inside the bundling policy: `react`, `@agentui/sdk/react`, `@agentui/contracts/*`, `@agentui/theme/react`, `@agentui/ui-primitives/desktop`. No `@birbcrew/client` import in desktop code.
+- Imports stay inside the bundling policy: `react`, `@openpane/sdk/react`, `@openpane/contracts/*`, `@openpane/theme/react`, `@openpane/ui-primitives/desktop`. No `@birbcrew/client` import in desktop code.
 
 ### Layout (Slack idiom, no Slack assets or names)
 
@@ -95,7 +95,7 @@ Prerequisite state: WP5 merged.
 - Selecting a member with no conversation shows an empty state with a `Start conversation` button that calls `props.create(agent.id)`.
 - Selecting a conversation row calls `props.open(scope)`.
 - `Add member` opens `MemberForm`: engine select (`pi`, `claude`, `codex`), profile text field, instructions textarea. Submit calls `members.create` with a `requestId` generated once per form instance. On `ok` it calls `props.refresh()` and selects the new member. On `refused` it shows a fixed message per code. On `failed` (including `unavailable` and `timeout`) it shows a generic failure and keeps the form and the same `requestId` for retry.
-- With no installation: a setup panel that names the configuration file and the variable name `AGENTUI_EXTENSION_CREW_TOKEN`, and links to the documentation. No token entry field.
+- With no installation: a setup panel that names the configuration file and the variable name `OPENPANE_EXTENSION_CREW_TOKEN`, and links to the documentation. No token entry field.
 - With an unavailable installation: the sanitized status and a `Retry` button that calls `props.refresh()`.
 - Edit and Delete controls are present and disabled in this phase with the tooltip `Requires a newer Crew service`. WP9 enables them.
 - A concluded conversation (128 turns or closed) shows the host's existing state inside the conversation node. This plan adds no Continue control.

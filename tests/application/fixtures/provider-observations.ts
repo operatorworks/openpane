@@ -2,19 +2,19 @@
 /// <reference lib="esnext" />
 import { randomUUID } from 'node:crypto';
 import { EventSchema, RunAgentInputSchema } from '@ag-ui/core/schemas';
-import { canonicalJson, copyJson, parseRunAuthority, parseScope } from '@agentui/contracts';
-import { identifier, record } from '@agentui/contracts/decode';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import type { Event, RunAgentInput } from '@agentui/protocol';
+import { canonicalJson, copyJson, parseRunAuthority, parseScope } from '@openpane/contracts';
+import { identifier, record } from '@openpane/contracts/decode';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import type { Event, RunAgentInput } from '@openpane/protocol';
 import type { AguiObservations, AguiOriginalRun, AguiRunBatch, AguiRunSnapshot, BackendProvider, ConnectedProvider,
-  Json, ProviderConversation, ProviderInstance, ProviderModel, ProviderPresentation, ServerExtensionContext } from '@agentui/sdk';
+  Json, ProviderConversation, ProviderInstance, ProviderModel, ProviderPresentation, ServerExtensionContext } from '@openpane/sdk';
 
 type Model = { request: RunAgentInput; cursor: string; state: Json; event: Json };
 export const instance: ProviderInstance<string> = Object.freeze({ namespace: 'observation-test', installationId: 'fixture', generation: '1', protocolVersion: '1' });
 function binding(value: unknown): ProviderConversation<string> {
   const input = record(value), creation = record(input.creation), agent = record(creation.agent);
-  if (input.kind !== 'agentui-created' || creation.kind !== 'create' || agent.kind !== 'agent' || canonicalJson(agent.instance) !== canonicalJson(instance)) throw new Error('binding');
-  return { kind: 'agentui-created', creation: { kind: 'create', operationId: identifier(creation.operationId), scope: parseScope(creation.scope),
+  if (input.kind !== 'openpane-created' || creation.kind !== 'create' || agent.kind !== 'agent' || canonicalJson(agent.instance) !== canonicalJson(instance)) throw new Error('binding');
+  return { kind: 'openpane-created', creation: { kind: 'create', operationId: identifier(creation.operationId), scope: parseScope(creation.scope),
     agent: { kind: 'agent', instance, opaqueId: identifier(agent.opaqueId) } }, authority: parseRunAuthority(input.authority) };
 }
 export function controlledProvider(service: string) {

@@ -1,5 +1,5 @@
-import type { ClientCompatibility, HostCompatibility, CompatibilityIssue, CompatibilityResult } from '@agentui/contracts/compatibility';
-export type { AppliedArtifactIdentity, ClientCompatibility, CompatibilityIssue, CompatibilityResult, HostCompatibility, NativeRuntimeIdentity } from '@agentui/contracts/compatibility';
+import type { ClientCompatibility, HostCompatibility, CompatibilityIssue, CompatibilityResult } from '@openpane/contracts/compatibility';
+export type { AppliedArtifactIdentity, ClientCompatibility, CompatibilityIssue, CompatibilityResult, HostCompatibility, NativeRuntimeIdentity } from '@openpane/contracts/compatibility';
 
 export function checkCompatibility(client: ClientCompatibility, host: HostCompatibility): CompatibilityResult {
   const issues: CompatibilityIssue[] = [];

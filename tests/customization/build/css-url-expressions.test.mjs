@@ -11,7 +11,7 @@ import { cssUrlExpressions } from '../../../scripts/lib/css-url-expressions.mjs'
 import { repository, buildCustom } from './support.mjs';
 
 test('relative CSS URL expressions retain precedence, bytes and source maps in Chromium', { timeout: 60_000 }, async t => {
-  const root = await mkdtemp(join(tmpdir(), 'agentui-css-expressions-'));
+  const root = await mkdtemp(join(tmpdir(), 'openpane-css-expressions-'));
   const browser = await chromium.launch();
   t.after(async () => { await browser.close(); await rm(root, { recursive: true, force: true }); });
   await writeFile(join(root, 'style.css'), '.fixture { color: rgb(1, 2, 3); }');
@@ -59,7 +59,7 @@ test('relative CSS URL expressions retain precedence, bytes and source maps in C
 });
 
 test('pre-CSS grouping handles emitted keys and quasis without rewriting tagged raw text', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'agentui-css-ast-'));
+  const root = await mkdtemp(join(tmpdir(), 'openpane-css-ast-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(join(root, 'entry.js'), 'globalThis.probe = true;');
   let parse;

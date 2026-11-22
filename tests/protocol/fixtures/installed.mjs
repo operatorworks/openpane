@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createAguiProjection, describeProjection, aguiProtocol } from '@agentui/host/agui';
+import { createAguiProjection, describeProjection, aguiProtocol } from '@openpane/host/agui';
 import { projectionFacts } from '../coverage.mjs';
 import { validateEvent } from '../canonical.mjs';
 
@@ -17,7 +17,7 @@ function mapped(projection, fact, count = 1) {
   return result.events;
 }
 
-function actor({ start = true, sourceKey = 'agentui.fixture', runId = 'run' } = {}) {
+function actor({ start = true, sourceKey = 'openpane.fixture', runId = 'run' } = {}) {
   const made = createAguiProjection({ threadId: 'thread', runId, parentRunId: 'parent', sourceKey, bounds });
   assert.equal(made.kind, 'ok', JSON.stringify(made));
   if (start) mapped(made.value, { kind: 'run-started' });
@@ -78,8 +78,8 @@ export const installedFixtures = {
     assert.notEqual(text.messageId, '');
     assert.equal(typeof text.subagentRunId, 'string');
     assert.notEqual(text.subagentRunId, '');
-    assert.deepEqual(JSON.parse(text.messageId), [1, 'agentui.fixture', 'message', ['fixture'], 'same']);
-    assert.deepEqual(JSON.parse(text.subagentRunId), [1, 'agentui.fixture', 'subagent', ['fixture'], 'same']);
+    assert.deepEqual(JSON.parse(text.messageId), [1, 'openpane.fixture', 'message', ['fixture'], 'same']);
+    assert.deepEqual(JSON.parse(text.subagentRunId), [1, 'openpane.fixture', 'subagent', ['fixture'], 'same']);
     assert.equal(mapped(projection, { kind: 'text-ended', message, owner })[0].messageId, text.messageId);
     assert.deepEqual(mapped(projection, { kind: 'run-finished', outcome: 'success' })[0].outcome, { type: 'success' });
     projection.close();
@@ -120,7 +120,7 @@ export const installedFixtures = {
     const [snapshot] = mapped(projection, { kind: 'activity-snapshot', message, activityType: 'progress', content: { count: 0, done: false }, replace: false });
     assert.equal(snapshot.replace, false);
     assert.equal(snapshot.activityType, 'progress');
-    assert.deepEqual(JSON.parse(snapshot.messageId), [1, 'agentui.fixture', 'message', message.scope, message.id]);
+    assert.deepEqual(JSON.parse(snapshot.messageId), [1, 'openpane.fixture', 'message', message.scope, message.id]);
     assert.deepEqual(snapshot.content, { count: 0, done: false });
     const patch = [{ op: 'replace', path: '/done', value: true }];
     const [activity] = mapped(projection, { kind: 'activity-delta', message, activityType: 'progress', patch });
@@ -167,7 +167,7 @@ export const installedFixtures = {
     assert.equal(assistant.toolCalls[0].type, 'function');
     assert.equal(activity.activityType, 'progress');
     for (const [index, item] of snapshot.messages.entries()) {
-      assert.deepEqual(JSON.parse(item.id), [1, 'agentui.fixture', 'message', messages[index].id.scope, messages[index].id.id]);
+      assert.deepEqual(JSON.parse(item.id), [1, 'openpane.fixture', 'message', messages[index].id.scope, messages[index].id.id]);
     }
     assert.equal(assistant.encryptedValue, 'opaque-assistant');
     assert.equal(assistant.toolCalls[0].encryptedValue, 'opaque-call');
@@ -179,7 +179,7 @@ export const installedFixtures = {
     assert.equal(typeof user.content[0].id, 'string');
     assert.notEqual(user.content[0].id, '');
     assert.notEqual(user.content[0].id, parts[0].id.id);
-    assert.deepEqual(JSON.parse(user.content[0].id), [1, 'agentui.fixture', 'part', parts[0].id.scope, parts[0].id.id]);
+    assert.deepEqual(JSON.parse(user.content[0].id), [1, 'openpane.fixture', 'part', parts[0].id.scope, parts[0].id.id]);
     assert.equal(user.content[0].text, '');
     assert.deepEqual(user.content[0].metadata, { count: 0 });
     assert.deepEqual(activity.content, { done: false });

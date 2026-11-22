@@ -238,7 +238,7 @@ mod tests {
     impl Fixture {
         fn new(endpoint: &str) -> Self {
             let directory =
-                std::env::temp_dir().join(format!("agentui-native-test-{}", Uuid::new_v4()));
+                std::env::temp_dir().join(format!("openpane-native-test-{}", Uuid::new_v4()));
             std::fs::create_dir(&directory).unwrap();
             let owner = Arc::new(Mutex::new(
                 Owner::new(&directory.join("profile"), endpoint.into()).unwrap(),

@@ -10,8 +10,8 @@ test('generic host import, open, create and close never load frontend coordinato
     import {join} from 'node:path';
     const urls=[];
     registerHooks({resolve(specifier,context,next){const value=next(specifier,context);urls.push(value.url);return value;}});
-    const {openLocalHost}=await import('@agentui/host');
-    const {transcriptProjection}=await import('@agentui/contracts/conversation');
+    const {openLocalHost}=await import('@openpane/host');
+    const {transcriptProjection}=await import('@openpane/contracts/conversation');
     const directory=mkdtempSync(join(tmpdir(),'generic-observation-'));
     try{
       const host=openLocalHost({path:join(directory,'host.sqlite'),projection:transcriptProjection,driver:[],authorize:()=>true});

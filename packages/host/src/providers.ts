@@ -5,19 +5,19 @@ import { aguiInput, offerInput } from './agui-input.js';
 import { observeProvider, ObservationFailure } from './provider-stream.js';
 import type { ProviderStream, ProviderStreamStore } from './provider-stream.js';
 import { randomUUID } from 'node:crypto';
-import { canonicalJson, copyJson, isOutputId, parseContinuationCarried, parseContinuationRefusal, parseConversationClosure, parseConversationPermissions } from '@agentui/contracts';
-import { identifier, record } from '@agentui/contracts/decode';
-import { backendProviderContractVersion, checkExtensionEntrypoint, EXTENSION_OPERATION_PATTERN, parseExtensionManifest, validateExtensionLifetime } from '@agentui/sdk';
-import { classifyExtensionCall, ExtensionCallTooLarge } from '@agentui/contracts/service';
-import type { ExtensionCallRequest, ExtensionCallValue, ExtensionDescriptor } from '@agentui/contracts/service';
+import { canonicalJson, copyJson, isOutputId, parseContinuationCarried, parseContinuationRefusal, parseConversationClosure, parseConversationPermissions } from '@openpane/contracts';
+import { identifier, record } from '@openpane/contracts/decode';
+import { backendProviderContractVersion, checkExtensionEntrypoint, EXTENSION_OPERATION_PATTERN, parseExtensionManifest, validateExtensionLifetime } from '@openpane/sdk';
+import { classifyExtensionCall, ExtensionCallTooLarge } from '@openpane/contracts/service';
+import type { ExtensionCallRequest, ExtensionCallValue, ExtensionDescriptor } from '@openpane/contracts/service';
 import { EXTENSION_OPERATION_DEADLINE_MS, failedCall, operationResult, runAdmitted } from './extension-operations.js';
-import type { ContinuationCarried, ContinuationRefusal, ConversationClosure, ConversationPermissions, ConversationScope, RunAuthority, FrontendEligibility, OutputId, OutputListing, OutputRead } from '@agentui/contracts';
+import type { ContinuationCarried, ContinuationRefusal, ConversationClosure, ConversationPermissions, ConversationScope, RunAuthority, FrontendEligibility, OutputId, OutputListing, OutputRead } from '@openpane/contracts';
 import { parseProviderCapture, providerOutcome, providerReference } from './provider-commands.js';
 import type { ProviderCapture, MatchedProviderCommand, ProviderTarget, ProviderObservation, ProviderAction } from './provider-commands.js';
 import { creationBinding, creationIntent, creationObservation, providerCreation, providerIdentity } from './provider-creation.js';
 import type { CreationPredecessor, ProviderCreation, ProviderInstallation, CreationObservation, StoredCreation } from './provider-creation.js';
 import type { BackendProvider, ConnectedProvider, CredentialHandle, ExtensionLifetime, ExtensionManifest, ExtensionOperation, ServerExtensionInstallation,
-  ProviderCommand, ProviderInstance, ProviderModel, ProviderOutputs, ProviderPresentation, ServerExtensionEntry, ServerProviderCredentials } from '@agentui/sdk';
+  ProviderCommand, ProviderInstance, ProviderModel, ProviderOutputs, ProviderPresentation, ServerExtensionEntry, ServerProviderCredentials } from '@openpane/sdk';
 
 export { providerIdentity } from './provider-creation.js';
 export type { ProviderIdentity } from './provider-creation.js';
@@ -43,7 +43,7 @@ export interface ProviderExtension {
 export { EXTENSION_OPERATION_DEADLINE_MS } from './extension-operations.js';
 function installationCopy(value: ServerExtensionInstallation): ServerExtensionInstallation {
   const instance = providerIdentity(value.instance);
-  if (value.expectedAuthority !== 'agentui-host' && value.expectedAuthority !== 'remote-provider') throw new Error('Invalid installation');
+  if (value.expectedAuthority !== 'openpane-host' && value.expectedAuthority !== 'remote-provider') throw new Error('Invalid installation');
   return Object.freeze({ id: text(value.id), instance: Object.freeze({ ...instance }), service: text(value.service), expectedAuthority: value.expectedAuthority });
 }
 export interface DiscoveredProvider {
@@ -64,10 +64,10 @@ export interface UnavailableProvider {
 }
 export type ProviderStatus = DiscoveredProvider | UnavailableProvider;
 export const providerUnavailableReasons: Readonly<Record<ProviderUnavailableCause, string>> = Object.freeze({
-  offline: 'The provider service is offline or unreachable. AgentUI checks again automatically.',
-  'authentication-failed': 'The provider rejected the configured credential. Fix it on the provider and AgentUI checks again automatically, or change the extension secret and restart the host.',
-  unauthorized: 'The configured credential is not authorized for this provider. Grant it access; AgentUI checks again automatically.',
-  'version-unsupported': 'The provider service version is unsupported. Install a compatible version; AgentUI checks again automatically.',
+  offline: 'The provider service is offline or unreachable. OpenPane checks again automatically.',
+  'authentication-failed': 'The provider rejected the configured credential. Fix it on the provider and OpenPane checks again automatically, or change the extension secret and restart the host.',
+  unauthorized: 'The configured credential is not authorized for this provider. Grant it access; OpenPane checks again automatically.',
+  'version-unsupported': 'The provider service version is unsupported. Install a compatible version; OpenPane checks again automatically.',
   'invalid-installation': 'The provider installation is invalid. Fix the extension configuration, then restart the host.',
 });
 const rediscoveryInterval = 30_000;

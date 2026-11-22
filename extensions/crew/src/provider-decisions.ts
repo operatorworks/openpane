@@ -1,12 +1,12 @@
 import type { z } from 'zod';
 import { CrewHttpError, type ApprovalDetailIdentity, type Capabilities, type CrewClient, type DecisionRecord } from '@birbcrew/client';
 import { decisionReceiptsCapabilityV1Schema } from '@birbcrew/client/contract';
-import type { ProviderCommandEffect, ProviderOutcome } from '@agentui/sdk';
+import type { ProviderCommandEffect, ProviderOutcome } from '@openpane/sdk';
 import { uncertain, type choiceSchema } from './provider-model.js';
 
 type Choice = z.infer<typeof choiceSchema>;
 export type DecisionVerdict = 'confirmed' | 'rejected' | 'uncertain';
-/** One decide as AgentUI would send it: the card identity, the choice and the decision id it carries, if any. */
+/** One decide as OpenPane would send it: the card identity, the choice and the decision id it carries, if any. */
 export interface DecisionRequest extends ApprovalDetailIdentity { readonly choice: Choice; readonly decisionId: string | null }
 /**
  * What Crew said about one decide: its reply, a 409 refusal code, the decision record read back under the id the

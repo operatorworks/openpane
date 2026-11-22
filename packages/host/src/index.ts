@@ -1,9 +1,9 @@
-export { createEventStream, parseInteractionContinuation, parseSessionReference } from '@mattsp1290/switchboard';
+export { createEventStream, parseInteractionContinuation, parseSessionReference } from '@operatorworks/switchboard';
 export type {
   AdapterInstance, AdapterRegistration, Capability, EventObserver, EventStream,
   InteractionContinuation, PendingInteraction, SessionBinding, SessionReference,
-} from '@mattsp1290/switchboard';
-export type { ProviderBinding, RunAuthority, RunIdentity } from '@agentui/contracts';
+} from '@operatorworks/switchboard';
+export type { ProviderBinding, RunAuthority, RunIdentity } from '@openpane/contracts';
 
 export { imageFailure } from './image-input.js';
 

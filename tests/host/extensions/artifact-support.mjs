@@ -15,7 +15,7 @@ export const secret = 'PRIVATE_ARTIFACT_REPLACEMENT_SECRET';
 let harness;
 export async function packagedHost(t) {
   if (!harness) harness = (async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'agentui-artifact-host-'));
+    const directory = await mkdtemp(join(tmpdir(), 'openpane-artifact-host-'));
     const abi = await serverCustomizationAbi();
     try {
       const result = await buildHostBundle({ abi, entryPoint: 'apps/host/src/server.ts', outdir: directory });
@@ -33,7 +33,7 @@ export async function packagedHost(t) {
 }
 
 export async function fixture(t, runtime, { stableIdentity = false, liveFeeds = false } = {}) {
-  const key = 'agentuiArtifactReplacement' + randomUUID().replaceAll('-', '');
+  const key = 'openpaneArtifactReplacement' + randomUUID().replaceAll('-', '');
   const state = { events: [], modules: [], emitter: new EventEmitter(), deliveries: [], maximum: 0, hooks: {}, commands: [] };
   state.phase = async (phase, module) => {
     state.events.push(`${module.label}:${module.id}:${phase}`);
@@ -41,7 +41,7 @@ export async function fixture(t, runtime, { stableIdentity = false, liveFeeds = 
   };
   globalThis[key] = state;
   t.after(() => { delete globalThis[key]; });
-  const source = label => `import { EXTENSION_SDK_VERSION, parseExtensionManifest } from '@agentui/sdk';
+  const source = label => `import { EXTENSION_SDK_VERSION, parseExtensionManifest } from '@openpane/sdk';
     import { createCrewFixture } from './crew.ts';
     const state = globalThis[${JSON.stringify(key)}] ?? {modules:[],phase:async()=>{}}, label = ${JSON.stringify(label)};
     const instance = {namespace:'example-crew',installationId:'personal',generation:${stableIdentity ? "'stable'" : 'label'},protocolVersion:'crew-v2'};
@@ -79,7 +79,7 @@ export async function fixture(t, runtime, { stableIdentity = false, liveFeeds = 
       return {async dispose(){state.emitter.off('update',module.listener);await state.phase('dispose',module);}};
     }};`;
   const f = await setup(t, source('artifact-a'));
-  await write(f.repo.directory, 'package.json', { type: 'module', agentui: extension('example-crew') });
+  await write(f.repo.directory, 'package.json', { type: 'module', openpane: extension('example-crew') });
   await write(f.repo.directory, 'crew.ts', await readFile(crew, 'utf8'));
   await write(f.repo.directory, 'unused.ts', 'export const retained = 17;');
   // The builder inlines lazy imports. This unused asset tests actual loader-hook release.
@@ -108,7 +108,7 @@ export async function fixture(t, runtime, { stableIdentity = false, liveFeeds = 
   }
   async function installedEntry(label) {
     const installed = join(f.root, label); await mkdir(installed);
-    await writeFile(join(installed, 'server.mjs'), source(label).replace("'@agentui/sdk'", JSON.stringify(pathToFileURL(join(runtime.directory, 'sdk.js')).href))
+    await writeFile(join(installed, 'server.mjs'), source(label).replace("'@openpane/sdk'", JSON.stringify(pathToFileURL(join(runtime.directory, 'sdk.js')).href))
     .replace("'./crew.ts'", JSON.stringify(crew.href)).replace("'./unused.ts'", "'./unused.mjs'"));
     await writeFile(join(installed, 'unused.mjs'), 'export const retained = 17;');
     return { kind: 'installed', directory: installed, manifest: extension('example-crew').extension, installations: grants(label) };

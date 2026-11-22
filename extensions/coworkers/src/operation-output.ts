@@ -1,4 +1,4 @@
-import type { Json } from '@agentui/contracts';
+import type { Json } from '@openpane/contracts';
 
 // The output of `coworkers.list`, shared by the server operation and the desktop workspace. No node imports: the desktop
 // bundle imports this module. Type aliases, not interfaces, so the outputs are assignable to `Json`.

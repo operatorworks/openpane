@@ -2,12 +2,12 @@ import { spawn } from 'node:child_process';
 import { readFile, realpath } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bootstrapScript, distribution, harnessInstallScript, shellQuote } from './agentui-runtime.mjs';
+import { bootstrapScript, distribution, harnessInstallScript, shellQuote } from './openpane-runtime.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const usage = `Usage: ./agentui setup --agent codex|pi|claude [--ssh USER@HOST]
+const usage = `Usage: ./openpane setup --agent codex|pi|claude [--ssh USER@HOST]
 
-Installs a pinned harness in AgentUI's private tools directory and exits.
+Installs a pinned harness in OpenPane's private tools directory and exits.
 Does not sign in, start a host, or open the app. No provider credentials are required.
 SSH must already connect in batch mode with normal host-key verification.
 `;
@@ -45,7 +45,7 @@ export async function harnessSpecifications() {
 export function setupScript(nodeVersion, specification) {
   return `${bootstrapScript(nodeVersion, 'pi', '')}
 ${harnessInstallScript(specification)}
-"$node" --input-type=commonjs -e 'const [agent,version,executable,os,arch]=process.argv.slice(1); console.log("AGENTUI_INSTALLED "+JSON.stringify({event:"installed",agent,version,executable,os,arch,authentication:"not-checked"}));' ${[specification.id, specification.version].map(shellQuote).join(' ')} "$harness" "$os" "$arch"
+"$node" --input-type=commonjs -e 'const [agent,version,executable,os,arch]=process.argv.slice(1); console.log("OPENPANE_INSTALLED "+JSON.stringify({event:"installed",agent,version,executable,os,arch,authentication:"not-checked"}));' ${[specification.id, specification.version].map(shellQuote).join(' ')} "$harness" "$os" "$arch"
 `;
 }
 
@@ -83,11 +83,11 @@ export async function setup(options) {
       child.once('close', (code, signal) => resolve({ code, signal }));
     });
     if (interrupted || result.code !== 0) throw new Error(overflow ? 'Setup output exceeded its limit.' : 'Harness setup did not complete.');
-    const records = output.split('\n').filter(line => line.startsWith('AGENTUI_INSTALLED '));
+    const records = output.split('\n').filter(line => line.startsWith('OPENPANE_INSTALLED '));
     if (records.length !== 1) throw new Error('Harness setup did not return an installation result.');
     let record;
     try {
-      record = JSON.parse(records[0].slice('AGENTUI_INSTALLED '.length));
+      record = JSON.parse(records[0].slice('OPENPANE_INSTALLED '.length));
       if (!record || typeof record !== 'object' || Array.isArray(record) ||
           Object.keys(record).sort().join(',') !== 'agent,arch,authentication,event,executable,os,version' ||
           record.event !== 'installed' || record.agent !== options.agent || record.version !== specifications[options.agent].version ||

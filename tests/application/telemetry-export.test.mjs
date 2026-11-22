@@ -33,7 +33,7 @@ async function receiver(t, respond = (_incoming, outgoing) => {
 
 function observe(t, collector, headers = {}) {
   const observations = createHostObservability({ kind: 'otlp', endpoint: collector.endpoint,
-    headers, serviceName: 'agentui-export-test', datadogLlmObservability: false });
+    headers, serviceName: 'openpane-export-test', datadogLlmObservability: false });
   t.after(() => observations.close());
   return observations;
 }
@@ -130,9 +130,9 @@ for (const kind of ['requests', 'unfinished native runs']) {
       assert.equal(exported.length, count, 'shutdown must deliver every span to a healthy receiver');
       assert.equal(new Set(exported.map(span => span.traceId)).size, count);
       for (const span of exported) {
-        assert.equal(span.name, kind === 'requests' ? 'agentui.host.request' : 'invoke_agent codex');
+        assert.equal(span.name, kind === 'requests' ? 'openpane.host.request' : 'invoke_agent codex');
         const outcome = span.attributes.find(attribute => attribute.key ===
-          (kind === 'requests' ? 'agentui.outcome' : 'switchboard.outcome'));
+          (kind === 'requests' ? 'openpane.outcome' : 'switchboard.outcome'));
         assert.equal(outcome?.value.stringValue, kind === 'requests' ? 'ok' : 'outcome-unknown');
       }
     });
@@ -199,7 +199,7 @@ for (const response of responses) {
     const memory = new InMemorySpanExporter();
     const provider = new TracerProvider({ spanProcessors: [new SimpleSpanProcessor({ exporter: memory })] });
     t.after(() => provider.shutdown());
-    provider.getTracer('otlp-response-test').startSpan('agentui.host.request').end();
+    provider.getTracer('otlp-response-test').startSpan('openpane.host.request').end();
     const [span] = memory.getFinishedSpans();
     assert.ok(span, 'the SDK produced a readable span');
     const exporter = createOtlpExporter({ endpoint: collector.endpoint, headers: {} });
@@ -218,7 +218,7 @@ for (const response of responses) {
     assert.equal(collector.received.length, 1, 'the exporter makes one attempt without retrying');
     const exported = spans(collector);
     assert.equal(exported.length, 1);
-    assert.equal(exported[0].name, 'agentui.host.request');
+    assert.equal(exported[0].name, 'openpane.host.request');
     assert.match(exported[0].traceId, /^[0-9a-f]{32}$/);
     assert.match(exported[0].spanId, /^[0-9a-f]{16}$/);
   });
@@ -235,7 +235,7 @@ test('exporter shutdown waits for an active healthy response and returns the sam
   const memory = new InMemorySpanExporter();
   const provider = new TracerProvider({ spanProcessors: [new SimpleSpanProcessor({ exporter: memory })] });
   t.after(() => provider.shutdown());
-  provider.getTracer('otlp-shutdown-test').startSpan('agentui.host.request').end();
+  provider.getTracer('otlp-shutdown-test').startSpan('openpane.host.request').end();
   const exporter = createOtlpExporter({ endpoint: collector.endpoint, headers: {} });
   t.after(() => exporter.shutdown());
   const result = exportOne(exporter, memory.getFinishedSpans()[0]);
@@ -265,7 +265,7 @@ test('an active response drip cannot extend the 500 ms export deadline', { timeo
   const memory = new InMemorySpanExporter();
   const provider = new TracerProvider({ spanProcessors: [new SimpleSpanProcessor({ exporter: memory })] });
   t.after(() => provider.shutdown());
-  provider.getTracer('otlp-deadline-test').startSpan('agentui.host.request').end();
+  provider.getTracer('otlp-deadline-test').startSpan('openpane.host.request').end();
   const exporter = createOtlpExporter({ endpoint: collector.endpoint, headers: {} });
   t.after(() => exporter.shutdown());
   const started = performance.now();

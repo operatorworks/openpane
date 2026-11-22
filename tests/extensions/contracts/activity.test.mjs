@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { forwardRef, lazy, memo } from 'react';
-import { parseUiExtensionContributions } from '@agentui/sdk/react';
+import { parseUiExtensionContributions } from '@openpane/sdk/react';
 import { assertCompileCases } from '../../support/compile.mjs';
 
 test('activity captures both known getters once and preserves component identity', async () => {
@@ -50,7 +50,7 @@ test('activity authors get readonly updates and the existing module context', ()
   config: 'apps/desktop/tsconfig.json',
   prefix: `
 import { createElement, memo } from 'react';
-import type { ConversationActivityProps, ConversationModuleProps, UiExtensionContributions } from '@agentui/sdk/react';
+import type { ConversationActivityProps, ConversationModuleProps, UiExtensionContributions } from '@openpane/sdk/react';
 export const activity = ({ updates, activity, commands }: ConversationActivityProps) => createElement('button', { onClick: () => commands.cancel('run') }, updates, activity.domain.activities?.length ?? 0);
 export const contribution: UiExtensionContributions = { modules: [], overrides: { activity: memo(activity) }, dispose() {} };
 export const ignoresUpdates: UiExtensionContributions = { modules: [], overrides: { activity: (_props: ConversationModuleProps) => null }, dispose() {} };

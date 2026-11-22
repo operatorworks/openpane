@@ -1,8 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { identifier } from '@agentui/contracts/decode';
-import { parseCommand } from '@agentui/contracts';
+import { identifier } from '@openpane/contracts/decode';
+import { parseCommand } from '@openpane/contracts';
 import { taggedKeySql } from './sqlite-frontend-sends.js';
-import type { ClientCommand, ConversationScope } from '@agentui/contracts';
+import type { ClientCommand, ConversationScope } from '@openpane/contracts';
 import { isOffered } from './durable-model.js';
 import type { StoredCommand, OfferedStoredCommand } from './durable-model.js';
 import type { AguiRunKey, MatchedProviderCommand } from './provider-commands.js';

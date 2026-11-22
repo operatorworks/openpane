@@ -1,20 +1,20 @@
-import type { ContinuationRefusal, ConversationClosure } from '@agentui/contracts';
+import type { ContinuationRefusal, ConversationClosure } from '@openpane/contracts';
 import type { ContinuationBoundary, ConversationContinuation } from './application-controller.js';
 
 export const BEFORE_CONTINUE = 'Starts a new provider conversation with the same agent. The provider sends it the newest complete turns, up to 64 KiB. '
   + 'Older turns and turns with an unknown outcome are left out. Nothing you sent is resent. Tools, approvals and pending work do not carry over.';
 export const NEW_CHAT_NOTE = 'Nothing from this chat is sent. Add any context yourself.';
 export const CONTINUING = 'Continuing…';
-export const PENDING = 'The provider saved the continuation but has not delivered the carried context. AgentUI will not send it again.';
+export const PENDING = 'The provider saved the continuation but has not delivered the carried context. OpenPane will not send it again.';
 export const UNCONFIRMED = 'Continue is not confirmed. Checking again cannot start a second conversation.';
-export const STALLED = 'AgentUI could not confirm this continuation yet.';
+export const STALLED = 'OpenPane could not confirm this continuation yet.';
 export type ContinuationChoice = 'Continue' | 'Try again' | 'Check again' | 'Start a new chat';
 const REFUSAL: Record<ContinuationRefusal, { readonly text: string; readonly choices: readonly ContinuationChoice[] }> = {
   busy: { text: 'The provider is still finishing work here.', choices: ['Try again'] },
   // Provider limits reset, and a refused handoff wrote nothing at the provider, so a later attempt is safe.
   limit: { text: 'The agent is over a provider limit.', choices: ['Try again', 'Start a new chat'] },
   unavailable: { text: 'The provider could not carry context.', choices: ['Start a new chat'] },
-  'continued-elsewhere': { text: 'This conversation was continued outside AgentUI.', choices: ['Start a new chat'] },
+  'continued-elsewhere': { text: 'This conversation was continued outside OpenPane.', choices: ['Start a new chat'] },
 };
 const BOUNDARY_REASON: Record<ConversationClosure, string> = {
   cancelled: 'was stopped',

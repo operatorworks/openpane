@@ -1,12 +1,12 @@
 # Installed refresh over MCP
 
-This private example exposes one `agentui_refresh` tool over stdio on macOS and Linux. The installed host owns builds, durable receipts and desired selection. Run it on the host's machine with access to its private data directory.
+This private example exposes one `openpane_refresh` tool over stdio on macOS and Linux. The installed host owns builds, durable receipts and desired selection. Run it on the host's machine with access to its private data directory.
 
 Build the workspace, then configure an MCP client to launch the absolute Node executable with these arguments:
 
 ```text
-/absolute/agentui/examples/mcp-control/refresh/dist/main.js
-/absolute/installed-agentui/main.js
+/absolute/openpane/examples/mcp-control/refresh/dist/main.js
+/absolute/installed-openpane/main.js
 /absolute/private-host-data
 30000
 ```

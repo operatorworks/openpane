@@ -1,4 +1,4 @@
-import { record } from '@agentui/contracts/decode';
+import { record } from '@openpane/contracts/decode';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -64,6 +64,7 @@ function treeFiles(tree: Buffer, budget: SourceBudget): TreeFile[] {
 
 export interface SourceFile { readonly path: string; readonly sha256: string; readonly executable: boolean }
 export function sourceFile({ path, sha256, executable }: SourceFile): SourceFile { return Object.freeze({ path, sha256, executable }); }
+// Versioned hash domain tag kept from before the OpenPane rename; it is not a product name, and recorded goldens depend on it.
 export function treeIdentity(files: readonly SourceFile[]): string { return identity(['agentui-tree-v1', files]); }
 export interface CommittedInputs { readonly identity: string; readonly files: readonly SourceFile[] }
 export interface RepositoryTree {
@@ -89,7 +90,7 @@ export async function readCommittedRepository(input: {
   const { budget, commit, transport } = input;
   const scratchParent = resolve(input.scratchParent);
   await mkdir(scratchParent, { recursive: true, mode: 0o700 });
-  const privateDirectory = await mkdtemp(join(scratchParent, 'agentui-source-'));
+  const privateDirectory = await mkdtemp(join(scratchParent, 'openpane-source-'));
   const directory = join(privateDirectory, 'source');
   const objects = join(privateDirectory, 'objects.git');
   const dispose = () => rm(privateDirectory, { recursive: true, force: true });

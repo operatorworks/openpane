@@ -3,8 +3,8 @@ import test from 'node:test';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { createProviderRegistry } from '@agentui/host';
-import { EXTENSION_SDK_VERSION, backendProviderContractVersion } from '@agentui/sdk';
+import { createProviderRegistry } from '@openpane/host';
+import { EXTENSION_SDK_VERSION, backendProviderContractVersion } from '@openpane/sdk';
 import { SqliteStore } from '../../packages/host/dist/sqlite-store.js';
 import { budgets } from '../../packages/host/dist/durable-model.js';
 import { openDatabase as openFormat7 } from './fixtures/sqlite-format7.ts';
@@ -27,7 +27,7 @@ const refused = { kind: 'not-dispatched', source: 'host', evidence: null };
 
 async function providers(t, { continuation = true, session = drawn, carrying = () => undefined } = {}) {
   const creates = [], lookups = [];
-  const confirmed = operation => ({ kind: 'confirmed', evidence: null, value: { kind: 'agentui-created', creation: operation, authority: {
+  const confirmed = operation => ({ kind: 'confirmed', evidence: null, value: { kind: 'openpane-created', creation: operation, authority: {
     kind: 'remote-provider', binding: { namespace: instance.namespace, installationId: instance.installationId, opaqueSessionId: session(operation) } },
     ...(carrying(operation) !== undefined && { carryingTurn: carrying(operation) }) } });
   const backend = { instance,

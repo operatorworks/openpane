@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { canonicalJson } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
 import type { BackendProvider, ConnectedProvider, ConversationRef, CreationIntent, CredentialHandle, ProviderCommand, ProviderCommandEffect,
-  ProviderConversation, ProviderCursor, ProviderFeed, ProviderInstance, ProviderOutcome, ProviderSnapshot, ServerExtensionContext } from '@agentui/sdk';
+  ProviderConversation, ProviderCursor, ProviderFeed, ProviderInstance, ProviderOutcome, ProviderSnapshot, ServerExtensionContext } from '@openpane/sdk';
 import { COWORKERS_API_VERSION, COWORKERS_REQUEST_CONTRACT, CoworkersClient } from './client.js';
 import type { CallResult } from './client.js';
 import { bindingSchema, capText, coworkersPresentation, DEFAULT_MAX_PROMPT_BYTES, isTerminal, MAX_REQUESTS, STATE_BUDGET_BYTES, stateCursor } from './presentation.js';
@@ -69,7 +69,7 @@ export function registerCoworkersProvider(context: ServerExtensionContext, id: s
     function creation(operation: CreationIntent<string>): ProviderConversation<string> {
       if (operation.agent.kind !== 'agent' || canonicalJson(operation.agent.instance) !== canonicalJson(instance) ||
         !/^[a-z0-9]+(-[a-z0-9]+)*$/u.test(operation.agent.opaqueId) || operation.from) throw new Error('Foreign coworker');
-      return bindingSchema.parse({ kind: 'agentui-created', creation: operation, authority: { kind: 'remote-provider',
+      return bindingSchema.parse({ kind: 'openpane-created', creation: operation, authority: { kind: 'remote-provider',
         binding: { namespace: instance.namespace, installationId: instance.installationId, opaqueSessionId: derivedUuid('conversation', operation.operationId) } } });
     }
     function validate(binding: ProviderConversation<string>) {

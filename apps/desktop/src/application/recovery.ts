@@ -1,5 +1,5 @@
-import type { ClientView, OutboxEntry } from '@agentui/client';
-import type { Receipt } from '@agentui/contracts';
+import type { ClientView, OutboxEntry } from '@openpane/client';
+import type { Receipt } from '@openpane/contracts';
 
 export function recoveryModel(view: Pick<ClientView<unknown>, 'outbox' | 'document' | 'submitting'>): {
   readonly retained: readonly OutboxEntry[];

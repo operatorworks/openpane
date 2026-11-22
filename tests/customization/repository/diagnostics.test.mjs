@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { chmod, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { readCustomizationSnapshot } from '@agentui/host/customization';
+import { readCustomizationSnapshot } from '@openpane/host/customization';
 import { fixture, shared, reference, write } from '../sources/source-support.mjs';
 
 const safe = (code, message) => error => {
@@ -19,7 +19,7 @@ test('snapshot and graph retrieve local paths with spaces and retain pinned exte
   const f = await fixture(t), child = await f.repository('child with spaces'), root = await f.repository('root with spaces');
   await shared(child);
   const childCommit = child.commit();
-  await shared(root, '', { agentui: { extensions: [reference(child, childCommit)] } });
+  await shared(root, '', { openpane: { extensions: [reference(child, childCommit)] } });
   const commit = root.commit();
   for (const repository of [root.directory, pathToFileURL(root.directory).href]) {
     const snapshot = await readCustomizationSnapshot({ repository, commit, scratchParent: f.scratchParent });
@@ -44,7 +44,7 @@ test('committed malformed external references have a fixed package diagnostic wh
     { repository: '/repo', commit: 'a'.repeat(40), subdirectory: '../escape' },
     { repository: '/repo', commit: 'a'.repeat(40), unexpected: 'SECRET' },
   ]) {
-    await shared(repo, '', { agentui: { extensions: [external] } });
+    await shared(repo, '', { openpane: { extensions: [external] } });
     const ref = reference(repo, repo.commit());
     await assert.rejects(readCustomizationSnapshot({ ...ref, scratchParent: f.scratchParent }), expected);
     await assert.rejects(f.read(ref), expected);
@@ -68,7 +68,7 @@ test('actual Git stdout overflow uses a fixed resource diagnostic at a bounded t
       catch(error){observed=error.code;throw error;}
     };
     childProcess.execFile=wrapped;syncBuiltinESMExports();
-    const {readCustomizationSnapshot}=await import('@agentui/host/customization');
+    const {readCustomizationSnapshot}=await import('@openpane/host/customization');
     try {await readCustomizationSnapshot(${JSON.stringify({ ...ref, scratchParent: f.scratchParent })});process.exit(1);}
     catch(error){process.stdout.write(JSON.stringify({observed,code:error.code,message:error.message,leak:'stderr'in error||'stdout'in error||'cause'in error}));}`;
   const result = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', program], { encoding: 'utf8' }));
@@ -92,11 +92,11 @@ test('failed snapshot and graph operations retain their safe error when real cle
     const f = await fixture(t), repo = await f.repository(`cleanup-${mode}`);
     await write(repo.directory, 'package.json', mode === 'dispose' ? {} : '{invalid SECRET package');
     const commit = repo.commit(), helper = join(f.root, 'ssh-helper');
-    await writeFile(helper, `#!/bin/sh\nchmod 500 "$AGENTUI_TEST_SCRATCH"\n${mode === 'retrieval' ? "echo 'SECRET transport diagnostic' >&2; exit 1" : 'exec git-upload-pack "$AGENTUI_TEST_REPOSITORY"'}\n`, { mode: 0o700 });
-    const keys = ['GIT_SSH_COMMAND', 'AGENTUI_TEST_SCRATCH', 'AGENTUI_TEST_REPOSITORY'];
+    await writeFile(helper, `#!/bin/sh\nchmod 500 "$OPENPANE_TEST_SCRATCH"\n${mode === 'retrieval' ? "echo 'SECRET transport diagnostic' >&2; exit 1" : 'exec git-upload-pack "$OPENPANE_TEST_REPOSITORY"'}\n`, { mode: 0o700 });
+    const keys = ['GIT_SSH_COMMAND', 'OPENPANE_TEST_SCRATCH', 'OPENPANE_TEST_REPOSITORY'];
     const previous = keys.map(key => process.env[key]);
     try {
-      Object.assign(process.env, { GIT_SSH_COMMAND: helper, AGENTUI_TEST_SCRATCH: f.scratchParent, AGENTUI_TEST_REPOSITORY: repo.directory });
+      Object.assign(process.env, { GIT_SSH_COMMAND: helper, OPENPANE_TEST_SCRATCH: f.scratchParent, OPENPANE_TEST_REPOSITORY: repo.directory });
       const input = { repository: 'ssh://git@example.invalid/cleanup', commit, scratchParent: f.scratchParent };
       if (mode === 'graph') await assert.rejects(f.read(input), { code: 'invalid-package' });
       else if (mode === 'dispose') {

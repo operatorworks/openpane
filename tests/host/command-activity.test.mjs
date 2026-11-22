@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { FeedMismatchError, parseFeedItem } from '@agentui/contracts';
-import { transcriptProjection, parseTranscript, parseCommandActivity, retainText } from '@agentui/contracts/conversation';
+import { FeedMismatchError, parseFeedItem } from '@openpane/contracts';
+import { transcriptProjection, parseTranscript, parseCommandActivity, retainText } from '@openpane/contracts/conversation';
 import { createCommandActivity } from '../../packages/host/dist/codex-command-activity.js';
 import { fixture, installed, scope, other, command, empty, run, snapshot as readSnapshot } from './fixture.mjs';
 

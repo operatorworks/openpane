@@ -5,8 +5,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { createProviderRegistry, openLocalHost } from '@agentui/host';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { createProviderRegistry, openLocalHost } from '@openpane/host';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { SqliteStore } from '../../../packages/host/dist/sqlite-store.js';
 import { budgets } from '../../../packages/host/dist/durable-model.js';
 import { acknowledgement, crewService } from './support/crew-service.mjs';
@@ -21,7 +21,7 @@ const before = scope('before');
 const credential = instance => ({ kind: 'credential-handle', hostId, instance, opaqueHandle: 'crew-handle' });
 
 async function harness(t) {
-  const remote = await service(t), directory = mkdtempSync(join(tmpdir(), 'agentui-crew-successor-')), path = join(directory, 'host.sqlite');
+  const remote = await service(t), directory = mkdtempSync(join(tmpdir(), 'openpane-crew-successor-')), path = join(directory, 'host.sqlite');
   let current;
   async function open() {
     const { value } = remote.extension();

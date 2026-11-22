@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { CODEX_RUNTIME } from '@agentui/contracts/compatibility';
+import { CODEX_RUNTIME } from '@openpane/contracts/compatibility';
 import { createAgentObservations } from '../../apps/host/build/tsc/agent-observations.js';
 import { readObservabilityConfiguration } from '../../apps/host/build/tsc/observability.js';
 import { attributes, receiver } from './support/observability.mjs';
@@ -119,12 +119,12 @@ test('Datadog LLM Observability requires an explicit boolean option and stays ab
   const base = { OTEL_TRACES_EXPORTER: 'otlp' };
   const defaults = readObservabilityConfiguration(base);
   assert.equal(defaults.datadogLlmObservability, false);
-  assert.deepEqual(readObservabilityConfiguration({ ...base, AGENTUI_DATADOG_LLMOBS: 'false' }), defaults);
-  assert.deepEqual(readObservabilityConfiguration({ ...base, AGENTUI_DATADOG_LLMOBS: 'true' }), {
+  assert.deepEqual(readObservabilityConfiguration({ ...base, OPENPANE_DATADOG_LLMOBS: 'false' }), defaults);
+  assert.deepEqual(readObservabilityConfiguration({ ...base, OPENPANE_DATADOG_LLMOBS: 'true' }), {
     ...defaults, datadogLlmObservability: true,
   });
   for (const value of ['TRUE', '1', '', 'private-invalid-option']) {
-    assert.throws(() => readObservabilityConfiguration({ ...base, AGENTUI_DATADOG_LLMOBS: value }),
+    assert.throws(() => readObservabilityConfiguration({ ...base, OPENPANE_DATADOG_LLMOBS: value }),
       error => value === '' || !error.message.includes(value));
   }
 });
@@ -141,7 +141,7 @@ async function until(predicate) {
 test('bundled host exports upstream GenAI spans for persisted native runs with no private content', { timeout: 25_000 }, async t => {
   const collector = await receiver(t);
   const received = collector.received;
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-genai-private-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-genai-private-'));
   const workspace = join(directory, 'private-workspace-dc13a5');
   const bin = join(directory, 'bin'), data = join(directory, 'data'), log = join(directory, 'native-rpc.jsonl');
   const environmentLog = join(directory, 'native-environment.jsonl');
@@ -152,7 +152,7 @@ test('bundled host exports upstream GenAI spans for persisted native runs with n
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 appendFileSync(${JSON.stringify(environmentLog)}, JSON.stringify({ invocation: process.argv[2],
-  telemetryKeys: Object.keys(process.env).filter(key => key.startsWith('OTEL_') || key === 'AGENTUI_DATADOG_LLMOBS'),
+  telemetryKeys: Object.keys(process.env).filter(key => key.startsWith('OTEL_') || key === 'OPENPANE_DATADOG_LLMOBS'),
   providerCredentialPresent: process.env.OPENAI_API_KEY === 'private-native-provider-credential',
   pathPresent: process.env.PATH?.includes(${JSON.stringify(bin)}) === true }) + '\\n');
 if (process.argv[2] === '--version') process.stdout.write(${JSON.stringify(`codex-cli ${CODEX_RUNTIME.version}\n`)});
@@ -168,7 +168,7 @@ else {
     OTEL_EXPORTER_OTLP_TRACES_HEADERS: 'x-host-trace-token=private-host-trace-credential',
     OTEL_RESOURCE_ATTRIBUTES: 'private.resource=private-host-resource',
     OPENAI_API_KEY: 'private-native-provider-credential',
-    AGENTUI_DATADOG_LLMOBS: 'true',
+    OPENPANE_DATADOG_LLMOBS: 'true',
   });
   const host = launch(['codex', '--port', '0', '--workspace', workspace]);
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -223,10 +223,10 @@ else {
     assert.equal(batch.headers['x-host-general-token'], 'private-host-general-credential');
     assert.equal(batch.headers['x-host-trace-token'], 'private-host-trace-credential');
     for (const resource of batch.body.resourceSpans) {
-      assert.deepEqual(attributes(resource.resource.attributes), { 'service.name': 'agentui-host', dd_llmobs_enabled: true });
+      assert.deepEqual(attributes(resource.resource.attributes), { 'service.name': 'openpane-host', dd_llmobs_enabled: true });
       for (const group of resource.scopeSpans) {
         for (const span of group.spans) {
-          if (span.name === 'agentui.host.request') continue;
+          if (span.name === 'openpane.host.request') continue;
           assert.deepEqual(group.scope, upstreamScope);
           const values = attributes(span.attributes);
           assert.equal(span.name, 'invoke_agent codex');

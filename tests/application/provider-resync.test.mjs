@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { join } from 'node:path';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { SqliteStore } from '../../packages/host/dist/sqlite-store.js';
 import { observeProvider } from '../../packages/host/dist/provider-stream.js';
 import { providerService, fixture, saved, send } from './provider-stream-fixture.mjs';

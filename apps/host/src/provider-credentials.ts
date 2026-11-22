@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { RunAuthority } from '@agentui/contracts';
-import { canonicalJson } from '@agentui/contracts';
-import { identifier } from '@agentui/contracts/decode';
-import { providerIdentity } from '@agentui/host';
-import type { ProviderAuthority, ProviderIdentity } from '@agentui/host';
-import type { CredentialHandle, ProviderInstance } from '@agentui/sdk';
+import type { RunAuthority } from '@openpane/contracts';
+import { canonicalJson } from '@openpane/contracts';
+import { identifier } from '@openpane/contracts/decode';
+import { providerIdentity } from '@openpane/host';
+import type { ProviderAuthority, ProviderIdentity } from '@openpane/host';
+import type { CredentialHandle, ProviderInstance } from '@openpane/sdk';
 import type { AccessDatabase } from './access-database.js';
 
 export interface ProviderInstallation {
@@ -33,7 +33,7 @@ export function normalizeProviderInstallations(namespace: string, installations:
   const ids = new Set<string>(), identities = new Set<string>();
   return installations.map(installation => {
     const instance = providerIdentity(installation.instance);
-    if (!['agentui-host', 'remote-provider'].includes(installation.expectedAuthority) || instance.namespace !== namespace) throw new Error('Provider authorization refused');
+    if (!['openpane-host', 'remote-provider'].includes(installation.expectedAuthority) || instance.namespace !== namespace) throw new Error('Provider authorization refused');
     const authentication: ProviderInstallation['authentication'] = installation.authentication.kind === 'secret'
       ? { kind: 'secret', revision: nonblank(installation.authentication.revision), resolve: installation.authentication.resolve }
       : { kind: 'unauthenticated' };

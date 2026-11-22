@@ -1,5 +1,5 @@
-import type { ConversationScope, Json, RunIdentity } from '@agentui/contracts';
-import type { FrontendPlatform, FrontendTool, FrontendToolOutcome } from '@agentui/sdk/tools';
+import type { ConversationScope, Json, RunIdentity } from '@openpane/contracts';
+import type { FrontendPlatform, FrontendTool, FrontendToolOutcome } from '@openpane/sdk/tools';
 import type { LocalHost } from '../local-host.js';
 import { createFrontendCoordinator } from './coordinator.js';
 import { frontendToolsContext } from '../frontend-tools-context.js';

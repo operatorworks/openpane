@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createConversationStore } from '@agentui/client';
+import { createConversationStore } from '@openpane/client';
 import { createViewLeasePool } from '../../apps/desktop/dist/application/view-leases.js';
 import { deferred, fakePort, projection, scope, storage } from '../client/support.mjs';
 

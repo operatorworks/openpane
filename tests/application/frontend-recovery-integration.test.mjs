@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createConversationStore } from '@agentui/client';
-import { ServiceError } from '@agentui/contracts/service';
-import { createFrontendToolGeneration } from '@agentui/sdk/tools';
+import { createConversationStore } from '@openpane/client';
+import { ServiceError } from '@openpane/contracts/service';
+import { createFrontendToolGeneration } from '@openpane/sdk/tools';
 import { createFrontendRecovery } from '../../apps/desktop/dist/application/frontend-recovery.js';
 import { createFrontendSends, createGenerationSource } from '../../apps/desktop/dist/application/frontend-sends.js';
 import { createViewLeasePool } from '../../apps/desktop/dist/application/view-leases.js';

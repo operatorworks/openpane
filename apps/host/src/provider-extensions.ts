@@ -1,10 +1,10 @@
-import { loadServerArtifact, loadServerExtension } from '@agentui/host/extensions';
-import type { InstalledServerEntry, LoadedServerEntry, ServerExtensionFailure, ServerExtensionSource } from '@agentui/host/extensions';
-import type { ProviderExtension } from '@agentui/host';
-import { readServerCustomizationArtifact, serverCatalog } from '@agentui/host/customization';
-import type { ServerCustomizationArtifact, VerifiedServerCustomizationArtifact } from '@agentui/host/customization';
-import { EXTENSION_SDK_VERSION, parseExtensionManifest } from '@agentui/sdk';
-import type { ExtensionManifest, ServerExtensionEntry } from '@agentui/sdk';
+import { loadServerArtifact, loadServerExtension } from '@openpane/host/extensions';
+import type { InstalledServerEntry, LoadedServerEntry, ServerExtensionFailure, ServerExtensionSource } from '@openpane/host/extensions';
+import type { ProviderExtension } from '@openpane/host';
+import { readServerCustomizationArtifact, serverCatalog } from '@openpane/host/customization';
+import type { ServerCustomizationArtifact, VerifiedServerCustomizationArtifact } from '@openpane/host/customization';
+import { EXTENSION_SDK_VERSION, parseExtensionManifest } from '@openpane/sdk';
+import type { ExtensionManifest, ServerExtensionEntry } from '@openpane/sdk';
 import type { AccessDatabase } from './access-database.js';
 import { createProviderAuthority, normalizeProviderInstallations } from './provider-credentials.js';
 import type { ProviderInstallation } from './provider-credentials.js';

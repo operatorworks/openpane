@@ -4,7 +4,7 @@ import { assertCompileCases } from '../../../tests/support/compile.mjs';
 test('host native contracts require narrowed capabilities and complete native identities', async () => {
   await assertCompileCases({
     config: 'packages/host/tsconfig.json',
-    prefix: `import type { Capability, InteractionContinuation, PendingInteraction, SessionBinding, SessionReference } from '@agentui/host';
+    prefix: `import type { Capability, InteractionContinuation, PendingInteraction, SessionBinding, SessionReference } from '@openpane/host';
 export const binding: SessionBinding = { engine: 'fixture', nativeVersion: '1', account: 'account', authorizedScope: 'scope', nativeFormat: 'format' };
 export const session: SessionReference = { kind: 'session', formatVersion: 1, binding, opaque: 'session' };
 export const pending: PendingInteraction = { kind: 'approval', target: { kind: 'approval', session, nativeApprovalId: 'approval', tool: null }, nativePolicy: { namespace: 'fixture', schemaVersion: 1, data: null }, request: { namespace: 'fixture', schemaVersion: 1, data: null }, choices: [{ nativeChoiceId: 'once', label: 'Once' }] };

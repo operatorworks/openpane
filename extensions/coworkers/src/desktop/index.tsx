@@ -1,5 +1,5 @@
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { UiExtensionEntry } from '@agentui/sdk/react';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { UiExtensionEntry } from '@openpane/sdk/react';
 import { CoworkersTranscript } from './CoworkersTranscript.js';
 import { CoworkersWorkspace } from './CoworkersWorkspace.js';
 import './styles.css';

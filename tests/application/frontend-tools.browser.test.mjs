@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { build } from 'esbuild';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { chromium } from 'playwright';
 import { repository, buildCustom } from '../customization/build/support.mjs';
 import { root, fixture, connected, draft, revealRecovery, customRuntime, wait } from './browser-support.mjs';
@@ -73,10 +73,10 @@ test('committed tool and module artifact loads in the actual application alongsi
   const custom = repository(), child = repository();
   t.after(() => Promise.all([custom, child].map(value => rm(value.directory, { recursive: true, force: true }))));
   const childManifest = JSON.parse(await readFile(join(child.repo, 'package.json'), 'utf8'));
-  childManifest.agentui.extension.namespace = 'tools'; child.write('package.json', JSON.stringify(childManifest));
+  childManifest.openpane.extension.namespace = 'tools'; child.write('package.json', JSON.stringify(childManifest));
   child.write('desktop/index.tsx', await readFile(join(root, 'tests/application/fixtures/frontend-tools.tsx'), 'utf8'));
   const parentManifest = JSON.parse(await readFile(join(custom.repo, 'package.json'), 'utf8'));
-  parentManifest.agentui.extensions = [{ repository: child.repo, commit: child.commit() }];
+  parentManifest.openpane.extensions = [{ repository: child.repo, commit: child.commit() }];
   custom.write('package.json', JSON.stringify(parentManifest)); const commit = custom.commit();
   child.write('desktop/index.tsx', 'throw new Error("Dirty source must not load");'); buildCustom(custom, commit);
   const host = await fixture(t, join(custom.directory, 'browser')), page = await host.page(), errors = [];
@@ -187,7 +187,7 @@ test('in-process only: actual hook retains A before a run exists and binds after
   const bundle = await build({ stdin: { resolveDir: root, loader: 'jsx', contents: `
     import React from 'react'; import {createRoot} from 'react-dom/client'; import {flushSync} from 'react-dom';
     import {useDesktopCustomizations} from './apps/desktop/src/application/DesktopCustomizations.tsx';
-    import {pinFrontendTools,retainFrontendTools} from '@agentui/sdk/tools';
+    import {pinFrontendTools,retainFrontendTools} from '@openpane/sdk/tools';
     window.activations=0; window.disposals=[];
     const customizations=[{manifest:{namespace:'fixture',sdkVersion:'${EXTENSION_SDK_VERSION}',entries:[{kind:'desktop',module:'./desktop.js'}]},
       async load(){return {default:{kind:'desktop',sdkVersion:'${EXTENSION_SDK_VERSION}',activate({frontendTools}){

@@ -1,8 +1,8 @@
 import type { ComponentType, ReactNode } from 'react';
-import type { ConversationDocument, ConversationPermissions, ConversationScope, Json, PermissionScope, SubmitResult } from '@agentui/contracts';
-import type { AgentDescriptor, ConversationProvider, ExtensionCallValue, ExtensionInstallationStatus } from '@agentui/contracts/service';
-import type { Transcript } from '@agentui/contracts/conversation';
-import { nonempty } from '@agentui/contracts/decode';
+import type { ConversationDocument, ConversationPermissions, ConversationScope, Json, PermissionScope, SubmitResult } from '@openpane/contracts';
+import type { AgentDescriptor, ConversationProvider, ExtensionCallValue, ExtensionInstallationStatus } from '@openpane/contracts/service';
+import type { Transcript } from '@openpane/contracts/conversation';
+import { nonempty } from '@openpane/contracts/decode';
 import type { UiExtensionContext } from './tool-contracts.js';
 export type { FrontendToolContribution, FrontendToolContributions, UiExtensionContext } from './tool-contracts.js';
 import { behaviour } from './extensions.js';

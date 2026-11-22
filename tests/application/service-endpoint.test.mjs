@@ -1,6 +1,6 @@
 import { NO_OBSERVABILITY } from '../../apps/host/build/tsc/observability.js';
 import { describeAgent } from '../../apps/host/build/tsc/agents.js';
-import { recordedInstallation } from '@agentui/host/recorded';
+import { recordedInstallation } from '@openpane/host/recorded';
 const recordedAgentId = describeAgent(recordedInstallation, { kind: 'ready' }, { kind: 'unsupported', reason: 'Recorded text-only fixture.' }).id;
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -8,9 +8,9 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
-import { SERVICE_MAX_RESPONSE_BYTES } from '@agentui/contracts/service';
-import { openRecordedHost } from '@agentui/host/recorded';
+import { EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
+import { SERVICE_MAX_RESPONSE_BYTES } from '@openpane/contracts/service';
+import { openRecordedHost } from '@openpane/host/recorded';
 import { openAccessDatabase } from '../../apps/host/build/tsc/access-database.js';
 import { createApi } from '../../apps/host/build/tsc/api.js';
 import { FeedRegistry } from '../../apps/host/build/tsc/feed-registry.js';
@@ -18,7 +18,7 @@ import { serviceEndpoint } from '../../apps/host/build/tsc/service-endpoint.js';
 
 for (const client of ['browser-development', 'native']) {
   test(`${client} framing failures stay unavailable after dispatch without reflecting diagnostics`, async t => {
-    const directory = mkdtempSync(join(tmpdir(), 'agentui-endpoint-'));
+    const directory = mkdtempSync(join(tmpdir(), 'openpane-endpoint-'));
     const access = openAccessDatabase(join(directory, 'host.sqlite'));
     const host = openRecordedHost({ path: join(directory, 'host.sqlite'), backendPath: join(directory, 'recorded.jsonl'), hostId: access.hostId });
     const feeds = new FeedRegistry();

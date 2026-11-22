@@ -1,6 +1,6 @@
 # Public provider contracts
 
-`@agentui/sdk` exports the version 1 backend provider contract.
+`@openpane/sdk` exports the version 1 backend provider contract.
 The declarations describe provider integrations without Node or DOM types.
 The host now activates imported server extensions, authorizes connections, discovers a private catalog, and drains them on shutdown.
 Imported providers support conversation creation, sends, approvals, cancellation, observation and chooser integration.
@@ -13,13 +13,13 @@ The host's recorded Switchboard driver remains a separate integration.
 | --- | --- |
 | `backendProviderContractVersion` | Literal `1`, required as `apiVersion` on providers and connection requests. |
 | `ProviderModel` | JSON-compatible semantic `request`, opaque `cursor`, projected `state`, and `event` types. Declare object payloads as type aliases. Interfaces without an index signature do not satisfy the `Json` constraint. |
-| `Json` | Canonical JSON-compatible value type re-exported from `@agentui/contracts`. |
+| `Json` | Canonical JSON-compatible value type re-exported from `@openpane/contracts`. |
 | `BackendProvider<M, I>` | Connects one model and installation identity. Returns a `ConnectedProvider` or an explicit failure. |
 | `ProviderInstance<I>` | Namespace, literal installation identity, generation, and provider protocol version. |
 | `CredentialHandle<I>` | Host-scoped opaque handle tied to an instance. Contains no secret bytes. `null` requires an explicit operator-configured unauthenticated installation. |
 | `ProviderRef<I, K>` | Instance-scoped opaque ID with a semantic role. Discovery returns agents, never native conversation history. |
 | `CreationIntent<I>` | Immutable host operation ID, allocated `ConversationScope`, and selected agent. |
-| `ProviderConversation<I>` | AgentUI-created provenance with captured creation intent and canonical `RunAuthority` whose binding has installation identity `I`. Its authority owns the session binding. A `from` creation may also name its `carryingTurn`. |
+| `ProviderConversation<I>` | OpenPane-created provenance with captured creation intent and canonical `RunAuthority` whose binding has installation identity `I`. Its authority owns the session binding. A `from` creation may also name its `carryingTurn`. |
 | `ConversationRef<I, K>` | Run, decision, or choice reference retaining its originating conversation. |
 | `ProviderCommand<M, I>` | Captured operation ID and conversation, plus send request, cancel run, or decision and choice. |
 | `ProviderOperation<M, I>` | Saved creation intent or command. Narrow by `kind` to route to `reconcileCreation` or `reconcileCommand`. |
@@ -66,7 +66,7 @@ const catalog = await running.discoverProviders(); // Private server catalog; me
 await running.close();
 ```
 
-Startup configuration explicitly supplies each contribution's full instance, expected authority kind (`remote-provider` or `agentui-host`), canonical HTTP(S) service origin and secret revision/resolver, or `authentication: { kind: 'unauthenticated' }`.
+Startup configuration explicitly supplies each contribution's full instance, expected authority kind (`remote-provider` or `openpane-host`), canonical HTTP(S) service origin and secret revision/resolver, or `authentication: { kind: 'unauthenticated' }`.
 Origins contain no path, query, fragment, username or password; adapters own routes within that origin.
 `service_provider_credentials` stores only opaque grant metadata in the existing access database: host, namespace, contribution, installation, generation, protocol, service, revision and revocation.
 The authority borrows that connection and never closes it. The native connection is independent of provider credentials.
@@ -346,7 +346,7 @@ Closing a connection closes each open feed. Closing a feed or connection release
 
 Replacement admission rules, persisted model decoding, and provider conversation migration remain host work.
 Credentials stay outside client projections. The authority determines who owns execution and approvals.
-Local receipts and provider observations do not transfer remote execution authority to AgentUI.
+Local receipts and provider observations do not transfer remote execution authority to OpenPane.
 
 Providers may be constructed generically in `I` from a host-assigned `ProviderInstance<I>`.
 Module export and loading conventions remain downstream host work. No particular factory API is required.
@@ -482,7 +482,7 @@ Opening any segment, from the catalog, a search hit or a saved route, reads `con
 
 A concluded conversation shows its closure notice, then what Continue does, then **Continue** and **Start a new chat**. Nothing starts until one is clicked. Continue sends `start`. While the answer or the read view is `starting`, the notice reads "Continuing…" and the desktop polls `read` with backoff, from 0.5 to 4 seconds, until the view settles. A `start` that times out or fails with anything but `invalid` is followed by a `read`, and is not reported as a failure when that read shows `starting` or `confirmed`. A confirmed successor opens in place of the closed conversation. `pending` offers **Check again** and **Start a new chat**; `unconfirmed` offers **Check again**, which sends `check`, and **Try again**, which sends `start`. A refusal shows its own text: `busy` offers **Try again**, `limit` offers **Try again** and **Start a new chat**, because provider limits reset and a refused handoff wrote nothing at the provider, and `unavailable` and `continued-elsewhere` offer **Start a new chat**. **Start a new chat** uses the ordinary create flow with the same agent, so it makes an unrelated conversation and sends nothing from the closed one. In both moves the unsent draft goes to the new composer and is never sent. The draft is read after the new chat opens, so text typed during the move is kept. Focus then moves to the new composer.
 
-Background reads stop after six consecutive failures, and moves to a confirmed successor stop after three failures; a successful read does not reset the move count. The notice then reads "AgentUI could not confirm this continuation yet." and offers **Check again**, which resets both counts and sends one `check`, and **Start a new chat**. A closed conversation whose first reads all fail ends in the same state. A polite live region outside the conversation view announces "Continuing…", the other state lines, and the boundary after Continue opens the new chat.
+Background reads stop after six consecutive failures, and moves to a confirmed successor stop after three failures; a successful read does not reset the move count. The notice then reads "OpenPane could not confirm this continuation yet." and offers **Check again**, which resets both counts and sends one `check`, and **Start a new chat**. A closed conversation whose first reads all fail ends in the same state. A polite live region outside the conversation view announces "Continuing…", the other state lines, and the boundary after Continue opens the new chat.
 
 A segment with a predecessor shows a boundary note above its messages. It names how the earlier segment ended and the provider's carried, omitted and uncertain turn counts and carried KiB, and drops any sentence whose count is zero. **Show earlier messages** loads one earlier segment per click, up to five, each through one `watch`, its first snapshot and `close`. Loaded segments are read-only and sit in the transcript's scroll area, above the open segment's messages.
 

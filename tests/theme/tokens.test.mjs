@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createTheme, buttonTones } from '@agentui/theme';
+import { createTheme, buttonTones } from '@openpane/theme';
 
 function contrast(foreground, background) {
   const luminance = (hex) => {

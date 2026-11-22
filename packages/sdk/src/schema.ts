@@ -1,6 +1,6 @@
 import { Validator, schemaKeyword, schemaArrayKeyword, schemaMapKeyword, type Schema as LibrarySchema } from '@cfworker/json-schema';
 import { draft7 } from './draft-07.js';
-import { copyJson } from '@agentui/contracts';
+import { copyJson } from '@openpane/contracts';
 type Schema = boolean | LibrarySchema;
 let meta: Validator | undefined;
 function metaValidator(): Validator {

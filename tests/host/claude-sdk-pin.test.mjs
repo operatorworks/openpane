@@ -15,13 +15,13 @@ test('Claude host consumes the pinned public Switchboard artifact with SDK-free 
   const artifact = json(`vendor/${pin.qualificationRecord}`);
   const host = json('packages/host/package.json');
   const dependency = `file:../../vendor/${artifact.artifact}`;
-  assert.equal(host.dependencies['@agentui/switchboard-claude'], dependency);
+  assert.equal(host.dependencies['@openpane/switchboard-claude'], dependency);
   assert.equal(createHash('sha256').update(readFileSync(new URL(`vendor/${artifact.artifact}`, root))).digest('hex'), artifact.sha256);
   assert.equal(host.dependencies['@anthropic-ai/claude-agent-sdk'], pin.nativeSdk);
-  const entry = fileURLToPath(resolveHostDependency('@agentui/switchboard-claude/claude'));
+  const entry = fileURLToPath(resolveHostDependency('@openpane/switchboard-claude/claude'));
   assert.doesNotMatch(readFileSync(entry.replace(/\.js$/, '.d.ts'), 'utf8'), /@anthropic-ai/);
   const lock = json('package-lock.json');
-  assert.equal(lock.packages['packages/host'].dependencies['@agentui/switchboard-claude'], dependency);
+  assert.equal(lock.packages['packages/host'].dependencies['@openpane/switchboard-claude'], dependency);
   assert.equal(lock.packages['node_modules/@anthropic-ai/claude-agent-sdk'].version, pin.nativeSdk);
   assert.equal(pin.provider, 'anthropic-api-key');
   assert.deepEqual(pin.models, ['opus', 'sonnet']);

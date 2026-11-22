@@ -19,7 +19,7 @@ async function decoded(preview) {
 
 for (const suspendedTranscript of [false, true]) test(`committed layout keeps sent images inside its ${suspendedTranscript ? 'independently suspended' : 'text-only'} transcript and protects the composer through loading, failure and restore`, { timeout: 90_000 }, async t => {
   const custom = repository(), child = repository();
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-img-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-img-'));
   let host, browser;
   t.after(async () => {
     const closed = await Promise.allSettled([browser?.close(), host?.close()]);
@@ -28,11 +28,11 @@ for (const suspendedTranscript of [false, true]) test(`committed layout keeps se
     if (failure) throw failure.reason;
   });
   const childManifest = JSON.parse(readFileSync(join(child.repo, 'package.json'), 'utf8'));
-  childManifest.agentui.extension.namespace = 'transcript';
+  childManifest.openpane.extension.namespace = 'transcript';
   child.write('package.json', JSON.stringify(childManifest));
   child.write('desktop/index.tsx', readFileSync(join(root, `tests/application/fixtures/${suspendedTranscript ? 'suspending-image-transcript' : 'transcript-override'}.tsx`), 'utf8'));
   const manifest = JSON.parse(readFileSync(join(custom.repo, 'package.json'), 'utf8'));
-  manifest.agentui.extensions = [{ repository: child.repo, commit: child.commit() }];
+  manifest.openpane.extensions = [{ repository: child.repo, commit: child.commit() }];
   custom.write('package.json', JSON.stringify(manifest));
   custom.write('desktop/index.tsx', readFileSync(join(root, 'tests/application/fixtures/image-layout.tsx'), 'utf8'));
   const commit = custom.commit();

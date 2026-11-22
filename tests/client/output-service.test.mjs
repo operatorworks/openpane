@@ -3,11 +3,11 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { setImmediate } from 'node:timers/promises';
-import { createBrowserConnection, ServiceError, ServiceProtocolError } from '@agentui/client/service';
-import { createMacConnection } from '@agentui/client/mac';
+import { createBrowserConnection, ServiceError, ServiceProtocolError } from '@openpane/client/service';
+import { createMacConnection } from '@openpane/client/mac';
 import { createServiceConnection } from '../../packages/client/dist/service-engine.js';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import { parseServiceRequest, parseServiceResponse, SERVICE_MAX_RESPONSE_BYTES } from '@agentui/contracts/service';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import { parseServiceRequest, parseServiceResponse, SERVICE_MAX_RESPONSE_BYTES } from '@openpane/contracts/service';
 
 const scope = { hostId: 'host', conversationId: 'chat' }, outputId = `output-${'a'.repeat(64)}`;
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');

@@ -3,16 +3,16 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
-import { parseServiceResponse } from '@agentui/contracts/service';
-import { openRecordedHost, recordedInstallation } from '@agentui/host/recorded';
+import { EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
+import { parseServiceResponse } from '@openpane/contracts/service';
+import { openRecordedHost, recordedInstallation } from '@openpane/host/recorded';
 import { ownerPrincipal } from '../../apps/host/build/tsc/principal.js';
 import { openAccessDatabase } from '../../apps/host/build/tsc/access-database.js';
 import { createApi } from '../../apps/host/build/tsc/api.js';
 import { FeedRegistry } from '../../apps/host/build/tsc/feed-registry.js';
 
 test('saved history search scans past empty pages and searches only current transcript and labels', async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-search-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-search-'));
   const access = openAccessDatabase(join(directory, 'host.sqlite'));
   const host = openRecordedHost({ path: join(directory, 'host.sqlite'), backendPath: join(directory, 'recorded.jsonl'), hostId: access.hostId, progressMs: 0 });
   const feeds = new FeedRegistry();

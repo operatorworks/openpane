@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { CrewClient, CrewHttpError, CrewTransportError, CrewUnknownOutcomeError } from '@birbcrew/client';
-import type { ExtensionOperation, ExtensionOperationCall, ExtensionOperationResult, ServerProviderCredentials } from '@agentui/sdk';
+import type { ExtensionOperation, ExtensionOperationCall, ExtensionOperationResult, ServerProviderCredentials } from '@openpane/sdk';
 import { eachMemberPage, MAX_CREW_MEMBERS } from './members.js';
 import type { MemberSummary, MembersCreateOutput, MembersListOutput } from './operation-output.js';
 

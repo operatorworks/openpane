@@ -1,4 +1,4 @@
-import { canonicalJson } from '@agentui/contracts';
+import { canonicalJson } from '@openpane/contracts';
 import type { NotDispatched, ObservedResult, StoredCommand } from './durable-model.js';
 
 interface Evidence<S> {

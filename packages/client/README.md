@@ -1,6 +1,6 @@
 # Shared conversation client
 
-`@agentui/client` provides a conversation store for desktop and iOS consumers. Its core compiles against ES2023 without browser or Node globals. `@agentui/client/react` exports `useConversation(store)` using React's external-store subscription API. The package contains no transport, authentication, native adapter, or platform storage implementation.
+`@openpane/client` provides a conversation store for desktop and iOS consumers. Its core compiles against ES2023 without browser or Node globals. `@openpane/client/react` exports `useConversation(store)` using React's external-store subscription API. The package contains no transport, authentication, native adapter, or platform storage implementation.
 
 Create a store with `createConversationStore({ scope, port, projection, drafts, createCommandId })`. The scope contains both host and conversation IDs. The port must belong to that scope. The command ID generator must return a fresh nonempty ID accepted by the shared contracts.
 

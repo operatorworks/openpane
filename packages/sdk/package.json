@@ -1,5 +1,5 @@
 {
-  "name": "@agentui/sdk",
+  "name": "@openpane/sdk",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -29,8 +29,8 @@
     "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.react.json --noEmit && tsc -p tsconfig.tools.json --noEmit && tsc -p tsconfig.react-tools.json --noEmit"
   },
   "dependencies": {
-    "@agentui/contracts": "0.0.0",
-    "@agentui/protocol": "0.0.0",
+    "@openpane/contracts": "0.0.0",
+    "@openpane/protocol": "0.0.0",
     "@cfworker/json-schema": "4.1.6"
   },
   "peerDependencies": {

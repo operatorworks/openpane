@@ -32,11 +32,11 @@ test('committed artifact replaces transcript, updates activity and retains indep
   const custom = repository(), child = repository();
   t.after(() => Promise.all([custom, child].map(value => rm(value.directory, { recursive: true, force: true }))));
   const childManifest = JSON.parse(await readFile(join(child.repo, 'package.json'), 'utf8'));
-  childManifest.agentui.extension.namespace = 'transcript';
+  childManifest.openpane.extension.namespace = 'transcript';
   child.write('package.json', JSON.stringify(childManifest));
   child.write('desktop/index.tsx', await readFile(join(root, 'tests/application/fixtures/transcript-override.tsx'), 'utf8'));
   const parentManifest = JSON.parse(await readFile(join(custom.repo, 'package.json'), 'utf8'));
-  parentManifest.agentui.extensions = [{ repository: child.repo, commit: child.commit() }];
+  parentManifest.openpane.extensions = [{ repository: child.repo, commit: child.commit() }];
   custom.write('package.json', JSON.stringify(parentManifest));
   const commit = custom.commit();
   child.write('desktop/index.tsx', 'throw new Error("Dirty source must not enter artifact");');

@@ -19,8 +19,8 @@ test('controlled qualification declarations resolve through the development alia
       compilerOptions: { noEmit: true, rootDir: temporary, types: ['node'] },
       files: [`${temporary}/probe.ts`], include: [],
     }));
-    const prefix = `import { contracts, createFakeFixture } from '@agentui/switchboard-qualification/testkit';
-import type { QualificationFactory, QualificationFixture, QualificationContract, QualificationConnection, RecoverableSnapshot } from '@agentui/switchboard-qualification/testkit';
+    const prefix = `import { contracts, createFakeFixture } from '@openpane/switchboard-qualification/testkit';
+import type { QualificationFactory, QualificationFixture, QualificationContract, QualificationConnection, RecoverableSnapshot } from '@openpane/switchboard-qualification/testkit';
 export const factory: QualificationFactory = createFakeFixture;
 export const asyncFactory: QualificationFactory = async () => createFakeFixture();
 export const fixture: QualificationFixture = createFakeFixture();
@@ -36,18 +36,18 @@ export async function run(signal: AbortSignal) {
       ['export const missing = contracts.missing;', /Property 'missing' does not exist/u],
       ['export const invalidSnapshot: RecoverableSnapshot = {};', /missing the following properties/u],
       ['export const invalid: QualificationFactory = () => ({});', /not assignable|missing the following properties/u],
-      ["export { createFakeFixture as privateFake } from '@agentui/switchboard-qualification';", /has no exported member/u],
-      ["export { createFakeFixture as privateFake } from '@agentui/switchboard-qualification/src/testkit/index.ts';", /Cannot find module/u],
-      ["export { createFakeFixture as privateFake } from '@agentui/switchboard-qualification/dist/testkit/fake.js';", /Cannot find module/u],
+      ["export { createFakeFixture as privateFake } from '@openpane/switchboard-qualification';", /has no exported member/u],
+      ["export { createFakeFixture as privateFake } from '@openpane/switchboard-qualification/src/testkit/index.ts';", /Cannot find module/u],
+      ["export { createFakeFixture as privateFake } from '@openpane/switchboard-qualification/dist/testkit/fake.js';", /Cannot find module/u],
       [[
-        "import { contracts as productionContracts } from '@mattsp1290/switchboard/testkit';",
+        "import { contracts as productionContracts } from '@operatorworks/switchboard/testkit';",
         'type RejectAny<T> = 0 extends (1 & T) ? never : T;',
         'export const productionUncertainty: QualificationContract =',
         '  productionContracts.uncertainty satisfies RejectAny<typeof productionContracts.uncertainty>;',
       ].join('\n'), null],
     ];
-    await mkdir(`${temporary}/node_modules/@mattsp1290`, { recursive: true });
-    await symlink(dirname(hostDependencyManifest('@mattsp1290/switchboard')), `${temporary}/node_modules/@mattsp1290/switchboard`);
+    await mkdir(`${temporary}/node_modules/@operatorworks`, { recursive: true });
+    await symlink(dirname(hostDependencyManifest('@operatorworks/switchboard')), `${temporary}/node_modules/@operatorworks/switchboard`);
     for (const [source, diagnostic] of cases) {
       await writeFile(`${temporary}/probe.ts`, prefix + source);
       const result = spawnSync(process.execPath, [compiler, '-p', `${temporary}/tsconfig.json`, '--pretty', 'false'], { encoding: 'utf8' });

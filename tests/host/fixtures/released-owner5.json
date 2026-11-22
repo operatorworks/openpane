@@ -7,8 +7,13 @@
     "mergedAt": "2026-11-17T04:53:38Z",
     "treeEquality": "Root verified merge tree equals producer commit"
   },
-  "databaseSha256": "3a01b4c9b0e458225993455d80ebf9e05ede29b7ffa20fd7ebfbc00f573172e7",
-  "compressedSha256": "140ece08502ec717dc00f003ba81565bd434c16e2c94e8794ab55d5d5c9a86df",
+  "databaseSha256": "f16ecf44c54ed72c921cd788339e4a67d0e2b796915dce52dfde9533317d3b0f",
+  "compressedSha256": "22c63d096a354d38bf1c807bd9ee6a967d9663678e515800b3f983c93098741e",
+  "openpaneRename": {
+    "note": "Text values renamed agentui->openpane (AgentUI->OpenPane) in place, then VACUUM; schema, user_version and row identities unchanged.",
+    "previousDatabaseSha256": "3a01b4c9b0e458225993455d80ebf9e05ede29b7ffa20fd7ebfbc00f573172e7",
+    "previousCompressedSha256": "140ece08502ec717dc00f003ba81565bd434c16e2c94e8794ab55d5d5c9a86df"
+  },
   "openerSha256": "1107a72806f47d9d521514359eccf290ce9c972f990ae4dc1a6d30a3a0a987ca",
   "fixtureManifestSha256": "5bfc7a0f472b6284da4ee2a7c34d026006a1a6202e49d68515babebd259a5910",
   "publicReaderSha256": "2e62e56e6882b689e9647292cf7a072af38ca7c8129d9714285e643bfb4d6ce7",

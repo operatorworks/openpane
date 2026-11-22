@@ -9,22 +9,22 @@ test('official SDK stdio tools preserve recorded uncertainty and leave durable s
   assert.ok(listed.tools.every(tool => tool.annotations.readOnlyHint && !tool.annotations.destructiveHint));
   const before = f.durable(), counts = { ...f.counts };
   const call = (name, args = {}) => mcp.client.callTool({ name, arguments: args });
-  const agents = data(await call('agentui_agents'));
+  const agents = data(await call('openpane_agents'));
   assert.deepEqual(agents.agents[0].commands, ['send', 'approve']);
   assert.equal(agents.agents[0].availability.kind, 'ready');
   assert.equal(agents.agents[1].availability.kind, 'unavailable');
-  const first = data(await call('agentui_conversations', { limit: 1 }));
+  const first = data(await call('openpane_conversations', { limit: 1 }));
   assert.equal(first.items.length, 1);
   assert.equal(first.after, f.scope.conversationId);
-  assert.equal(data(await call('agentui_conversations', { after: first.after, limit: 1 })).items[0].scope.conversationId, 'conversation-b');
-  assert.equal(data(await call('agentui_conversations', { after: 'conversation-b', limit: 1 })).after, null);
+  assert.equal(data(await call('openpane_conversations', { after: first.after, limit: 1 })).items[0].scope.conversationId, 'conversation-b');
+  assert.equal(data(await call('openpane_conversations', { after: 'conversation-b', limit: 1 })).after, null);
   assert.deepEqual(f.durable(), before);
   for (const kind of ['running', 'stopping', 'ended']) {
     if (kind === 'stopping') f.host.append(f.scope, { events: [{ kind: 'run-stop-requested', runId: 'run-a', clientCommandId: 'stop-original' }], runs: [], decisions: [] });
     if (kind === 'ended') f.host.append(f.scope, { events: [{ kind: 'run-ended', runId: 'run-a', outcome: 'completed' }], runs: [], decisions: [] });
     const phaseBefore = f.durable();
     for (let repeat = 0; repeat < 2; repeat++) {
-      const inspected = data(await call('agentui_inspect', { conversationId: f.scope.conversationId }));
+      const inspected = data(await call('openpane_inspect', { conversationId: f.scope.conversationId }));
       assert.equal(inspected.currentRun.kind, kind);
       assert.equal(inspected.receipts['uncertain-original'].state.kind, 'uncertain');
       assert.equal(inspected.receipts['uncertain-original'].state.reason, 'provider-outcome-unknown');
@@ -39,10 +39,10 @@ test('official SDK stdio tools preserve recorded uncertainty and leave durable s
     assert.deepEqual(f.durable(), phaseBefore);
   }
   const beforeReceipts = f.durable();
-  const receipt = data(await call('agentui_receipt', { conversationId: f.scope.conversationId, clientCommandId: 'uncertain-original' }));
+  const receipt = data(await call('openpane_receipt', { conversationId: f.scope.conversationId, clientCommandId: 'uncertain-original' }));
   assert.equal(receipt.receipt.clientCommandId, 'uncertain-original');
   assert.equal(receipt.receipt.state.kind, 'uncertain');
-  assert.equal(data(await call('agentui_receipt', { conversationId: f.scope.conversationId, clientCommandId: 'never-recorded' })).receipt, null);
+  assert.equal(data(await call('openpane_receipt', { conversationId: f.scope.conversationId, clientCommandId: 'never-recorded' })).receipt, null);
   assert.deepEqual(f.durable(), beforeReceipts);
   assert.deepEqual(f.counts, counts);
   assert.ok(f.operations.every(op => ['metadata', 'catalog', 'conversation-agent', 'watch', 'pull', 'close', 'receipt'].includes(op)));
@@ -57,9 +57,9 @@ test('official SDK stdio tools preserve recorded uncertainty and leave durable s
 test('live data tool inputs cannot select mutations or another host', { timeout: 15_000 }, async t => {
   const f = await fixture(t), mcp = await connect(t, f.origin);
   for (const [name, args] of [
-    ['agentui_agents', { op: 'reconcile' }], ['agentui_conversations', { limit: 0 }],
-    ['agentui_inspect', { conversationId: '', hostId: 'other' }],
-    ['agentui_receipt', { conversationId: f.scope.conversationId, clientCommandId: 'x', secret: 'sentinel' }],
+    ['openpane_agents', { op: 'reconcile' }], ['openpane_conversations', { limit: 0 }],
+    ['openpane_inspect', { conversationId: '', hostId: 'other' }],
+    ['openpane_receipt', { conversationId: f.scope.conversationId, clientCommandId: 'x', secret: 'sentinel' }],
   ]) assert.equal((await mcp.client.callTool({ name, arguments: args })).isError, true);
   assert.equal((await mcp.client.callTool({ name: 'reconcile', arguments: {} })).isError, true);
   assert.equal(mcp.stderr, '');
@@ -77,7 +77,7 @@ test('startup refuses invalid origins, unreachable hosts, extra arguments and th
     const result = await cli(args);
     assert.equal(result.code, 1, args.join(' '));
     assert.equal(result.stdout, '');
-    assert.match(result.stderr, /^AgentUI MCP startup failed\./u);
+    assert.match(result.stderr, /^OpenPane MCP startup failed\./u);
   }
 });
 
@@ -94,10 +94,10 @@ test('a host answering a different host identity after startup fails tool calls'
     } else response.end(JSON.stringify({ ok: true, value: { hostId: 'foreign', principalId: 'trusted-owner', compatibility: foreignCompatibility, agents: [], defaultAgentId: null, extensions: [] } }));
   });
   const mcp = await connect(t, origin);
-  data(await mcp.client.callTool({ name: 'agentui_agents', arguments: {} }));
+  data(await mcp.client.callTool({ name: 'openpane_agents', arguments: {} }));
   foreign = true;
-  for (const [name, args] of [['agentui_agents', {}], ['agentui_conversations', {}],
-    ['agentui_inspect', { conversationId: f.scope.conversationId }], ['agentui_receipt', { conversationId: f.scope.conversationId, clientCommandId: 'x' }]]) {
+  for (const [name, args] of [['openpane_agents', {}], ['openpane_conversations', {}],
+    ['openpane_inspect', { conversationId: f.scope.conversationId }], ['openpane_receipt', { conversationId: f.scope.conversationId, clientCommandId: 'x' }]]) {
     const result = await mcp.client.callTool({ name, arguments: args });
     assert.equal(result.isError, true, name);
     assert.equal(result.structuredContent, undefined);

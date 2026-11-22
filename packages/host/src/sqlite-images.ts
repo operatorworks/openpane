@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
-import type { ConversationScope } from '@agentui/contracts';
-import { IMAGE_HOST_MAX_BYTES, IMAGE_HOST_MAX_COUNT, IMAGE_MAX_AXIS, IMAGE_MAX_BYTES, IMAGE_MAX_PIXELS, parseImageAttachment, parseImageId } from '@agentui/contracts/image';
-import type { ImageAttachment, ImageId, ImageInputCapability, UploadId } from '@agentui/contracts/image';
+import type { ConversationScope } from '@openpane/contracts';
+import { IMAGE_HOST_MAX_BYTES, IMAGE_HOST_MAX_COUNT, IMAGE_MAX_AXIS, IMAGE_MAX_BYTES, IMAGE_MAX_PIXELS, parseImageAttachment, parseImageId } from '@openpane/contracts/image';
+import type { ImageAttachment, ImageId, ImageInputCapability, UploadId } from '@openpane/contracts/image';
 import { readDatabaseFormat } from './sqlite-schema.js';
 import { ImageInputError } from './image-input.js';
 import type { verifyImageUpload } from './image-input.js';

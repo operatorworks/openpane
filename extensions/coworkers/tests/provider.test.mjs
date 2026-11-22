@@ -10,7 +10,7 @@ import { createPoller, IDLE_DELAYS_MS } from '../dist/poller.js';
 import { registerCoworkersProvider } from '../dist/provider.js';
 
 const directory = fileURLToPath(new URL('../', import.meta.url));
-const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).agentui.extension;
+const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).openpane.extension;
 const instance = { namespace: 'coworkers', installationId: 'team', generation: '1', protocolVersion: '1' };
 /** The built package through an installed entry, so every call runs through the host's real credential authority. */
 const installed = (remote, token = remote.token) => ({ value: { kind: 'installed', directory, manifest, installations: [{ id: 'team', instance,

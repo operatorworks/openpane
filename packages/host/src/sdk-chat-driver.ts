@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { canonicalJson } from '@agentui/contracts';
-import type { ClientCommand, ConversationScope, Envelope } from '@agentui/contracts';
-import type { TranscriptEvent } from '@agentui/contracts/conversation';
-import type { NativeDispatchObservation } from '@mattsp1290/switchboard';
+import { canonicalJson } from '@openpane/contracts';
+import type { ClientCommand, ConversationScope, Envelope } from '@openpane/contracts';
+import type { TranscriptEvent } from '@openpane/contracts/conversation';
+import type { NativeDispatchObservation } from '@operatorworks/switchboard';
 import type { CapturedTarget, CommandResult, HostOutput, Installation, NativeRun, ProviderDriver } from './durable-model.js';
 import { budgets } from './durable-model.js';
 import { createTranscriptWriter } from './transcript-writer.js';
@@ -90,7 +90,7 @@ export function createSdkChatDriver(options: SdkChatDriverOptions): ProviderDriv
     const finalization = Promise.resolve().then(() => {
       const key = canonicalJson(turn.scope);
       if (terminal.outcome === 'failed' && !turn.storageFailed) {
-        turn.messages.set('agentui:failure', `${displayName} could not finish this response. You can send another message.`);
+        turn.messages.set('openpane:failure', `${displayName} could not finish this response. You can send another message.`);
       }
       try { render(turn, true); }
       catch { outputFailed(turn); try { render(turn, true); } catch { sealSaved(turn); } }
@@ -179,7 +179,7 @@ export function createSdkChatDriver(options: SdkChatDriverOptions): ProviderDriv
           if (closing) throw new Error(`${displayName} is closing`);
           const runId = randomUUID();
           const run: NativeRun = { identity: { conversation: command.scope, runId,
-            authority: { kind: 'agentui-host', hostId: command.scope.hostId,
+            authority: { kind: 'openpane-host', hostId: command.scope.hostId,
               binding: { namespace: sessionNamespace, installationId: installation.installationId, opaqueSessionId: native.threadId } } },
             reference: { kind: 'session', formatVersion: 1, binding: installation.binding, opaque: native.threadId } };
           turn = { scope: command.scope, native, run, messages: new Map(),

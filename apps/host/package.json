@@ -1,5 +1,5 @@
 {
-  "name": "@agentui/host-app",
+  "name": "@openpane/host-app",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,9 +8,9 @@
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@agentui/contracts": "0.0.0",
-    "@agentui/host": "0.0.0",
-    "@agentui/sdk": "0.0.0",
+    "@openpane/contracts": "0.0.0",
+    "@openpane/host": "0.0.0",
+    "@openpane/sdk": "0.0.0",
     "@opentelemetry/api": "1.9.0",
     "@opentelemetry/core": "2.12.0",
     "@opentelemetry/otlp-transformer": "0.223.0",

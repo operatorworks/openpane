@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { gunzipSync } from 'node:zlib';
-import { createReleaseArchive } from '../../scripts/agentui-launch.mjs';
+import { createReleaseArchive } from '../../scripts/openpane-launch.mjs';
 
 test('deployment archives contain artifact bytes without Mac metadata files', async t => {
-  const temporary = await mkdtemp(join(tmpdir(), 'agentui-archive-'));
+  const temporary = await mkdtemp(join(tmpdir(), 'openpane-archive-'));
   t.after(() => rm(temporary, { recursive: true, force: true }));
   const source = join(temporary, 'source'), extracted = join(temporary, 'extracted');
   await mkdir(join(source, 'assets'), { recursive: true });
@@ -17,7 +17,7 @@ test('deployment archives contain artifact bytes without Mac metadata files', as
   await writeFile(join(source, 'assets', 'main.js'), 'console.log("artifact bytes");\n');
   if (process.platform === 'darwin') {
     for (const path of [source, join(source, 'artifact.json'), join(source, 'assets', 'main.js')]) {
-      const attribute = spawnSync('/usr/bin/xattr', ['-w', 'com.agentui.archive-test', 'metadata', path], { encoding: 'utf8' });
+      const attribute = spawnSync('/usr/bin/xattr', ['-w', 'com.openpane.archive-test', 'metadata', path], { encoding: 'utf8' });
       assert.equal(attribute.status, 0, attribute.stderr);
     }
   }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setImmediate } from 'node:timers/promises';
-import { createFrontendToolGeneration } from '@agentui/sdk/tools';
+import { createFrontendToolGeneration } from '@openpane/sdk/tools';
 
 const defaults = { namespace: 'fixture', generation: 'one', platform: 'desktop', activate: () => ({ dispose() {} }), capture: () => undefined };
 const tool = { definition: { name: 'echo', description: 'Echo' }, decodeInput: value => value, async execute() { return 'ok'; } };

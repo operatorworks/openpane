@@ -1,7 +1,7 @@
-import { canonicalJson, parseDecision, parseRunIdentity, sameScope } from '@agentui/contracts';
-import type { ConversationScope, Json, Projection } from '@agentui/contracts';
-import { createDispatchOperation, parseSessionReference } from '@mattsp1290/switchboard';
-import type { DispatchEvidence, DispatchIdentity } from '@mattsp1290/switchboard';
+import { canonicalJson, parseDecision, parseRunIdentity, sameScope } from '@openpane/contracts';
+import type { ConversationScope, Json, Projection } from '@openpane/contracts';
+import { createDispatchOperation, parseSessionReference } from '@operatorworks/switchboard';
+import type { DispatchEvidence, DispatchIdentity } from '@operatorworks/switchboard';
 import type { CapturedTarget, HostOutput, Installation, NativeRun, NotDispatched, ObservedResult, ProviderDispatchObservation, ProviderDriver, NativeStoredCommand } from './durable-model.js';
 import { array, copyCanonicalJson, nonempty, object, positiveInteger } from './codec.js';
 import type { SettlementObservation } from './settlement.js';
@@ -26,7 +26,7 @@ export function installation(value: unknown): Installation {
 export function nativeRun(value: unknown, expected: Installation, scope: ConversationScope): NativeRun {
   const input = object(value), identity = parseRunIdentity(input.identity);
   const { authority, conversation } = identity;
-  if (!sameScope(conversation, scope) || authority.kind !== 'agentui-host' ||
+  if (!sameScope(conversation, scope) || authority.kind !== 'openpane-host' ||
     authority.binding.installationId !== expected.installationId) throw new Error('Foreign run authority');
   const reference = parseSessionReference({ value: input.reference, expected: expected.binding });
   if (reference.kind !== 'ok') throw new Error('Invalid native reference');

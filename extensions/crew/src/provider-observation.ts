@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { createCrewObserver } from '@birbcrew/client/agui';
 import type { CrewClient } from '@birbcrew/client';
 import type { BaseEvent } from '@ag-ui/core';
-import type { ProviderConversation, ProviderFeed, ProviderItem, ProviderSnapshot } from '@agentui/sdk';
+import type { ProviderConversation, ProviderFeed, ProviderItem, ProviderSnapshot } from '@openpane/sdk';
 import { approvalKey, choiceLabels, closureCause, cursorSchema, reference, remoteSchema, stateSchema } from './provider-model.js';
 import type { CrewModel, CrewCursor, CrewState } from './provider-model.js';
 

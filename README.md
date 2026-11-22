@@ -1,6 +1,6 @@
-# AgentUI
+# OpenPane
 
-AgentUI is a conversation client for existing agent installations, with React customization for Tauri desktop and a separate React Native iOS client.
+OpenPane is a conversation client for existing agent installations, with React customization for Tauri desktop and a separate React Native iOS client.
 
 The macOS launcher starts the host and desktop client together. Run the host locally or on an SSH-accessible Mac or Linux machine. The launcher provisions the matching runtime, connects automatically, and opens the conversation UI without any access setup. Read [launcher setup](docs/development/launcher.md) for local and remote workspaces. The separate iOS client still starts disconnected.
 
@@ -39,14 +39,14 @@ Run `npm run preview:theme` after building to inspect the local visual fixture.
 
 ## Extensions
 
-The **Extensions** item in the desktop rail lists every installed extension and opens its workspace. This repository ships two: [Crew](docs/extensions/crew.md), with a member sidebar and flat chat rows, and [Coworkers](docs/extensions/coworkers.md), with chat cards and message bubbles. Both are configured through `~/.local/share/agentui/extensions.json` and token environment variables, as [the launcher guide](docs/development/launcher.md#load-server-extensions-on-a-local-host) describes; [authoring extensions](docs/architecture/extension-sdk.md) covers the platform.
+The **Extensions** item in the desktop rail lists every installed extension and opens its workspace. This repository ships two: [Crew](docs/extensions/crew.md), with a member sidebar and flat chat rows, and [Coworkers](docs/extensions/coworkers.md), with chat cards and message bubbles. Both are configured through `~/.local/share/openpane/extensions.json` and token environment variables, as [the launcher guide](docs/development/launcher.md#load-server-extensions-on-a-local-host) describes; [authoring extensions](docs/architecture/extension-sdk.md) covers the platform.
 
 ## Launch the desktop app
 
 On macOS, install the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) and make Node.js and npm available. From the repository root, run:
 
 ```sh
-./agentui
+./openpane
 ```
 
 The launcher builds the app, starts a local Codex host in your current directory, and opens the client. Keep the terminal running. Select **New conversation** to begin.
@@ -54,9 +54,9 @@ The launcher builds the app, starts a local Codex host in your current directory
 To run the host on another machine, pass its SSH destination:
 
 ```sh
-./agentui --ssh lunus@100.102.195.3
-./agentui --ssh infra-admin@100.82.43.93
-./agentui --ssh punk1290@100.69.236.34
+./openpane --ssh lunus@100.102.195.3
+./openpane --ssh infra-admin@100.82.43.93
+./openpane --ssh punk1290@100.69.236.34
 ```
 
 The launcher detects the remote operating system and architecture, provisions private tools and the built host, and connects through an SSH tunnel. The remote workspace defaults to that user's home directory. Add `--workspace /absolute/remote/project` to choose a project. Files stay on the selected host.
@@ -64,11 +64,11 @@ The launcher detects the remote operating system and architecture, provisions pr
 To use Pi with GLM 5.3, export `OPENCODE_GO_API_KEY` and select Pi:
 
 ```sh
-./agentui --agent pi
-./agentui --ssh infra-admin@100.82.43.93 --agent pi
+./openpane --agent pi
+./openpane --ssh infra-admin@100.82.43.93 --agent pi
 ```
 
-[Launcher setup](docs/development/launcher.md) covers provider credentials, persistent history, troubleshooting, and repeatable local and remote verification. The launcher trusts the selected user and connection. It does not require AgentUI enrollment.
+[Launcher setup](docs/development/launcher.md) covers provider credentials, persistent history, troubleshooting, and repeatable local and remote verification. The launcher trusts the selected user and connection. It does not require OpenPane enrollment.
 
 For development with a live frontend server, use the pinned toolchain:
 
@@ -90,9 +90,9 @@ xcrun simctl list devices available
 From the repository root, pass a simulator UDID to the launcher:
 
 ```sh
-./agentui-ios SIMULATOR_UDID
+./openpane-ios SIMULATOR_UDID
 ```
 
-The launcher selects Node 24.22.3 and npm 11.19.1, installs locked JavaScript and native dependencies, and builds a Release app. It boots the selected simulator, installs AgentUI, and launches the disconnected screen. The app uses an embedded bundle without a Metro development server.
+The launcher selects Node 24.22.3 and npm 11.19.1, installs locked JavaScript and native dependencies, and builds a Release app. It boots the selected simulator, installs OpenPane, and launches the disconnected screen. The app uses an embedded bundle without a Metro development server.
 
 Read the [iOS packaging guide](docs/qualification/ios-app.md) for preparation commands, relaunch checks, and qualification limits. Physical-device signing and distribution remain separate work.

@@ -9,10 +9,10 @@ import { chromium } from 'playwright';
 import { repository, buildCustom } from '../customization/build/support.mjs';
 import { readArtifactBytes } from '../../apps/host/build/tsc/artifact.js';
 import { serviceEndpoint } from '../../apps/host/build/tsc/service-endpoint.js';
-import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, CODEX_RUNTIME, CODEX_SDK_MODEL, CODEX_SDK_RUNTIME, CLAUDE_SDK_RUNTIMES } from '@agentui/contracts/compatibility';
-import { parseServiceRequest, parseServiceResponse } from '@agentui/contracts/service';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import { openLocalHost, createRecordedDriver } from '@agentui/host';
+import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, CODEX_RUNTIME, CODEX_SDK_MODEL, CODEX_SDK_RUNTIME, CLAUDE_SDK_RUNTIMES } from '@openpane/contracts/compatibility';
+import { parseServiceRequest, parseServiceResponse } from '@openpane/contracts/service';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import { openLocalHost, createRecordedDriver } from '@openpane/host';
 import { ownerPrincipal } from '../../apps/host/build/tsc/principal.js';
 import { openAccessDatabase } from '../../apps/host/build/tsc/access-database.js';
 import { createApi } from '../../apps/host/build/tsc/api.js';
@@ -23,7 +23,7 @@ const installed = (runtime, account) => ({ installationId: 'same-installation-id
   account, authorizedScope: '/private/workspace',
 } });
 test('authorized agent API and browser route two recorded agents and retain unavailable history', { timeout: 60000 }, async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-agent-routing-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-agent-routing-'));
   const path = join(directory, 'host.sqlite'), access = openAccessDatabase(path);
   const feeds = new FeedRegistry(), calls = [];
   const a = installed(CODEX_RUNTIME, 'private-account-a'), b = installed(CLAUDE_SDK_RUNTIMES.sonnet, 'private-account-b');
@@ -233,12 +233,12 @@ test('authorized agent API and browser route two recorded agents and retain unav
   assert.equal(await message.inputValue(), 'Draft for Sonnet');
   await open('a');
   await page.evaluate(hostId => new Promise((resolve, reject) => {
-    const request = indexedDB.open('agentui-browser-views', 1);
+    const request = indexedDB.open('openpane-browser-views', 1);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const db = request.result, transaction = db.transaction('records', 'readwrite');
       transaction.objectStore('records').put({ version: 1, route: { hostId, conversationId: 'a' },
-        pendingCreation: { hostId, conversationId: 'legacy-absent' } }, ['view', sessionStorage.getItem('agentui.viewId'), hostId]);
+        pendingCreation: { hostId, conversationId: 'legacy-absent' } }, ['view', sessionStorage.getItem('openpane.viewId'), hostId]);
       transaction.oncomplete = () => { db.close(); resolve(); };
     };
   }), access.hostId);

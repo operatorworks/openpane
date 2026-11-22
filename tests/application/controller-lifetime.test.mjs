@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createFrontendToolGeneration } from '@agentui/sdk/tools';
+import { createFrontendToolGeneration } from '@openpane/sdk/tools';
 import { scope, empty, deferred, fixture } from './controller-fixture.mjs';
 
 const flush = () => new Promise(resolve => setImmediate(resolve));

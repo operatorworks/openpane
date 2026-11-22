@@ -1,7 +1,7 @@
 import type { V1Command } from './provider-commands.js';
 import { appendFileSync, closeSync, existsSync, fsyncSync, openSync, readFileSync } from 'node:fs';
-import { canonicalJson } from '@agentui/contracts';
-import type { NativeDispatchObservation } from '@mattsp1290/switchboard';
+import { canonicalJson } from '@openpane/contracts';
+import type { NativeDispatchObservation } from '@operatorworks/switchboard';
 import { nonempty, object } from './codec.js';
 import { output, parseEvidence } from './native-execution.js';
 import type { CapturedTarget, CommandResult, Installation, ProviderDriver } from './durable-model.js';
@@ -23,8 +23,8 @@ export function createRecordedDriver<E>(options: RecordedDriverOptions<E>): Prov
     async dispatch(command, target) {
       const result = await options.resolve(command, target);
       const evidence = { identity: target.identity, source: 'native-acknowledgement',
-        nativeOperation: { namespace: 'agentui-recorded', id: target.identity.hostOperationId },
-        observation: { namespace: 'agentui-recorded', schemaVersion: 1, data: { source: 'recorded' } },
+        nativeOperation: { namespace: 'openpane-recorded', id: target.identity.hostOperationId },
+        observation: { namespace: 'openpane-recorded', schemaVersion: 1, data: { source: 'recorded' } },
       } as const;
       const observed: NativeDispatchObservation<CommandResult<E>> = result === 'accepted'
         ? { kind: 'accepted', evidence } : { kind: 'conclusive', evidence, result };

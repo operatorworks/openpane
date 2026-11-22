@@ -1,4 +1,4 @@
-import { EXTENSION_SDK_VERSION } from '@agentui/contracts/compatibility';
+import { EXTENSION_SDK_VERSION } from '@openpane/contracts/compatibility';
 import { createHash } from 'node:crypto';
 import { sourceFile, treeIdentity } from '../../../packages/host/dist/customization/repository.js';
 import assert from 'node:assert/strict';
@@ -9,7 +9,7 @@ const oid = 'a'.repeat(40);
 const files = new Set(['desktop.tsx', 'shared.ts']);
 const manifest = { namespace: 'personal', trust: 'full', sdkVersion: EXTENSION_SDK_VERSION, entries: [{ kind: 'desktop', module: './dist/desktop.js' }] };
 const local = { extension: manifest, sources: { './dist/desktop.js': './desktop.tsx' } };
-const parse = agentui => parseCustomizationPackage({ agentui }, files);
+const parse = openpane => parseCustomizationPackage({ openpane }, files);
 
 test('absent metadata and empty metadata retain shipped defaults', () => {
   assert.equal(parseCustomizationPackage({}, files), undefined);
@@ -17,8 +17,8 @@ test('absent metadata and empty metadata retain shipped defaults', () => {
 });
 
 test('absent and no-op customization retain defaults with unrelated dependency declarations', () => {
-  for (const agentui of [undefined, {}, { extensions: [] }]) {
-    assert.equal(parseCustomizationPackage({ dependencies: { unrelated: '1.0.0' }, agentui }, files), undefined);
+  for (const openpane of [undefined, {}, { extensions: [] }]) {
+    assert.equal(parseCustomizationPackage({ dependencies: { unrelated: '1.0.0' }, openpane }, files), undefined);
   }
 });
 
@@ -59,7 +59,7 @@ test('shared and external inputs survive without a local SDK manifest', () => {
 });
 
 test('source maps and shared inputs must identify contained committed regular files', () => {
-  for (const agentui of [
+  for (const openpane of [
     { sources: local.sources }, { extension: manifest },
     { ...local, sources: {} }, { ...local, sources: { ...local.sources, './extra.js': './shared.ts' } },
     { ...local, sources: { './dist/desktop.js': './missing.ts' } },
@@ -69,12 +69,12 @@ test('source maps and shared inputs must identify contained committed regular fi
     { extensions: [{ repository: 'https://token@example.org/x', commit: oid }] },
     { extensions: [{ repository: 'ext::sh', commit: oid }] },
     { extensions: [{ repository: '/repo', commit: oid, subdirectory: '../x' }] },
-  ]) assert.throws(() => parse(agentui));
+  ]) assert.throws(() => parse(openpane));
 });
 
 test('metadata parsing does not inspect npm declarations', () => {
-  for (const agentui of [local, { shared: './shared.ts' }, { extensions: [{ repository: '/repo', commit: oid }] }]) {
-    assert.ok(parseCustomizationPackage({ agentui, dependencies: 'unrelated' }, files));
+  for (const openpane of [local, { shared: './shared.ts' }, { extensions: [{ repository: '/repo', commit: oid }] }]) {
+    assert.ok(parseCustomizationPackage({ openpane, dependencies: 'unrelated' }, files));
   }
 });
 

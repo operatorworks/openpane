@@ -4,12 +4,12 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { openRecordedHost, recordedInstallation } from '@agentui/host/recorded';
+import { openRecordedHost, recordedInstallation } from '@openpane/host/recorded';
 
 const scope = { hostId: 'shutdown-host', conversationId: 'shutdown-conversation' };
 const command = id => ({ version: 1, scope, clientCommandId: id, body: { kind: 'send', text: 'Finish this run.' } });
 function fixture(t, progressMs = 10) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-shutdown-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-shutdown-'));
   const options = { path: join(directory, 'host.sqlite'), backendPath: join(directory, 'recorded.jsonl'),
     hostId: scope.hostId, progressMs };
   const host = openRecordedHost(options);

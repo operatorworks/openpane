@@ -1,10 +1,10 @@
-import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION } from '@agentui/contracts/compatibility';
+import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION } from '@openpane/contracts/compatibility';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash, webcrypto } from 'node:crypto';
-import { canonicalJson, parseReceipt, parseDecision } from '@agentui/contracts';
-import { record, identifier, count, hex, utf8Bytes } from '@agentui/contracts/decode';
-import { BROWSER_RUNTIME, manifestPayload, parseArtifactManifest, artifactIdentityText, assertArtifactId } from '@agentui/contracts/artifact';
+import { canonicalJson, parseReceipt, parseDecision } from '@openpane/contracts';
+import { record, identifier, count, hex, utf8Bytes } from '@openpane/contracts/decode';
+import { BROWSER_RUNTIME, manifestPayload, parseArtifactManifest, artifactIdentityText, assertArtifactId } from '@openpane/contracts/artifact';
 
 const digest = text => createHash('sha256').update(text).digest('hex');
 const payload = () => manifestPayload({ schemaVersion: 1, platform: 'browser-development', sourceRevision: 'a'.repeat(64),

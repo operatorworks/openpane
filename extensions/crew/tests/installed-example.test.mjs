@@ -16,7 +16,7 @@ test('installed Crew and example share the patched Zod runtime', () => {
 });
 
 test('packed Crew example imports all exports with the retained SDK archive', t => {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-crew-consumer-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-crew-consumer-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const root = fileURLToPath(new URL('../../../', import.meta.url));
   const env = { ...process.env, npm_config_cache: join(directory, 'cache') };
@@ -53,9 +53,9 @@ test('packed Crew example imports all exports with the retained SDK archive', t 
     import assert from 'node:assert/strict';
     import { createRequire } from 'node:module';
     import { join } from 'node:path';
-    import { connectCrewConversation } from 'agentui-extension-crew';
-    import { fileIntents } from 'agentui-extension-crew/file-intents';
-    import { crewProvider } from 'agentui-extension-crew/provider';
+    import { connectCrewConversation } from 'openpane-extension-crew';
+    import { fileIntents } from 'openpane-extension-crew/file-intents';
+    import { crewProvider } from 'openpane-extension-crew/provider';
     import { CrewClient } from '@birbcrew/client';
     import { decisionReceiptsCapabilityV1Schema, decisionRecordSchema, handoffsCapabilityV1Schema } from '@birbcrew/client/contract';
     assert.equal(typeof connectCrewConversation, 'function');
@@ -71,7 +71,7 @@ test('packed Crew example imports all exports with the retained SDK archive', t 
     assert.equal(typeof decisionReceiptsCapabilityV1Schema.safeParse, 'function');
     assert.equal(typeof decisionRecordSchema.parse, 'function');
     const consumerRequire = createRequire(join(process.cwd(), 'package.json'));
-    const exampleRequire = createRequire(consumerRequire.resolve('agentui-extension-crew'));
+    const exampleRequire = createRequire(consumerRequire.resolve('openpane-extension-crew'));
     const crewRequire = createRequire(exampleRequire.resolve('@birbcrew/client'));
     assert.equal(exampleRequire('zod/package.json').version, '4.6.6');
     assert.equal(crewRequire('zod/package.json').version, '4.6.6');

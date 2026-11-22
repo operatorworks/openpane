@@ -1,4 +1,4 @@
-import * as SDK from '@agentui/sdk';
+import * as SDK from '@openpane/sdk';
 
 export type CrewModel = {
   request: { member: string; text: string };
@@ -33,7 +33,7 @@ export function createCrewFixture<I extends string>(crewInstance: SDK.ProviderIn
     kind: 'create', operationId: 'crew-create', scope: { hostId: 'host', conversationId: 'crew' }, agent: crewAgent,
   };
   const crewBinding: SDK.ProviderConversation<I> = {
-    kind: 'agentui-created', creation: crewCreation,
+    kind: 'openpane-created', creation: crewCreation,
     authority: { kind: 'remote-provider', binding: {
       namespace: crewInstance.namespace, installationId: crewInstance.installationId, opaqueSessionId: 'same-session',
     } },

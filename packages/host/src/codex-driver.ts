@@ -1,11 +1,11 @@
 import type { V1Command } from './provider-commands.js';
 import { randomUUID } from 'node:crypto';
 import { codexInstallation } from './native-installations.js';
-import type { ConversationScope } from '@agentui/contracts';
-import type { NativeDispatchObservation } from '@mattsp1290/switchboard';
-import { canonicalJson } from '@agentui/contracts';
-import type { RunOutcome, TranscriptEvent } from '@agentui/contracts/conversation';
-import type { ImageAttachment, ImageId } from '@agentui/contracts/image';
+import type { ConversationScope } from '@openpane/contracts';
+import type { NativeDispatchObservation } from '@operatorworks/switchboard';
+import { canonicalJson } from '@openpane/contracts';
+import type { RunOutcome, TranscriptEvent } from '@openpane/contracts/conversation';
+import type { ImageAttachment, ImageId } from '@openpane/contracts/image';
 import { nonempty, object } from './codec.js';
 import type { CapturedTarget, CommandResult, HostOutput, Installation, NativeRun, ProviderDriver } from './durable-model.js';
 import { CodexRpc, CodexRpcError } from './codex-rpc.js';
@@ -93,7 +93,7 @@ export function createCodexDriver(options: CodexDriverOptions): CodexDriver {
   let initialization: Promise<void> | null = null;
   function initialize(): Promise<void> {
     initialization ??= rpc.request('initialize', {
-      clientInfo: { name: 'agentui', version: '0.0.0' }, capabilities: { experimentalApi: false },
+      clientInfo: { name: 'openpane', version: '0.0.0' }, capabilities: { experimentalApi: false },
     }).then(() => rpc.notify('initialized', {})).catch(error => { initialization = null; throw error; });
     return initialization;
   }
@@ -169,8 +169,8 @@ export function createCodexDriver(options: CodexDriverOptions): CodexDriver {
     try {
       publish(turn, [{ kind: 'message-updated', messageId: `codex-storage:${randomUUID()}`,
         revision: 1, role: 'assistant', complete: true,
-        text: 'This response stopped because AgentUI could not store more output. Try a new conversation.' }]);
-    } catch { process.emitWarning('Could not store Codex output', { code: 'AGENTUI_CODEX_STORAGE' }); }
+        text: 'This response stopped because OpenPane could not store more output. Try a new conversation.' }]);
+    } catch { process.emitWarning('Could not store Codex output', { code: 'OPENPANE_CODEX_STORAGE' }); }
     if (turn.run && !disconnected && !closing) {
       void rpc.request('turn/interrupt', { threadId: turn.threadId, turnId: turn.run.identity.runId }).catch(() => {});
     }
@@ -181,12 +181,12 @@ export function createCodexDriver(options: CodexDriverOptions): CodexDriver {
       const threadId = value !== null && typeof value === 'object' && 'threadId' in value ? value.threadId : null;
       const turn = typeof threadId === 'string' ? active.get(threadId) : undefined;
       if (turn) outputFailed(turn);
-      else process.emitWarning('Could not handle Codex output', { code: 'AGENTUI_CODEX_OUTPUT' });
+      else process.emitWarning('Could not handle Codex output', { code: 'OPENPANE_CODEX_OUTPUT' });
     }
   }
   function run(turn: ActiveTurn, turnId: string): NativeRun {
     const value: NativeRun = { identity: { conversation: turn.scope, runId: turnId,
-      authority: { kind: 'agentui-host', hostId: turn.scope.hostId,
+      authority: { kind: 'openpane-host', hostId: turn.scope.hostId,
         binding: { namespace: 'codex-app-server', installationId: turn.installation.installationId, opaqueSessionId: turn.threadId } } },
       reference: { kind: 'session', formatVersion: 1, binding: turn.installation.binding, opaque: turn.threadId },
     };
@@ -227,7 +227,7 @@ export function createCodexDriver(options: CodexDriverOptions): CodexDriver {
             closed.files.observe(method, params); closed.files.flush();
           } else { closed.commands.observe(method, params); closed.commands.flush(); }
         }
-        catch { process.emitWarning('Could not retain late Codex activity', { code: 'AGENTUI_CODEX_LATE_OUTPUT' }); }
+        catch { process.emitWarning('Could not retain late Codex activity', { code: 'OPENPANE_CODEX_LATE_OUTPUT' }); }
       }
       return;
     }
@@ -286,13 +286,13 @@ export function createCodexDriver(options: CodexDriverOptions): CodexDriver {
   }
   function request(id: string | number, method: string, value: unknown): void {
     if (method !== 'item/commandExecution/requestApproval' && method !== 'item/fileChange/requestApproval') {
-      rpc.rejectRequest(id, 'This interaction is not supported by AgentUI yet.');
+      rpc.rejectRequest(id, 'This interaction is not supported by OpenPane yet.');
       return;
     }
     const params = object(value);
     const turn = active.get(nonempty(params.threadId));
     if (!turn?.run || turn.run.identity.runId !== params.turnId) {
-      rpc.rejectRequest(id, 'Approval does not belong to an active AgentUI turn.');
+      rpc.rejectRequest(id, 'Approval does not belong to an active OpenPane turn.');
       return;
     }
     renderMessage(turn);
@@ -370,7 +370,7 @@ export function createCodexDriver(options: CodexDriverOptions): CodexDriver {
         }
       } catch {
         if (turn) outputFailed(turn);
-        else process.emitWarning('Could not store Codex output', { code: 'AGENTUI_CODEX_STORAGE' });
+        else process.emitWarning('Could not store Codex output', { code: 'OPENPANE_CODEX_STORAGE' });
       }
       if (turn) active.delete(turn.threadId);
       busy.delete(key);

@@ -3,8 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { access, cp, mkdir, readFile, realpath, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
-import { CustomizationError, planServerCatalog, resolveCustomizationSources, parseServerCustomizationArtifact, readServerCustomizationArtifact } from '@agentui/host/customization';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { CustomizationError, planServerCatalog, resolveCustomizationSources, parseServerCustomizationArtifact, readServerCustomizationArtifact } from '@openpane/host/customization';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { serverCustomizationAbi } from '../../../scripts/server-customization-abi.mjs';
 import { qualifyServerCatalog } from '../../../scripts/server-customization-qualifier.mjs';
 import { execute, locked, tarball } from './preparation-support.mjs';
@@ -35,7 +35,7 @@ test('builds stable committed server bytes, excludes dirty files, and retains ve
 test('bundles real locked dependencies while ignoring author build and compiler configuration', async t => {
   const f = await setup(t);
   const { pkg } = await locked(f, f.repo);
-  pkg.agentui = extension('locked');
+  pkg.openpane = extension('locked');
   pkg.scripts.build = 'exit 99';
   await write(f.repo.directory, 'package.json', pkg);
   await write(f.repo.directory, 'tsconfig.json', { compilerOptions: { jsxImportSource: 'missing', paths: { value: ['./missing'] } } });
@@ -51,17 +51,17 @@ test('bundles real locked dependencies while ignoring author build and compiler 
 test('deduplicates external diamond and selected monorepo siblings in deterministic graph order', async t => {
   const f = await setup(t);
   const leaf = await f.repository('leaf');
-  await write(leaf.directory, 'package.json', { agentui: extension('leaf') });
+  await write(leaf.directory, 'package.json', { openpane: extension('leaf') });
   await write(leaf.directory, 'index.ts', validSource);
   const leafRef = leaf.reference(leaf.commit());
   const mono = await f.repository('monorepo');
   for (const name of ['left', 'right']) {
-    await write(mono.directory, `${name}/package.json`, { type: 'module', agentui: extension(name, { extensions: [leafRef] }) });
+    await write(mono.directory, `${name}/package.json`, { type: 'module', openpane: extension(name, { extensions: [leafRef] }) });
     await write(mono.directory, `${name}/index.ts`, validSource);
   }
   const commit = mono.commit();
   const refs = ['left', 'right', 'left'].map(name => mono.reference(commit, name));
-  await write(f.repo.directory, 'package.json', { type: 'module', agentui: extension('fixture', { extensions: refs }) });
+  await write(f.repo.directory, 'package.json', { type: 'module', openpane: extension('fixture', { extensions: refs }) });
   const rootCommit = f.repo.commit();
   const resolved = await resolveCustomizationSources({ reference: f.repo.reference(rootCommit), scratchParent: f.scratchParent });
   try {
@@ -85,13 +85,13 @@ test('deduplicates external diamond and selected monorepo siblings in determinis
 test('retains every pinned commit while compiling identical child content once', async t => {
   const f = await setup(t, validSource.replace('return {dispose(){}}', 'return {value:globalThis.childLoads,dispose(){}}'));
   const child = await f.repository('child');
-  await write(child.directory, 'package.json', { agentui: extension('child') });
+  await write(child.directory, 'package.json', { openpane: extension('child') });
   await write(child.directory, 'index.ts', `globalThis.childLoads=(globalThis.childLoads??0)+1; ${validSource}`);
   const first = child.commit(), second = child.commit();
   assert.notEqual(first, second);
   assert.equal(execute('git', ['rev-parse', `${first}^{tree}`], child.directory), execute('git', ['rev-parse', `${second}^{tree}`], child.directory));
   const build = async (commits, name) => {
-    await write(f.repo.directory, 'package.json', { agentui: extension('fixture', { extensions: commits.map(commit => child.reference(commit)) }) });
+    await write(f.repo.directory, 'package.json', { openpane: extension('fixture', { extensions: commits.map(commit => child.reference(commit)) }) });
     return f.build(undefined, name);
   };
   const initial = await build([first, first], 'initial');
@@ -134,9 +134,9 @@ test('retains every pinned commit while compiling identical child content once',
 test('rejects duplicate namespaces across distinct graph packages', async t => {
   const f = await setup(t);
   const external = await f.repository('external');
-  await write(external.directory, 'package.json', { agentui: extension('fixture') });
+  await write(external.directory, 'package.json', { openpane: extension('fixture') });
   await write(external.directory, 'index.ts', validSource);
-  await write(f.repo.directory, 'package.json', { agentui: extension('fixture', { extensions: [external.reference(external.commit())] }) });
+  await write(f.repo.directory, 'package.json', { openpane: extension('fixture', { extensions: [external.reference(external.commit())] }) });
   await assert.rejects(f.build(undefined, 'bad'), { code: 'invalid-graph' });
   await clean(f);
 });
@@ -150,8 +150,8 @@ for (const [name, source, code] of [
   ['bounded top level await', 'await new Promise(r=>setInterval(r,60000));' + validSource, 'entry-validation'],
   ['compile error', 'export default {', 'build-failed'],
   ['ambient dependency', "import 'esbuild';" + validSource, 'build-failed'],
-  ['unknown host package', "import '@agentui/contracts';" + validSource, 'build-failed'],
-  ['SDK subpath', "import '@agentui/sdk/tools';" + validSource, 'build-failed'],
+  ['unknown host package', "import '@openpane/contracts';" + validSource, 'build-failed'],
+  ['SDK subpath', "import '@openpane/sdk/tools';" + validSource, 'build-failed'],
   ['nonliteral dynamic import', "const name='esbuild'; await import(name);" + validSource, 'build-failed'],
 ]) {
   test(`rejects ${name} and preserves last good output`, async t => {
@@ -167,8 +167,8 @@ for (const [name, source, code] of [
 
 test('rejects mismatched manifest SDK before any entry executes', async t => {
   const f = await setup(t);
-  const pkg = { agentui: extension('fixture') };
-  pkg.agentui.extension.sdkVersion = 'wrong';
+  const pkg = { openpane: extension('fixture') };
+  pkg.openpane.extension.sdkVersion = 'wrong';
   await write(f.repo.directory, 'package.json', pkg);
   await write(f.repo.directory, 'index.ts', "throw new Error('never execute');");
   await assert.rejects(f.build(undefined, 'bad'), { code: 'invalid-graph' });
@@ -179,7 +179,7 @@ test('install failure cleans owned staging and leaves a previous artifact intact
   const f = await setup(t);
   const good = await f.build();
   const { pkg, lock } = await locked(f, f.repo);
-  pkg.agentui = extension('fixture');
+  pkg.openpane = extension('fixture');
   lock.packages['node_modules/value'].integrity = 'sha512-' + 'A'.repeat(86) + '==';
   await write(f.repo.directory, 'package.json', pkg);
   await write(f.repo.directory, 'package-lock.json', lock);
@@ -221,11 +221,11 @@ test('bundles locked workspace imports across external members and qualifies rel
   for (const name of ['one', 'two', 'sibling']) {
     const pkg = { name, type: 'module', exports: './index.mjs',
       ...(name === 'sibling' ? { dependencies: { '@fixture/child': 'file:../../vendor/@fixture/child-1.0.0.tgz' } } :
-        { version: '1.0.0', dependencies: { sibling: '*' }, agentui: { ...extension(name), sources: { './server.mjs': './index.mjs' } } }) };
+        { version: '1.0.0', dependencies: { sibling: '*' }, openpane: { ...extension(name), sources: { './server.mjs': './index.mjs' } } }) };
     await write(repo.directory, `packages/${name}/package.json`, pkg);
     await write(repo.directory, `packages/${name}/index.mjs`, name === 'sibling' ? "export {default} from '@fixture/child';" :
       `import value from 'sibling'; ${validSource.replace('return {dispose(){}}', 'return {value,dispose(){}}')}`);
-    const { type: _type, exports: _exports, agentui: _agentui, ...entry } = pkg;
+    const { type: _type, exports: _exports, openpane: _openpane, ...entry } = pkg;
     members[`packages/${name}`] = entry;
     members[`node_modules/${name}`] = { resolved: `packages/${name}`, link: true };
   }
@@ -233,7 +233,7 @@ test('bundles locked workspace imports across external members and qualifies rel
   await write(repo.directory, 'package.json', root);
   await write(repo.directory, 'package-lock.json', { name: root.name, version: root.version, lockfileVersion: 3, packages: { '': root, ...members } });
   const commit = repo.commit();
-  await write(f.repo.directory, 'package.json', { agentui: extension('fixture', { extensions: ['one', 'two'].map(name => repo.reference(commit, `packages/${name}`)) }) });
+  await write(f.repo.directory, 'package.json', { openpane: extension('fixture', { extensions: ['one', 'two'].map(name => repo.reference(commit, `packages/${name}`)) }) });
   const built = await f.build();
   const selected = built.manifest.packages.slice(1);
   assert.equal(selected[0].npm.path, '');
@@ -264,9 +264,9 @@ test('preserves canonical source errors through build and CLI boundaries', async
 
 test('supports shared module declarations and canonicalizes a symlinked output parent', async t => {
   const f = await setup(t);
-  const agentui = extension('fixture');
-  agentui.extension.entries.push({ kind: 'desktop', module: './server.mjs' });
-  await write(f.repo.directory, 'package.json', { agentui });
+  const openpane = extension('fixture');
+  openpane.extension.entries.push({ kind: 'desktop', module: './server.mjs' });
+  await write(f.repo.directory, 'package.json', { openpane });
   await mkdir(join(f.root, 'physical'));
   await symlink(join(f.root, 'physical'), join(f.root, 'alias'));
   const built = await f.build(undefined, 'alias/artifact');
@@ -297,13 +297,13 @@ test('rejects unsupported native addons and lazy CommonJS builtin loading', asyn
 test('first depth-first edge owns the compiled representative when breadth-first order differs', async t => {
   const f = await setup(t, validSource.replace('return {dispose(){}}', 'return {value:globalThis.childLoads,dispose(){}}'));
   const child = await f.repository('shared-child');
-  await write(child.directory, 'package.json', { agentui: extension('shared-child') });
+  await write(child.directory, 'package.json', { openpane: extension('shared-child') });
   await write(child.directory, 'index.ts', `globalThis.childLoads=(globalThis.childLoads??0)+1; ${validSource}`);
   const first = child.commit(), later = child.commit();
   const parent = await f.repository('parent');
-  await write(parent.directory, 'package.json', { agentui: extension('parent', { extensions: [child.reference(first)] }) });
+  await write(parent.directory, 'package.json', { openpane: extension('parent', { extensions: [child.reference(first)] }) });
   await write(parent.directory, 'index.ts', validSource);
-  await write(f.repo.directory, 'package.json', { agentui: extension('fixture', { extensions: [parent.reference(parent.commit()), child.reference(later)] }) });
+  await write(f.repo.directory, 'package.json', { openpane: extension('fixture', { extensions: [parent.reference(parent.commit()), child.reference(later)] }) });
   const rootCommit = f.repo.commit();
   const built = await f.build(rootCommit);
   const [root, intermediate, representative] = built.manifest.packages;
@@ -322,7 +322,7 @@ test('serializes nested npm paths without prepared absolute directories', async 
   const path = 'nested/owner';
   const nested = { directory: join(f.repo.directory, path) };
   const { pkg } = await locked(f, nested);
-  pkg.agentui = extension('nested');
+  pkg.openpane = extension('nested');
   await write(nested.directory, 'package.json', pkg);
   await write(nested.directory, 'index.ts', validSource);
   const { buildServerCustomization } = await import('../../../scripts/server-customization.mjs');

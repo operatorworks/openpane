@@ -22,8 +22,13 @@
     "nativeDispatches": 0
   },
   "qualification": "Public local host, provider registry snapshot/feed receive, command/binding, coordinator canonical-input fixture. No provider-to-frontend observation bridge, real frontend handler, native/provider network execution, service authentication or product acceptance claimed.",
-  "databaseSha256": "3f9107217766bbabd129c37932b037c79f61b7bbd1ca852640c3eb9cb5d104d4",
-  "compressedSha256": "9e5f3a0741ca9539fd85e0368793a8b26864f8286b696c5707163f82de910d64",
+  "databaseSha256": "e529924e276da391003f082a126e57d7e23f067045194df2b5cb95c49257eea6",
+  "compressedSha256": "59f68756dd45b464b67114257a7a640c2b6de4d636b1bc3f82f2cc5c5fcfb8d0",
+  "openpaneRename": {
+    "note": "Text values renamed agentui->openpane (AgentUI->OpenPane) in place, then VACUUM; schema, user_version and row identities unchanged.",
+    "previousDatabaseSha256": "3f9107217766bbabd129c37932b037c79f61b7bbd1ca852640c3eb9cb5d104d4",
+    "previousCompressedSha256": "9e5f3a0741ca9539fd85e0368793a8b26864f8286b696c5707163f82de910d64"
+  },
   "openerSha256": "7990c58a22f06d1203e37ab77ff997d3e3e4a8dce81f6e91a55ad347b3882223",
   "publicReaderSha256": "51f7729eb08d740ca02936f30c87397ca2e44c27740a3cf4392259f3ac55422d"
 }

@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { identifier, record, exact } from '@agentui/contracts/decode';
-import { CODEX_RUNTIME } from '@agentui/contracts/compatibility';
-import type { ClaudeSdkModel } from '@agentui/contracts/compatibility';
-import { codexInstallation, codexSdkInstallation, claudeSdkInstallation, piInstallation } from '@agentui/host';
+import { identifier, record, exact } from '@openpane/contracts/decode';
+import { CODEX_RUNTIME } from '@openpane/contracts/compatibility';
+import type { ClaudeSdkModel } from '@openpane/contracts/compatibility';
+import { codexInstallation, codexSdkInstallation, claudeSdkInstallation, piInstallation } from '@openpane/host';
 
 export type NativeProvider =
   | { readonly kind: 'codex' | 'codex-sdk'; readonly cwd: string; readonly executable?: string }

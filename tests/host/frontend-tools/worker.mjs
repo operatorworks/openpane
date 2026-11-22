@@ -1,7 +1,7 @@
-import { frontendToolsFor } from '@agentui/host/frontend-tools';
+import { frontendToolsFor } from '@openpane/host/frontend-tools';
 import { appendFileSync } from 'node:fs';
-import { openLocalHost, createRecordedDriver } from '@agentui/host';
-import { createFrontendToolGeneration, pinFrontendTools } from '@agentui/sdk/tools';
+import { openLocalHost, createRecordedDriver } from '@openpane/host';
+import { createFrontendToolGeneration, pinFrontendTools } from '@openpane/sdk/tools';
 import { projection, installed, scope, run } from '../fixture.mjs';
 const [path, mode, id, extra] = process.argv.slice(2);
 const driver = createRecordedDriver({ installation: installed, backendPath: path + '.recorded', decodeEvent: projection.decodeEvent });

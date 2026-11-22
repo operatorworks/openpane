@@ -8,7 +8,7 @@ import { build } from 'esbuild';
 import { chromium } from 'playwright';
 
 test('bundled tools run under the desktop CSP', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'agentui-tools-'));
+  const dir = await mkdtemp(join(tmpdir(), 'openpane-tools-'));
   const csp = JSON.parse(await readFile('apps/desktop/src-tauri/tauri.conf.json', 'utf8')).app
     .security.csp;
   await build({

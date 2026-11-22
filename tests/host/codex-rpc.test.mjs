@@ -31,7 +31,7 @@ async function until(predicate) {
 
 for (const supplied of [false, true]) {
   test(`child ${supplied ? 'uses the supplied' : 'inherits the normal process'} environment`, { timeout: 4000 }, async t => {
-    const key = 'OTEL_AGENTUI_RPC_ENVIRONMENT_TEST';
+    const key = 'OTEL_OPENPANE_RPC_ENVIRONMENT_TEST';
     const previous = process.env[key];
     process.env[key] = 'inherited-value';
     t.after(() => {
@@ -39,7 +39,7 @@ for (const supplied of [false, true]) {
       else process.env[key] = previous;
     });
     const env = { PATH: process.env.PATH, OPENAI_API_KEY: 'explicit-provider-credential',
-      OTEL_EXPORTER_OTLP_HEADERS: 'explicit-collector-header', AGENTUI_DATADOG_LLMOBS: 'true' };
+      OTEL_EXPORTER_OTLP_HEADERS: 'explicit-collector-header', OPENPANE_DATADOG_LLMOBS: 'true' };
     const rpc = new CodexRpc({
       executable: process.execPath,
       args: ['--input-type=module', '--eval', `
@@ -55,7 +55,7 @@ for (const supplied of [false, true]) {
       onNotification() {}, onRequest() {}, onClose() {},
     });
     t.after(() => rpc.close());
-    const keys = [key, 'PATH', 'OPENAI_API_KEY', 'OTEL_EXPORTER_OTLP_HEADERS', 'AGENTUI_DATADOG_LLMOBS'];
+    const keys = [key, 'PATH', 'OPENAI_API_KEY', 'OTEL_EXPORTER_OTLP_HEADERS', 'OPENPANE_DATADOG_LLMOBS'];
     const expected = supplied ? env : process.env;
     assert.deepEqual(await rpc.request('environment', keys),
       Object.fromEntries(keys.map(name => [name, expected[name] ?? null])));
@@ -153,7 +153,7 @@ test('intentional close is idempotent and rejects pending requests', { timeout: 
 test('spawn failure closes cleanly even when the close callback throws', { timeout: 4000 }, async () => {
   const closes = [];
   const rpc = new CodexRpc({
-    executable: '/agentui-fixture/missing-codex', cwd: process.cwd(),
+    executable: '/openpane-fixture/missing-codex', cwd: process.cwd(),
     onNotification() {}, onRequest() {},
     onClose(error) { closes.push(error); throw new Error('consumer failure'); },
   });

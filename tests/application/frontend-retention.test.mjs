@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createFrontendToolGeneration } from '@agentui/sdk/tools';
+import { createFrontendToolGeneration } from '@openpane/sdk/tools';
 import { createFrontendSends, createGenerationSource } from '../../apps/desktop/dist/application/frontend-sends.js';
 import { scope } from '../client/support.mjs';
 

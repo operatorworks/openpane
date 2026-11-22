@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import { canonicalJson } from '@agentui/contracts';
-import { count, hex, identifier, record } from '@agentui/contracts/decode';
-import { parseServerCustomizationArtifact } from '@agentui/host/customization';
-import type { ServerExtensionReplacement, ServerExtensionStatus } from '@agentui/host/extensions';
+import { canonicalJson } from '@openpane/contracts';
+import { count, hex, identifier, record } from '@openpane/contracts/decode';
+import { parseServerCustomizationArtifact } from '@openpane/host/customization';
+import type { ServerExtensionReplacement, ServerExtensionStatus } from '@openpane/host/extensions';
 import type { AccessDatabase } from './access-database.js';
 import { normalizeGrantPool, publicGrantBinding } from './provider-credentials.js';
 import { verifyArtifactPins } from './provider-extensions.js';

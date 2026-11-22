@@ -1,4 +1,4 @@
-import type { ServiceMetadata } from '@agentui/contracts/service';
+import type { ServiceMetadata } from '@openpane/contracts/service';
 import type { OwnedViewStorage } from './view-state.js';
 import type { FrontendSends } from './frontend-sends.js';
 import type { createViewLeasePool, ViewBorrow } from './view-leases.js';

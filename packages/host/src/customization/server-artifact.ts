@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { count, hex, nonempty, record } from '@agentui/contracts/decode';
-import { parseExtensionManifest, type ExtensionManifest } from '@agentui/sdk';
+import { count, hex, nonempty, record } from '@openpane/contracts/decode';
+import { parseExtensionManifest, type ExtensionManifest } from '@openpane/sdk';
 import { commitId, containedPath, CustomizationError, identity, serverCatalogFile, supportedPackageManager } from './contract.js';
 import { sourceFile, treeIdentity, type SourceFile } from './repository.js';
 import { npmIdentity } from './packages.js';
@@ -128,6 +128,7 @@ function canonical(value: unknown): unknown {
   return value;
 }
 export function serverCustomizationArtifactId(value: Omit<ServerCustomizationArtifact, 'artifactId'>): string {
+  // Versioned hash domain tag kept from before the OpenPane rename; it is not a product name, and recorded goldens depend on it.
   return identity(['agentui-server-artifact-v1', canonical(value)]);
 }
 export function parseServerCustomizationArtifact(value: unknown): ServerCustomizationArtifact {

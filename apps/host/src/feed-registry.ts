@@ -1,7 +1,7 @@
-import type { ConversationPort } from '@agentui/contracts';
-import type { Transcript, TranscriptEvent } from '@agentui/contracts/conversation';
-import type { ServicePull } from '@agentui/contracts/service';
-import { ServiceError } from '@agentui/contracts/service';
+import type { ConversationPort } from '@openpane/contracts';
+import type { Transcript, TranscriptEvent } from '@openpane/contracts/conversation';
+import type { ServicePull } from '@openpane/contracts/service';
+import { ServiceError } from '@openpane/contracts/service';
 import { ServiceFeed } from './feeds.js';
 
 export class FeedRegistry {

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { ConversationModuleProps, UiExtensionEntry } from '@agentui/sdk/react';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { ConversationModuleProps, UiExtensionEntry } from '@openpane/sdk/react';
 
 function Transcript({ conversation, activity }: ConversationModuleProps) {
   const [expanded, setExpanded] = useState(true);

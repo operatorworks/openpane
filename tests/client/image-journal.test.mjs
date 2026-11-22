@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { createConversationStore, FrontendImagesUnsupportedError } from '@agentui/client';
+import { createConversationStore, FrontendImagesUnsupportedError } from '@openpane/client';
 import { deferred, fakePort, projection, receipt, scope, storage } from './support.mjs';
 
 const bytes = new Uint8Array(readFileSync(new URL('../application/fixtures/released-local-images/selected-image.png', import.meta.url)));

@@ -1,4 +1,4 @@
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -9,11 +9,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { chromium } from 'playwright';
-import { createBrowserConnection } from '@agentui/client/service';
-import { createProviderRegistry } from '@agentui/host';
+import { createBrowserConnection } from '@openpane/client/service';
+import { createProviderRegistry } from '@openpane/host';
 import { fixture as hostFixture, scope as hostScope } from '../host/fixture.mjs';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import { SERVICE_WIRE_VERSION } from '@agentui/contracts/compatibility';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import { SERVICE_WIRE_VERSION } from '@openpane/contracts/compatibility';
 import { crew, crewBackend, crewPresentation } from '../extensions/providers/contracts/crew.ts';
 import { local, localBackend, localPresentation } from '../extensions/providers/contracts/local.ts';
 
@@ -35,8 +35,8 @@ function extension({ native = false, create, lookup, service = 'http://127.0.0.1
   if (generation) presentation.instance = { ...presentation.instance, generation };
   const calls = { creates: [], lookups: [], submits: 0 };
   let context, credential;
-  const binding = operation => ({ kind: 'agentui-created', creation: operation, authority: {
-    kind: native ? 'agentui-host' : 'remote-provider', ...(native ? { hostId: operation.scope.hostId } : {}),
+  const binding = operation => ({ kind: 'openpane-created', creation: operation, authority: {
+    kind: native ? 'openpane-host' : 'remote-provider', ...(native ? { hostId: operation.scope.hostId } : {}),
     binding: { namespace: presentation.instance.namespace, installationId: presentation.instance.installationId, opaqueSessionId: 'same-session' },
   } });
   const confirmed = operation => ({ kind: 'confirmed', value: binding(operation), evidence: { operationId: operation.operationId } });
@@ -54,12 +54,12 @@ function extension({ native = false, create, lookup, service = 'http://127.0.0.1
       value.providers.add('service', { ...provider, async connect(request) { credential = request.credential; return { kind: 'connected', backend: connected }; } }, presentation);
       return { async dispose() {} };
     } },
-    installations: [{ id: 'service', instance: presentation.instance, service, expectedAuthority: native ? 'agentui-host' : 'remote-provider',
+    installations: [{ id: 'service', instance: presentation.instance, service, expectedAuthority: native ? 'openpane-host' : 'remote-provider',
       authentication: { kind: 'secret', revision, resolve: async () => secret } }],
   } };
 }
 async function fixture(t, extensions) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-provider-create-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-provider-create-'));
   let running;
   const client = createBrowserConnection({ fetch: (url, init) => fetch(`${running.origin}${url}`, { ...init, headers: { ...init.headers, Origin: running.origin } }) });
   const start = async values => {
@@ -162,7 +162,7 @@ for (const field of ['scope', 'operation', 'agent', 'generation', 'namespace', '
       if (field === 'generation') value.creation.agent.instance.generation = 'foreign';
       if (field === 'namespace') value.authority.binding.namespace = 'foreign';
       if (field === 'protocol') value.creation.agent.instance.protocolVersion = 'foreign';
-      if (field === 'kind') value.authority = { ...value.authority, kind: 'agentui-host', hostId: operation.scope.hostId };
+      if (field === 'kind') value.authority = { ...value.authority, kind: 'openpane-host', hostId: operation.scope.hostId };
       if (field === 'host') value.authority.hostId = 'foreign';
       return result;
     } });
@@ -362,7 +362,7 @@ test('direct creation retry accepts a display rename while retaining its capture
     { ...renamed, agent: { ...renamed.agent, opaqueId: 'foreign' } },
     { ...renamed, instance: { ...renamed.instance, generation: 'foreign' } },
     { ...renamed, contributionId: 'foreign' },
-    { ...renamed, expectedAuthority: 'agentui-host' },
+    { ...renamed, expectedAuthority: 'openpane-host' },
   ]) await assert.rejects(host.createProviderConversation(hostScope, changed, registry), /Creation agent is immutable/);
   assert.equal(a.calls.creates.length, 1); assert.equal(a.calls.lookups.length, 1);
 });

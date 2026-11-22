@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createUiExtensionGeneration } from '@agentui/sdk/react-tools';
-import { pinFrontendTools } from '@agentui/sdk/tools';
+import { createUiExtensionGeneration } from '@openpane/sdk/react-tools';
+import { pinFrontendTools } from '@openpane/sdk/tools';
 
 const options = { namespace: 'fixture', generation: 'one', platform: 'desktop' };
 const tool = { definition: { name: 'echo', description: 'Echo' }, decodeInput: value => value, async execute() { return 'captured'; } };

@@ -1,5 +1,5 @@
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import { desktopCustomizationIdentity, planCustomizationCatalog } from '@agentui/host/customization';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import { desktopCustomizationIdentity, planCustomizationCatalog } from '@openpane/host/customization';
 export { customizationPlugin, mergePlans } from './lib/customization-plugin.mjs';
 
 export function desktopPlan(root) {

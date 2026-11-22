@@ -1,6 +1,6 @@
 # Chat with GLM 5.3 through OpenCode Go
 
-For automatic local or SSH setup, run `./agentui --agent pi`. The Mac app opens without a key and offers protected key entry in **Settings**, then **Open secure Pi setup**. See [launcher setup](launcher.md) for Keychain storage and remote workspaces. The instructions below run an independently managed host that the browser reaches directly.
+For automatic local or SSH setup, run `./openpane --agent pi`. The Mac app opens without a key and offers protected key entry in **Settings**, then **Open secure Pi setup**. See [launcher setup](launcher.md) for Keychain storage and remote workspaces. The instructions below run an independently managed host that the browser reaches directly.
 
 Use your OpenCode Go subscription key with the Pi SDK host. This host uses Pi 1.5.2 with provider `opencode-go` and model `glm-5.3`. It provides text chat without tools, commands, or file access.
 
@@ -18,7 +18,7 @@ Start the host with an existing workspace directory. Reserve a private data dire
 ```sh
 node apps/host/dist/main.js pi \
 	--workspace /absolute/path/to/your/project \
-	--data-dir "$HOME/.local/share/agentui-pi" \
+	--data-dir "$HOME/.local/share/openpane-pi" \
 	--port 7140
 ```
 
@@ -27,7 +27,7 @@ The workspace identifies this host's conversations. Pi does not read the workspa
 Open [the local app](http://127.0.0.1:7140/browser.html). On macOS, you can open the same host in the desktop app from another terminal.
 
 ```sh
-./agentui --host-url http://127.0.0.1:7140/browser.html
+./openpane --host-url http://127.0.0.1:7140/browser.html
 ```
 
 The desktop landing page's **Connect to local Codex** button opens this same address. It connects to the provider already running there. The connected app identifies this host as **Pi · GLM 5.3 · OpenCode Go**.
@@ -45,5 +45,5 @@ It starts a disposable bundled host and browser, sends real subscription request
 checks follow-up and restart memory, then interrupts a streamed response.
 
 ```sh
-AGENTUI_PI_LIVE=1 node --test tests/application/pi-live.test.mjs
+OPENPANE_PI_LIVE=1 node --test tests/application/pi-live.test.mjs
 ```

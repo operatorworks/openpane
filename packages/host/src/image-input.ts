@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { crc32, inflateSync } from 'node:zlib';
 import { PNG } from 'pngjs';
 import { decode } from 'jpeg-js';
-import { IMAGE_MAX_BYTES, parseImageDimensions, parseImageName } from '@agentui/contracts/image';
-import type { ImageAttachment, ImageFailureKind } from '@agentui/contracts/image';
+import { IMAGE_MAX_BYTES, parseImageDimensions, parseImageName } from '@openpane/contracts/image';
+import type { ImageAttachment, ImageFailureKind } from '@openpane/contracts/image';
 
 export class ImageInputError extends Error {
   constructor(readonly code: ImageFailureKind, message: string) {

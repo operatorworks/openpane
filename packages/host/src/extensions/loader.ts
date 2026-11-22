@@ -1,8 +1,8 @@
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { checkExtensionEntrypoint, EXTENSION_SDK_VERSION, parseExtensionManifest } from '@agentui/sdk';
-import type { ExtensionManifest, ServerExtensionEntry } from '@agentui/sdk';
+import { checkExtensionEntrypoint, EXTENSION_SDK_VERSION, parseExtensionManifest } from '@openpane/sdk';
+import type { ExtensionManifest, ServerExtensionEntry } from '@openpane/sdk';
 
 export interface InstalledServerEntry {
   readonly directory: string;

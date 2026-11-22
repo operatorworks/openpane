@@ -6,16 +6,16 @@ import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bootstrapScript, distribution, profileFor, shellQuote } from './agentui-runtime.mjs';
+import { bootstrapScript, distribution, profileFor, shellQuote } from './openpane-runtime.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-/** The local setup root, matching `root="$HOME/.local/share/agentui"` in agentui-runtime.mjs. */
-const LOCAL_SETUP_ROOT = join(homedir(), '.local/share/agentui');
+/** The local setup root, matching `root="$HOME/.local/share/openpane"` in openpane-runtime.mjs. */
+const LOCAL_SETUP_ROOT = join(homedir(), '.local/share/openpane');
 const sshOptions = ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=2'];
-const usage = `Usage: ./agentui [--ssh USER@HOST] [--workspace PATH] [--agent codex|pi] [--port PORT]
+const usage = `Usage: ./openpane [--ssh USER@HOST] [--workspace PATH] [--agent codex|pi] [--port PORT]
                  [--no-open] [--skip-build]
-       ./agentui --host-url http://127.0.0.1:PORT/browser.html
-       ./agentui setup --agent codex|pi|claude [--ssh USER@HOST]
+       ./openpane --host-url http://127.0.0.1:PORT/browser.html
+       ./openpane setup --agent codex|pi|claude [--ssh USER@HOST]
 
 Starts a trusted single-user host and opens the Mac client without pairing.
 The SSH form installs the matching tools and host on the selected machine.
@@ -157,7 +157,7 @@ async function run(file, args, options = {}, input = '') {
 function checkArtifacts(host, browser, nodeVersion) {
   if (host.platform !== 'host' || host.artifactRuntime?.engine !== 'node' || host.artifactRuntime.version !== nodeVersion ||
       browser.platform !== 'browser-development' || !/^[a-f0-9]{64}$/.test(host.artifactId) || !/^[a-f0-9]{64}$/.test(browser.artifactId)) {
-    throw new Error('Built host or browser artifacts do not match the pinned runtime. Run ./agentui without --skip-build.');
+    throw new Error('Built host or browser artifacts do not match the pinned runtime. Run ./openpane without --skip-build.');
   }
 }
 
@@ -175,11 +175,11 @@ export async function createReleaseArchive(directory, archive, lifecycle = {}) {
 
 async function deploy(destination, setup, releaseId, lifecycle) {
   const release = join(setup.root, 'releases', releaseId);
-  const staging = await mkdtemp(join(tmpdir(), 'agentui-release-'));
+  const staging = await mkdtemp(join(tmpdir(), 'openpane-release-'));
   try {
     await cp(join(root, 'apps/host/dist'), join(staging, 'host'), { recursive: true });
     await cp(join(root, 'apps/desktop/web-dist-browser'), join(staging, 'browser'), { recursive: true });
-    await cp(join(root, 'scripts/agentui-launch-session.mjs'), join(staging, 'session.mjs'));
+    await cp(join(root, 'scripts/openpane-launch-session.mjs'), join(staging, 'session.mjs'));
     await writeFile(join(staging, 'package.json'), '{"type":"module"}\n');
     const archive = `${staging}.tar.gz`;
     try {
@@ -218,15 +218,15 @@ async function waitForHost(session, origin, artifactId) {
     }
     await new Promise(done => setTimeout(done, 100));
   }
-  throw new Error('Timed out waiting for the AgentUI host. Check the setup output above.');
+  throw new Error('Timed out waiting for the OpenPane host. Check the setup output above.');
 }
 
 export async function launch(options) {
   if (options.kind === 'help') { process.stdout.write(usage); return; }
-  if (process.platform !== 'darwin' && options.open) throw new Error('The AgentUI desktop client requires macOS. Use --no-open to run without a window.');
+  if (process.platform !== 'darwin' && options.open) throw new Error('The OpenPane desktop client requires macOS. Use --no-open to run without a window.');
   const children = new Set();
   let stopping;
-  const checkRunning = () => { if (stopping) throw new Error('AgentUI startup cancelled.'); };
+  const checkRunning = () => { if (stopping) throw new Error('OpenPane startup cancelled.'); };
   const lifecycle = { children, checkRunning };
   async function stop() {
     stopping ??= (async () => {
@@ -254,22 +254,22 @@ export async function launch(options) {
     checkRunning();
     const open = async (url, setupEnvironment = {}) => {
       checkRunning();
-      const app = command(join(root, 'apps/desktop/src-tauri/target/release/bundle/macos/AgentUI.app/Contents/MacOS/agentui-desktop'), ['--host-url', url],
+      const app = command(join(root, 'apps/desktop/src-tauri/target/release/bundle/macos/OpenPane.app/Contents/MacOS/openpane-desktop'), ['--host-url', url],
         { ...lifecycle, env: { ...process.env, ...setupEnvironment } });
       await app.exited;
     };
     if (options.kind === 'existing') { await open(options.url); return; }
     const [host, browser] = await Promise.all(['apps/host/dist/artifact.json', 'apps/desktop/web-dist-browser/artifact.json'].map(async path => JSON.parse(await readFile(join(root, path), 'utf8'))));
     checkArtifacts(host, browser, nodeVersion);
-    const { CODEX_RUNTIME } = await import('@agentui/contracts/compatibility');
+    const { CODEX_RUNTIME } = await import('@openpane/contracts/compatibility');
     const setupScript = bootstrapScript(nodeVersion, options.agent, CODEX_RUNTIME.version);
     const setupOutput = options.kind === 'ssh'
       ? await run('ssh', [...sshOptions, options.destination, 'sh -s'], lifecycle, setupScript)
       : await run('/bin/sh', ['-s'], lifecycle, setupScript);
     checkRunning();
-    const setupLine = setupOutput.split('\n').findLast(line => line.startsWith('AGENTUI_SETUP '));
+    const setupLine = setupOutput.split('\n').findLast(line => line.startsWith('OPENPANE_SETUP '));
     if (!setupLine) throw new Error('Server setup did not return its runtime information.');
-    const setup = JSON.parse(setupLine.slice('AGENTUI_SETUP '.length));
+    const setup = JSON.parse(setupLine.slice('OPENPANE_SETUP '.length));
     const platform = distribution(setup.os, setup.arch);
     const target = options.kind === 'ssh' ? options.destination : 'local';
     const workspace = options.kind === 'ssh'
@@ -286,7 +286,7 @@ export async function launch(options) {
     if (options.kind === 'ssh') {
       // A remote host never loads server extensions; this only warns when a local extensions.json would be ignored.
       void extensionArguments({ setupRoot: LOCAL_SETUP_ROOT, kind: 'ssh' });
-      const deploymentHash = createHash('sha256').update(await readFile(join(root, 'scripts/agentui-launch-session.mjs')))
+      const deploymentHash = createHash('sha256').update(await readFile(join(root, 'scripts/openpane-launch-session.mjs')))
         .update('\0').update(await readFile(fileURLToPath(import.meta.url))).digest('hex').slice(0, 12);
       const release = await deploy(options.destination, setup, `${host.artifactId.slice(0, 16)}-${browser.artifactId.slice(0, 16)}-${deploymentHash}`, lifecycle);
       checkRunning();
@@ -297,15 +297,15 @@ export async function launch(options) {
       const args = [setup.node, join(root, 'apps/host/dist/main.js'), 'desktop', '--preferred', options.agent, '--workspace', workspace,
         '--data-dir', dataDir, '--assets', join(root, 'apps/desktop/web-dist-browser'), '--port', String(port),
         ...(options.agent === 'codex' ? ['--executable', setup.codex] : []), ...extensionArguments({ setupRoot: setup.root, kind: 'local' })];
-      session = command(setup.node, [join(root, 'scripts/agentui-launch-session.mjs'), ...args],
+      session = command(setup.node, [join(root, 'scripts/openpane-launch-session.mjs'), ...args],
         { ...lifecycle, lease: true, env: { ...process.env, PATH: `${dirname(setup.node)}:${process.env.PATH}` } });
     }
-    session.child.stdin.write(`${JSON.stringify({ OPENCODE_GO_API_KEY: process.env.OPENCODE_GO_API_KEY ?? null, AGENTUI_SETUP_CAPABILITY: setupCapability })}\n`);
+    session.child.stdin.write(`${JSON.stringify({ OPENCODE_GO_API_KEY: process.env.OPENCODE_GO_API_KEY ?? null, OPENPANE_SETUP_CAPABILITY: setupCapability })}\n`);
     await waitForHost(session, origin, host.artifactId);
     checkRunning();
     process.stdout.write(`${JSON.stringify({ event: 'ready', url: `${origin}/browser.html`, target, workspace, dataDir, port, agent: options.agent, platform })}\n`);
-    process.stderr.write(`AgentUI is ready. ${target} runs ${options.agent} in ${workspace}. Keep this terminal running.\n`);
-    if (options.open) await Promise.race([open(`${origin}/browser.html`, { AGENTUI_SETUP_CAPABILITY: setupCapability, AGENTUI_SETUP_PROFILE: profile.id, AGENTUI_SETUP_TARGET: `${target} · ${workspace}` }), session.exited.then(() => { if (!stopping) throw new Error('AgentUI host stopped.'); })]);
+    process.stderr.write(`OpenPane is ready. ${target} runs ${options.agent} in ${workspace}. Keep this terminal running.\n`);
+    if (options.open) await Promise.race([open(`${origin}/browser.html`, { OPENPANE_SETUP_CAPABILITY: setupCapability, OPENPANE_SETUP_PROFILE: profile.id, OPENPANE_SETUP_TARGET: `${target} · ${workspace}` }), session.exited.then(() => { if (!stopping) throw new Error('OpenPane host stopped.'); })]);
     else await session.exited;
   } finally {
     await stop();
@@ -316,7 +316,7 @@ export async function launch(options) {
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { await launch(parseLaunchArgs(process.argv.slice(2))); }
   catch (error) {
-    process.stderr.write(`Cannot connect to AgentUI host: ${error.message}\n`);
+    process.stderr.write(`Cannot connect to OpenPane host: ${error.message}\n`);
     process.exitCode = error.exitCode ?? 1;
   }
 }

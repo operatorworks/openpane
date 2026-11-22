@@ -2,13 +2,13 @@
 
 This in-process SDK 0.9 example registers a normal server extension. Each accepted send produces `response.txt` containing exactly its valid UTF-8 request text. Use Node 24 and build the workspace before importing it.
 
-Set `AGENTUI_REPORT_DATABASE` to an absolute path in an existing private directory. The report provider owns this SQLite database exclusively until it closes. Keep it separate from the LocalHost database. The example needs no provider credentials.
+Set `OPENPANE_REPORT_DATABASE` to an absolute path in an existing private directory. The report provider owns this SQLite database exclusively until it closes. Keep it separate from the LocalHost database. The example needs no provider credentials.
 
 ```js
 import { randomUUID } from 'node:crypto';
-import { openReportExample } from '@agentui/example-generated-text-output';
+import { openReportExample } from '@openpane/example-generated-text-output';
 
-process.env.AGENTUI_REPORT_DATABASE = '/private/reports.sqlite';
+process.env.OPENPANE_REPORT_DATABASE = '/private/reports.sqlite';
 const example = await openReportExample({
   hostPath: '/private/host.sqlite',
   scope: { hostId: 'my-host', conversationId: 'reports' },
@@ -42,7 +42,7 @@ Run the focused checks after building with `node --test examples/generated-text-
 A connected browser or Mac service client can list and read the same retained outputs. Both methods return the existing domain outcomes. Reads return newly owned `Uint8Array` bytes after exact length, fatal UTF-8 and SHA-256 verification. No browser cryptography API is required.
 
 ```js
-import { createBrowserConnection } from '@agentui/client/service';
+import { createBrowserConnection } from '@openpane/client/service';
 
 const connection = createBrowserConnection();
 const listing = await connection.conversationOutputs(scope);

@@ -1,4 +1,4 @@
-import type { Activity, Transcript } from '@agentui/contracts/conversation';
+import type { Activity, Transcript } from '@openpane/contracts/conversation';
 
 export function activityStatus(activity: Activity, transcript: Transcript, connected: boolean, paused: boolean): string {
   const observed = activity.status;

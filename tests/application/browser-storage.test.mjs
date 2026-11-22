@@ -7,8 +7,8 @@ import { chromium } from 'playwright';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 async function fixture(t) {
   const bundle = await build({ stdin: { contents: `import { BrowserViewStorage } from './apps/desktop/src/application/browser-storage.ts';
-    import { createConversationStore } from '@agentui/client';
-    import { transcriptProjection } from '@agentui/contracts/conversation';
+    import { createConversationStore } from '@openpane/client';
+    import { transcriptProjection } from '@openpane/contracts/conversation';
     Object.assign(globalThis, { BrowserViewStorage, createConversationStore, transcriptProjection });`, resolveDir: root }, bundle: true, write: false, format: 'iife' });
   const browser = await chromium.launch();
   t.after(() => browser.close());
@@ -26,7 +26,7 @@ async function holdNativeView(page) {
   await holder.goto('http://localhost/previous');
   await holder.evaluate(async () => {
     const acquired = Promise.withResolvers();
-    void navigator.locks.request('agentui-view:native-mac-default', () => new Promise(release => {
+    void navigator.locks.request('openpane-view:native-mac-default', () => new Promise(release => {
       globalThis.releaseView = release;
       acquired.resolve();
     }));
@@ -53,7 +53,7 @@ test('native initial view waits for the previous document and retains its exact 
   const [, result] = await Promise.all([
     holder.evaluate(async () => {
       const deadline = Date.now() + 5000;
-      while (!(await navigator.locks.query()).pending.some(lock => lock.name === 'agentui-view:native-mac-default')) {
+      while (!(await navigator.locks.query()).pending.some(lock => lock.name === 'openpane-view:native-mac-default')) {
         if (Date.now() > deadline) throw new Error('Native view did not wait for the previous document');
         await new Promise(resolve => setTimeout(resolve, 10));
       }
@@ -62,7 +62,7 @@ test('native initial view waits for the previous document and retains its exact 
     page.evaluate(async scope => {
       const owner = await globalThis.BrowserViewStorage.reopen('native-mac-default', () => {}, true);
       owner.select();
-      const result = { viewId: owner.viewId, sessionViewId: sessionStorage.getItem('agentui.viewId'),
+      const result = { viewId: owner.viewId, sessionViewId: sessionStorage.getItem('openpane.viewId'),
         saved: await owner.readView('host'), draft: await owner.drafts(() => {}).load(scope) };
       await owner.close();
       return result;
@@ -81,8 +81,8 @@ test('native initial view refuses a lock that stays held without inventing anoth
     let failure;
     try { await globalThis.BrowserViewStorage.reopen('native-mac-default', () => {}, true); }
     catch (error) { failure = error.message; }
-    const lockAvailable = await navigator.locks.request('agentui-view:native-mac-default', { ifAvailable: true }, lock => lock !== null);
-    return { failure, lockAvailable, sessionViewId: sessionStorage.getItem('agentui.viewId') };
+    const lockAvailable = await navigator.locks.request('openpane-view:native-mac-default', { ifAvailable: true }, lock => lock !== null);
+    return { failure, lockAvailable, sessionViewId: sessionStorage.getItem('openpane.viewId') };
   });
   await holder.evaluate(() => globalThis.releaseView());
   assert.match(result.failure, /already open/);
@@ -93,7 +93,7 @@ test('native initial view refuses a lock that stays held without inventing anoth
 test('acquiring a candidate view preserves selection until select succeeds', async t => {
   const page = await fixture(t);
   const result = await page.evaluate(async () => {
-    const a = await globalThis.BrowserViewStorage.open(() => {}), selected = () => sessionStorage.getItem('agentui.viewId');
+    const a = await globalThis.BrowserViewStorage.open(() => {}), selected = () => sessionStorage.getItem('openpane.viewId');
     const b = await globalThis.BrowserViewStorage.reopen('candidate-b', () => {});
     const acquired = selected();
     let failed;
@@ -129,7 +129,7 @@ test('saved views reject noncanonical records without overwriting local data or 
       try { await owner.saveView('host', value); } catch (error) { failures.push(error.message); }
     }
     const retained = await owner.readView('host');
-    const opened = indexedDB.open('agentui-browser-views', 1);
+    const opened = indexedDB.open('openpane-browser-views', 1);
     const db = await new Promise((resolve, reject) => { opened.onsuccess = () => resolve(opened.result); opened.onerror = () => reject(opened.error); });
     const write = db.transaction('records', 'readwrite');
     const foreign = { ...original, extra: 'preserve' };
@@ -151,7 +151,7 @@ test('saved view listing skips unreadable foreign rows, bounds pages and preserv
   const page = await fixture(t);
   const result = await page.evaluate(async () => {
     const owner = await globalThis.BrowserViewStorage.open(() => {});
-    const opened = indexedDB.open('agentui-browser-views', 1);
+    const opened = indexedDB.open('openpane-browser-views', 1);
     const db = await new Promise((resolve, reject) => { opened.onsuccess = () => resolve(opened.result); opened.onerror = () => reject(opened.error); });
     const write = db.transaction('records', 'readwrite');
     const records = write.objectStore('records');
@@ -181,9 +181,9 @@ test('a schema upgrade releases the old database and view lock and reports a rel
     const failures = [];
     const owner = await globalThis.BrowserViewStorage.open(error => failures.push(error.message));
     await owner.saveView('host', { version: 1, route: null, pendingCreation: null });
-    const upgrade = indexedDB.open('agentui-browser-views', 2);
+    const upgrade = indexedDB.open('openpane-browser-views', 2);
     const db = await new Promise((resolve, reject) => { upgrade.onsuccess = () => resolve(upgrade.result); upgrade.onerror = () => reject(upgrade.error); });
-    const lockReleased = await navigator.locks.request(`agentui-view:${owner.viewId}`, { ifAvailable: true }, lock => lock !== null);
+    const lockReleased = await navigator.locks.request(`openpane-view:${owner.viewId}`, { ifAvailable: true }, lock => lock !== null);
     let writeFailure;
     try { await owner.saveView('host', { version: 1, route: null, pendingCreation: null }); } catch (error) { writeFailure = error.message; }
     const read = db.transaction('records').objectStore('records').get(['view', owner.viewId, 'host']);
@@ -203,7 +203,7 @@ test('foreign-host scans are bounded and continuation retains another host row f
   const page = await fixture(t);
   const result = await page.evaluate(async () => {
     const owner = await globalThis.BrowserViewStorage.open(() => {});
-    const opened = indexedDB.open('agentui-browser-views', 1);
+    const opened = indexedDB.open('openpane-browser-views', 1);
     const db = await new Promise((resolve, reject) => { opened.onsuccess = () => resolve(opened.result); opened.onerror = () => reject(opened.error); });
     const write = db.transaction('records', 'readwrite'), rows = write.objectStore('records');
     for (let index = 0; index < 100; index++) rows.put({ version: 1, route: null, pendingCreation: null }, ['view', 'foreign-view', `a-${String(index).padStart(3, '0')}`]);
@@ -223,7 +223,7 @@ test('legacy pending scopes migrate without inventing a selected agent or changi
   const result = await page.evaluate(async () => {
     const owner = await globalThis.BrowserViewStorage.open(() => {});
     const scope = { hostId: 'host', conversationId: 'legacy-pending' };
-    const open = indexedDB.open('agentui-browser-views', 1);
+    const open = indexedDB.open('openpane-browser-views', 1);
     const db = await new Promise(resolve => { open.onsuccess = () => resolve(open.result); });
     const transaction = db.transaction('records', 'readwrite');
     transaction.objectStore('records').put({ version: 1, route: scope, pendingCreation: scope }, ['view', owner.viewId, 'host']);
@@ -262,7 +262,7 @@ test('close holds the view lock until admitted writes and saved-view scans finis
     const samePromise = closing === owner.close();
     let settled = false;
     void closing.then(() => { settled = true; });
-    const lockDuringDrain = await navigator.locks.request(`agentui-view:${owner.viewId}`, { ifAvailable: true }, lock => lock !== null);
+    const lockDuringDrain = await navigator.locks.request(`openpane-view:${owner.viewId}`, { ifAvailable: true }, lock => lock !== null);
     const settledDuringDrain = settled;
     let rejected;
     try { await owner.readView('host'); } catch (error) { rejected = error.message; }
@@ -294,7 +294,7 @@ test('close drains a saved-view scan through abort before releasing ownership', 
     transaction.addEventListener('abort', () => { aborted = true; });
     transaction.abort();
     await owner.close();
-    const lockReleased = await navigator.locks.request(`agentui-view:${owner.viewId}`, { ifAvailable: true }, lock => lock !== null);
+    const lockReleased = await navigator.locks.request(`openpane-view:${owner.viewId}`, { ifAvailable: true }, lock => lock !== null);
     return { aborted, lockReleased, failure: await listing };
   });
   assert.equal(result.aborted, true);
@@ -348,7 +348,7 @@ test('draft key discovery pages only the acquired view and host and drains scans
   const page = await fixture(t);
   const result = await page.evaluate(async () => {
     const owner = await globalThis.BrowserViewStorage.open(() => {});
-    const opening = indexedDB.open('agentui-browser-views', 1), db = await new Promise(resolve => { opening.onsuccess = () => resolve(opening.result); });
+    const opening = indexedDB.open('openpane-browser-views', 1), db = await new Promise(resolve => { opening.onsuccess = () => resolve(opening.result); });
     const transaction = db.transaction('records', 'readwrite'), rows = transaction.objectStore('records');
     for (let index = 0; index < 105; index++) rows.put({ untouched: index }, ['draft', owner.viewId, 'host', `scope-${String(index).padStart(3, '0')}`]);
     rows.put({ untouched: 'foreign host' }, ['draft', owner.viewId, 'elsewhere', 'scope']);
@@ -359,7 +359,7 @@ test('draft key discovery pages only the acquired view and host and drains scans
     try { await owner.draftScopes('host', []); } catch (error) { malformed = error.message; }
     const pending = owner.draftScopes('host', first.after), closing = owner.close();
     const second = await pending; await closing;
-    const acquired = await navigator.locks.request(`agentui-view:${owner.viewId}`, { ifAvailable: true }, lock => Boolean(lock));
+    const acquired = await navigator.locks.request(`openpane-view:${owner.viewId}`, { ifAvailable: true }, lock => Boolean(lock));
     const read = db.transaction('records').objectStore('records').getAll(), retained = await new Promise(resolve => { read.onsuccess = () => resolve(read.result); });
     db.close(); return { first, second, malformed, acquired, retained };
   });

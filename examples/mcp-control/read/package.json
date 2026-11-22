@@ -1,5 +1,5 @@
 {
-  "name": "@agentui/example-mcp-read",
+  "name": "@openpane/example-mcp-read",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@agentui/contracts": "0.0.0",
+    "@openpane/contracts": "0.0.0",
     "@modelcontextprotocol/sdk": "1.32.2",
     "zod": "4.6.6"
   }

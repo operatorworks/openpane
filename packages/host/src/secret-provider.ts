@@ -1,4 +1,4 @@
-import type { SecretProvider } from '@agentui/sdk';
+import type { SecretProvider } from '@openpane/sdk';
 
 export function secretResolver({ provider, reference }: {
   readonly provider: SecretProvider;

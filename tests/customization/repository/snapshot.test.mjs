@@ -1,4 +1,4 @@
-import { EXTENSION_SDK_VERSION } from '@agentui/contracts/compatibility';
+import { EXTENSION_SDK_VERSION } from '@openpane/contracts/compatibility';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { CustomizationError, readCustomizationSnapshot } from '@agentui/host/customization';
+import { CustomizationError, readCustomizationSnapshot } from '@openpane/host/customization';
 
 function git(cwd, ...args) {
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
@@ -14,7 +14,7 @@ function git(cwd, ...args) {
   return execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'agentui-snapshot-test-'));
+  const root = await mkdtemp(join(tmpdir(), 'openpane-snapshot-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const repo = join(root, 'repo');
   const scratchParent = join(root, 'scratch');
@@ -143,17 +143,17 @@ test('unneeded malformed lockfiles do not prevent defaults or dependency-free cu
   await writeFile(join(f.repo, 'package-lock.json'), '{malformed lockfile');
   for (const pkg of [
     { dependencies: { unrelated: '1.0.0' } },
-    { dependencies: { unrelated: '1.0.0' }, agentui: {} },
-    { agentui: { shared: './shared.ts' } },
+    { dependencies: { unrelated: '1.0.0' }, openpane: {} },
+    { openpane: { shared: './shared.ts' } },
   ]) {
     await writeFile(join(f.repo, 'package.json'), JSON.stringify(pkg));
     const snapshot = await f.read(f.commit());
-    assert.deepEqual(snapshot.customization, pkg.agentui?.shared ? { shared: './shared.ts', extensions: [] } : undefined);
+    assert.deepEqual(snapshot.customization, pkg.openpane?.shared ? { shared: './shared.ts', extensions: [] } : undefined);
     assert.equal(await readFile(join(snapshot.directory, 'package-lock.json'), 'utf8'), '{malformed lockfile');
     await snapshot.dispose();
   }
   await writeFile(join(f.repo, 'package.json'), JSON.stringify({
-    packageManager: 'npm@11.19.1', dependencies: { required: '1.0.0' }, agentui: { shared: './shared.ts' },
+    packageManager: 'npm@11.19.1', dependencies: { required: '1.0.0' }, openpane: { shared: './shared.ts' },
   }));
   await assert.rejects(f.read(f.commit()), { code: 'invalid-package' });
   assert.deepEqual(await readdir(f.scratchParent), []);
@@ -219,7 +219,7 @@ test('file URL retrieval preserves shared and external-only inputs', async t => 
   const f = await fixture(t);
   const extensions = [{ repository: 'ssh://git@example.org/team/widgets', commit: 'b'.repeat(40), subdirectory: 'packages/widgets' }];
   await writeFile(join(f.repo, 'shared.ts'), 'export const label = "Notes";\n');
-  await writeFile(join(f.repo, 'package.json'), JSON.stringify({ agentui: { shared: './shared.ts', extensions } }));
+  await writeFile(join(f.repo, 'package.json'), JSON.stringify({ openpane: { shared: './shared.ts', extensions } }));
   const snapshot = await readCustomizationSnapshot({ repository: new URL(`file://${f.repo}`).href, commit: f.commit(), scratchParent: f.scratchParent });
   assert.deepEqual(snapshot.customization, { shared: './shared.ts', extensions });
   await snapshot.dispose();
@@ -228,7 +228,7 @@ test('file URL retrieval preserves shared and external-only inputs', async t => 
 test('committed missing sources and disagreeing lockfiles fail before returning a snapshot', async t => {
   const f = await fixture(t);
   const extension = { namespace: 'personal', trust: 'full', sdkVersion: EXTENSION_SDK_VERSION, entries: [{ kind: 'desktop', module: './dist/desktop.js' }] };
-  const pkg = { name: 'notes', version: '1.0.0', packageManager: 'npm@11.19.1', agentui: { extension, sources: { './dist/desktop.js': './missing.ts' } } };
+  const pkg = { name: 'notes', version: '1.0.0', packageManager: 'npm@11.19.1', openpane: { extension, sources: { './dist/desktop.js': './missing.ts' } } };
   await writeFile(join(f.repo, 'package.json'), JSON.stringify(pkg));
   await assert.rejects(f.read(f.commit()), { code: 'invalid-package' });
   await writeFile(join(f.repo, 'missing.ts'), 'export default {};\n');

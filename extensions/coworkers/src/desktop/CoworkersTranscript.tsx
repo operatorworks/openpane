@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import type { ConversationModuleProps } from '@agentui/sdk/react';
+import type { ConversationModuleProps } from '@openpane/sdk/react';
 import { CoworkerContext, initials } from './shared.js';
 
 /** Bubbles: your messages on the right on the accent tint, the coworker's on the left with its avatar and name above each group. */

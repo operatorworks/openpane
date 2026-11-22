@@ -8,7 +8,7 @@ Use the pinned Node and npm versions. From the repository root:
 npm ci
 npm run setup:browser
 npm run build
-npm run host:browser-dev -- --data-dir /absolute/private/agentui-host
+npm run host:browser-dev -- --data-dir /absolute/private/openpane-host
 ```
 
 The command creates a private data directory if it does not exist. An existing directory must belong to the current user and have mode `0700`. Keep this directory across restarts. It contains the host identity, access records, conversation database, and recorded acceptance evidence. A second process cannot own it while the first process is running or draining accepted work.

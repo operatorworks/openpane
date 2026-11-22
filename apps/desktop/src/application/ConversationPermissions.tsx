@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { OutboxEntry } from '@agentui/client';
-import type { ConversationPermission } from '@agentui/contracts';
+import type { OutboxEntry } from '@openpane/client';
+import type { ConversationPermission } from '@openpane/contracts';
 import type { ConversationActions, PermissionState } from './application-controller.js';
 
 export function ConversationPermissions({ state, actions, enabled, retained }: {

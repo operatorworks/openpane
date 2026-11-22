@@ -56,8 +56,8 @@ async function main(): Promise<void> {
       ...(values.preferred === 'codex' ? [{ name: 'codex', kind: 'codex', cwd: resolve(values.workspace ?? '.'), ...executable } satisfies AgentConfiguration['agents'][number]] : []),
       { name: 'pi', kind: 'pi', cwd: resolve(values.workspace ?? '.') },
     ];
-    const setupCapability = process.env.AGENTUI_SETUP_CAPABILITY ?? '';
-    delete process.env.AGENTUI_SETUP_CAPABILITY;
+    const setupCapability = process.env.OPENPANE_SETUP_CAPABILITY ?? '';
+    delete process.env.OPENPANE_SETUP_CAPABILITY;
     const host = await startBrowserHost({ directory, port, observability: readObservabilityConfiguration(process.env), assetsDirectory: values.assets ? resolve(values.assets) : fileURLToPath(new URL('../../desktop/web-dist-browser/', import.meta.url)),
       ...(extensions === undefined ? {} : { extensions }),
       ...(values['refresh-builder'] === undefined ? {} : { refreshBuilder: values['refresh-builder'] }),

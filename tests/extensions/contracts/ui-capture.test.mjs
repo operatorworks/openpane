@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { forwardRef, lazy, memo } from 'react';
-import { parseConversationModules, parseUiExtensionContributions, parseUiExtensionPresentation, validateConversationModules, validateUiExtensionContributions } from '@agentui/sdk/react';
+import { parseConversationModules, parseUiExtensionContributions, parseUiExtensionPresentation, validateConversationModules, validateUiExtensionContributions } from '@openpane/sdk/react';
 
 const View = () => null;
 const module = { id: 'notes', label: 'Notes', component: View };

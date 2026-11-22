@@ -10,7 +10,7 @@ export async function createPreview(port = 0) {
     define: { 'process.env.NODE_ENV': '"development"' },
   });
   const assets = new Map(result.outputFiles.map((file) => [file.path.endsWith('.css') ? '/fixture.css' : '/fixture.js', file.contents]));
-  const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AgentUI theme workbench</title><link rel="stylesheet" href="/fixture.css"></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>';
+  const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenPane theme workbench</title><link rel="stylesheet" href="/fixture.css"></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>';
   const server = createServer((request, response) => {
     if (request.url === '/') {
       response.setHeader('Content-Type', 'text/html; charset=utf-8');

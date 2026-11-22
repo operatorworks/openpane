@@ -1,9 +1,9 @@
 import type { AguiObservations } from './agui-observations.js';
-import type { RunAgentInput } from '@agentui/protocol';
-import { EXTENSION_SDK_VERSION } from '@agentui/contracts/compatibility';
-import { EXTENSION_NAMESPACE_PATTERN } from '@agentui/contracts/service';
-import { nonempty, record } from '@agentui/contracts/decode';
-import type { Json } from '@agentui/contracts';
+import type { RunAgentInput } from '@openpane/protocol';
+import { EXTENSION_SDK_VERSION } from '@openpane/contracts/compatibility';
+import { EXTENSION_NAMESPACE_PATTERN } from '@openpane/contracts/service';
+import { nonempty, record } from '@openpane/contracts/decode';
+import type { Json } from '@openpane/contracts';
 import type { BackendProvider, CredentialHandle, ProviderInstance, ProviderModel } from './providers.js';
 import type { ProviderPresentation, ServerProviderCredentials } from './provider-presentation.js';
 
@@ -37,9 +37,9 @@ export interface ServerExtensionInstallation {
   readonly id: string;
   readonly instance: ProviderInstance<string>;
   readonly service: string;
-  readonly expectedAuthority: 'agentui-host' | 'remote-provider';
+  readonly expectedAuthority: 'openpane-host' | 'remote-provider';
 }
-export { EXTENSION_OPERATION_PATTERN, EXTENSION_REFUSAL_PATTERN } from '@agentui/contracts/service';
+export { EXTENSION_OPERATION_PATTERN, EXTENSION_REFUSAL_PATTERN } from '@openpane/contracts/service';
 /** The runtime `AbortSignal`, read from the consumer's global types so the SDK root needs no DOM or Node types. */
 export type ExtensionAbortSignal = typeof globalThis extends { readonly AbortSignal: { readonly prototype: infer Signal } }
   ? Signal : { readonly aborted: boolean };

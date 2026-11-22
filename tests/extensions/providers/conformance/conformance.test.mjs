@@ -3,7 +3,7 @@ import test from 'node:test';
 import { assistantTexts, host, pending, runOf, until } from './harness.mjs';
 import { providers } from './providers.mjs';
 
-const offline = 'The provider service is offline or unreachable. AgentUI checks again automatically.';
+const offline = 'The provider service is offline or unreachable. OpenPane checks again automatically.';
 const removed = 'This conversation’s provider is no longer configured.';
 const none = { creates: 0, sends: 0, cancels: 0, decisions: 0 };
 const options = { timeout: 30_000 };

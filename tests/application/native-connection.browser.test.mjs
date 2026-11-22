@@ -9,7 +9,7 @@ const bundle = await build({ stdin: { contents: `import React from 'react';
   import { createRoot } from 'react-dom/client';
   import { NativeApplication } from './apps/desktop/src/application/NativeApplication.tsx';
   import { BrowserViewStorage } from './apps/desktop/src/application/browser-storage.ts';
-  import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@agentui/contracts/compatibility';
+  import { SERVICE_WIRE_VERSION, EXTENSION_SDK_VERSION, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
   const agent = { id: 'recorded', label: 'Recorded', runtime: RECORDED_RUNTIME, imageInput: { kind: 'unsupported', reason: 'This agent cannot receive images.' }, frontendOffers: 'unsupported', commands: ['send', 'approve'], availability: { kind: 'ready' } };
   const metadata = { extensions: [], agents: [agent], defaultAgentId: agent.id, hostId: 'host', principalId: 'trusted-owner', compatibility: {
     wireVersion: SERVICE_WIRE_VERSION, extensionSdkVersion: EXTENSION_SDK_VERSION, nativeRuntime: RECORDED_RUNTIME, desiredGitRevision: 'test', appliedArtifact: { artifactId: 'test', gitRevision: 'test' } } };
@@ -44,7 +44,7 @@ const bundle = await build({ stdin: { contents: `import React from 'react';
     createRoot(document.getElementById('root')).render(<NativeApplication />);
   };
   globalThis.savedRecords = async () => {
-    const opened = indexedDB.open('agentui-browser-views', 1);
+    const opened = indexedDB.open('openpane-browser-views', 1);
     const db = await new Promise((resolve, reject) => { opened.onsuccess = () => resolve(opened.result); opened.onerror = () => reject(opened.error); });
     const read = db.transaction('records').objectStore('records').getAll();
     const records = await new Promise((resolve, reject) => { read.onsuccess = () => resolve(read.result); read.onerror = () => reject(read.error); });
@@ -91,7 +91,7 @@ test('a fresh Mac connects directly to the local host with no pairing step', asy
 test('native connection controls show category-specific recovery without exposing unknown causes', async t => {
   const page = await fixture(t);
   for (const [cause, guidance] of [
-    ['forbidden', /installed AgentUI app/],
+    ['forbidden', /installed OpenPane app/],
     ['profile-unavailable', /local profile.*access/i],
     ['network-failed', /host is running/],
     ['private-host-response-and-profile-path', /Native connection unavailable\. Reconnect/],
@@ -111,7 +111,7 @@ test('a host replaced during a session disables the app until an explicit reconn
   await page.getByRole('button', { name: 'Chats', exact: true }).click();
   await page.evaluate(() => { globalThis.answeringHost = 'replacement'; });
   await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: /different AgentUI host.*Reconnect/ }).waitFor();
+  await page.getByRole('alert').filter({ hasText: /different OpenPane host.*Reconnect/ }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'New conversation', exact: true }).isDisabled(), true);
   assert.deepEqual(await page.evaluate(() => globalThis.nativeCalls.filter(call => call.kind === 'execute' && call.request.op === 'create').map(call => call.request.scope.hostId)), ['host']);
   assert.equal(await draft(), true);

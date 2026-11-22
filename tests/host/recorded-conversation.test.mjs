@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { canonicalJson, DEFAULT_MAX_COMMAND_BYTES, foldDocument } from '@agentui/contracts';
-import { conversationPreview, parseTranscript, parseTranscriptEvent, transcriptProjection } from '@agentui/contracts/conversation';
-import { createConversationStore } from '@agentui/client';
-import { openRecordedHost, recordedInstallation } from '@agentui/host/recorded';
+import { canonicalJson, DEFAULT_MAX_COMMAND_BYTES, foldDocument } from '@openpane/contracts';
+import { conversationPreview, parseTranscript, parseTranscriptEvent, transcriptProjection } from '@openpane/contracts/conversation';
+import { createConversationStore } from '@openpane/client';
+import { openRecordedHost, recordedInstallation } from '@openpane/host/recorded';
 
 const scope = { hostId: 'recorded-host', conversationId: 'recorded-conversation' };
 const command = (id, body = { kind: 'send', text: 'Please start the recorded run.' }) =>
@@ -23,7 +23,7 @@ async function until(predicate) {
   }
 }
 function harness(t, progressMs = 15) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-recorded-app-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-recorded-app-'));
   const options = { path: join(directory, 'host.sqlite'), backendPath: join(directory, 'recorded.jsonl'),
     hostId: scope.hostId, progressMs };
   const hosts = [], clients = [], feeds = [];
@@ -204,7 +204,7 @@ for (const [label, unit] of [['ASCII', 'x'], ['multibyte', '🙂'], ['escaped', 
 test('a killed recorded process recovers final evidence with the original command ID', { timeout: 10_000 }, async t => {
   const f = harness(t);
   writeFileSync(f.options.backendPath, '');
-  const source = `import { openRecordedHost, recordedInstallation } from '@agentui/host/recorded';
+  const source = `import { openRecordedHost, recordedInstallation } from '@openpane/host/recorded';
     const host = openRecordedHost(${JSON.stringify({ ...f.options, progressMs: 60_000 })});
     host.createConversation(${JSON.stringify(scope)}, recordedInstallation);
     await host.conversation(${JSON.stringify(scope)}).submit(${JSON.stringify(command('crash'))});`;

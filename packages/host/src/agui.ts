@@ -1,1 +1,1 @@
-export { createAguiProjection, describeProjection, aguiProtocol } from '@mattsp1290/switchboard/agui';
+export { createAguiProjection, describeProjection, aguiProtocol } from '@operatorworks/switchboard/agui';

@@ -4,7 +4,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { assertSupportedNode } from '@agentui/host/customization';
+import { assertSupportedNode } from '@openpane/host/customization';
 import { classifyHostSpecifier, serverCustomizationAbi } from '../../../scripts/server-customization-abi.mjs';
 import { serverCatalogLinkage } from '../../../scripts/server-catalog-loader.mjs';
 import { locked, tarball } from './preparation-support.mjs';
@@ -18,7 +18,7 @@ async function dependencies(f, definitions) {
     packages[`node_modules/${name}`] = entry;
   }
   const root = { name: 'fixture', version: '1.0.0', dependencies };
-  await write(f.repo.directory, 'package.json', { ...root, type: 'module', packageManager: 'npm@11.19.1', agentui: extension('fixture') });
+  await write(f.repo.directory, 'package.json', { ...root, type: 'module', packageManager: 'npm@11.19.1', openpane: extension('fixture') });
   await write(f.repo.directory, 'package-lock.json', { name: root.name, version: root.version, lockfileVersion: 3, packages: { '': root, ...packages } });
 }
 
@@ -67,7 +67,7 @@ test('rejects explicit runtime loaders with lazy locked lookups and preserves pr
 for (const [entry, transitive] of [['mts', 'cts'], ['cts', 'mts']]) {
   test(`publishes typed .${entry} entries with transitive .${transitive} sources`, async t => {
     const f = await setup(t);
-    await write(f.repo.directory, 'package.json', { type: 'module', agentui: extension('fixture', { sources: { './server.mjs': `./entry.${entry}` } }) });
+    await write(f.repo.directory, 'package.json', { type: 'module', openpane: extension('fixture', { sources: { './server.mjs': `./entry.${entry}` } }) });
     await write(f.repo.directory, `entry.${entry}`, `import {value} from './helper.${transitive}'; const typed: number=value;
       ${validSource.replace('return {dispose(){}}', 'return {value:typed,dispose(){}}')}`);
     await write(f.repo.directory, `helper.${transitive}`, 'export const value: number=42;');
@@ -150,8 +150,8 @@ test('uses the same host specifier policy in real catalog hooks', async t => {
   const f = await setup(t, `import {basename} from 'node:path'; ${validSource.replace('return {dispose(){}}', "return {value:basename('/fixture/allowed'),dispose(){}}")}`);
   const built = await f.build();
   const abi = await serverCustomizationAbi();
-  for (const [specifier, kind] of [['@agentui/sdk', 'sdk'], ['fs', 'builtin'], ['node:path', 'builtin'],
-    ['module', 'forbidden'], ['node:module', 'forbidden'], ['@agentui/contracts', 'package'], ['node:unknown', 'package'], ['ordinary', 'package']]) {
+  for (const [specifier, kind] of [['@openpane/sdk', 'sdk'], ['fs', 'builtin'], ['node:path', 'builtin'],
+    ['module', 'forbidden'], ['node:module', 'forbidden'], ['@openpane/contracts', 'package'], ['node:unknown', 'package'], ['ordinary', 'package']]) {
     assert.equal(classifyHostSpecifier(abi.imports, specifier), kind);
   }
   await write(f.root, 'outside.mjs', 'throw new Error("must not execute");');

@@ -30,7 +30,7 @@ test('synthetic CLI receives unchanged reference, fixed launch cwd, fixed argv a
   try { assert.equal((await task).kind, 'receipt'); } finally { process.chdir(cwd); }
   const record = await cleaned(f);
   assert.equal(record.cwd, cwd); assert.deepEqual(record.reference, input.reference);
-  assert.deepEqual(Object.keys(record.env).filter(key => key !== '__CF_USER_TEXT_ENCODING').sort(), ['AGENTUI_REFRESH_SOURCE', 'AGENTUI_REFRESH_WAIT_MS', 'LANG']);
+  assert.deepEqual(Object.keys(record.env).filter(key => key !== '__CF_USER_TEXT_ENCODING').sort(), ['LANG', 'OPENPANE_REFRESH_SOURCE', 'OPENPANE_REFRESH_WAIT_MS']);
   assert.equal(record.args[0], 'extensions-refresh-request');
   assert.equal(record.args.includes('--expected-revision'), true);
 });
@@ -98,9 +98,9 @@ for (const mode of ['spawn-failure', 'guard-startup-failure', 'stream-error']) t
   const f = await fixture(t, `setInterval(()=>{},1000);`), actual = childProcess.spawn;
   let source;
   const mock = t.mock.method(childProcess, 'spawn', (executable, args, options) => {
-    source = options.env.AGENTUI_REFRESH_SOURCE;
-    const child = actual(mode === 'spawn-failure' ? '/nonexistent-agentui-test-node' : executable,
-      mode === 'guard-startup-failure' ? ['--import', '/nonexistent-agentui-test-guard', ...args.slice(2)] : args, options);
+    source = options.env.OPENPANE_REFRESH_SOURCE;
+    const child = actual(mode === 'spawn-failure' ? '/nonexistent-openpane-test-node' : executable,
+      mode === 'guard-startup-failure' ? ['--import', '/nonexistent-openpane-test-guard', ...args.slice(2)] : args, options);
     if (mode === 'stream-error') child.once('spawn', () => child.stdout.emit('error', new Error('injected stream failure')));
     return child;
   });

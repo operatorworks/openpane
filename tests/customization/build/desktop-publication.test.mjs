@@ -44,7 +44,7 @@ fs.readFileSync=function(path,...options){
   return bytes;
 };
 syncBuiltinESMExports();`);
-  f.write('desktop/index.tsx', `import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+  f.write('desktop/index.tsx', `import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 export default {kind:'desktop',sdkVersion:EXTENSION_SDK_VERSION,activate(){return {modules:[],dispose(){}}}};`);
   const out = join(f.directory, 'rejected');
   const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, join(root, 'scripts/build-local-customization.mjs'),

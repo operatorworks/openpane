@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { ConversationScope, Feed, FeedEnd, FeedItem } from '@agentui/contracts';
-import type { Transcript, TranscriptEvent } from '@agentui/contracts/conversation';
-import type { ServicePull } from '@agentui/contracts/service';
-import { ServiceError } from '@agentui/contracts/service';
+import type { ConversationScope, Feed, FeedEnd, FeedItem } from '@openpane/contracts';
+import type { Transcript, TranscriptEvent } from '@openpane/contracts/conversation';
+import type { ServicePull } from '@openpane/contracts/service';
+import { ServiceError } from '@openpane/contracts/service';
 
 type Page = Extract<ServicePull, { kind: 'page' }>;
 export class ServiceFeed {

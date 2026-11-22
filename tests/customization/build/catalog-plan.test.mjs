@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { desktopCustomizationIdentity, planCustomizationCatalog, planServerCatalog, serverCatalog } from '@agentui/host/customization';
+import { desktopCustomizationIdentity, planCustomizationCatalog, planServerCatalog, serverCatalog } from '@openpane/host/customization';
 import { desktopPlan } from '../../../scripts/local-customization.mjs';
 
 function node(identity, extensions = [], kinds = ['desktop', 'server']) {

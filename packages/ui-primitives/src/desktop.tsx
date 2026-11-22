@@ -1,6 +1,6 @@
 import { useCallback, useId, useSyncExternalStore, type HTMLAttributes, type ButtonHTMLAttributes, type InputHTMLAttributes } from 'react';
-import { buttonTones, textVariantColor, control, type ButtonTone, type TextVariant, type Theme } from '@agentui/theme';
-import { ThemeProvider, useProvidedTheme, useTheme, type ThemeProviderProps } from '@agentui/theme/react';
+import { buttonTones, textVariantColor, control, type ButtonTone, type TextVariant, type Theme } from '@openpane/theme';
+import { ThemeProvider, useProvidedTheme, useTheme, type ThemeProviderProps } from '@openpane/theme/react';
 
 function colorVariable(role: string): `--aui-color-${string}` {
   return `--aui-color-${role.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;

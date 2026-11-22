@@ -1,4 +1,4 @@
-import type { Transcript } from '@agentui/contracts/conversation';
+import type { Transcript } from '@openpane/contracts/conversation';
 import { activityStatus } from './activity-status.js';
 
 export function FileActivity({ transcript, connected, paused = false }: { readonly transcript: Transcript; readonly connected: boolean; readonly paused?: boolean }) {

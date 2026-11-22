@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from 'node:path';
-import { count, hex, identifier, record } from '@agentui/contracts/decode';
-import type { ServerExtensionFailure, ServerExtensionReplacement } from '@agentui/host/extensions';
+import { count, hex, identifier, record } from '@openpane/contracts/decode';
+import type { ServerExtensionFailure, ServerExtensionReplacement } from '@openpane/host/extensions';
 
 import type { ArtifactPin } from './provider-extensions.js';
 

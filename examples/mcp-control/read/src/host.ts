@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { identifier } from '@agentui/contracts/decode';
+import { identifier } from '@openpane/contracts/decode';
 
 export class ReadError extends Error {}
 export const idSchema = z.string().refine(value => {

@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { canonicalJson, HOST_DEFAULT_SNAPSHOT_BYTES } from '@agentui/contracts';
-import { transcriptProjection } from '@agentui/contracts/conversation';
-import { openLocalHost } from '@agentui/host';
+import { canonicalJson, HOST_DEFAULT_SNAPSHOT_BYTES } from '@openpane/contracts';
+import { transcriptProjection } from '@openpane/contracts/conversation';
+import { openLocalHost } from '@openpane/host';
 import { recoverProviderConversations, PROVIDER_RECOVERY } from '../../apps/host/build/tsc/provider-recovery.js';
 
 const scope = { hostId: 'restart-host', conversationId: 'conversation' };
@@ -21,7 +21,7 @@ const message = (messageId, text, complete = false) =>
   ({ kind: 'message-updated', messageId, revision: 1, role: 'assistant', text, complete });
 
 function fixture(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-codex-recovery-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-codex-recovery-'));
   const path = join(directory, 'host.sqlite'), hosts = [], dispatches = [];
   const driver = {
     source: 'recorded', installation, capability: () => ({ kind: 'supported' }),
@@ -63,7 +63,7 @@ for (const answered of [false, true]) {
     assert.equal(sent.receipt.state.kind, 'completed');
     const text = `Preserve this exact partial response.\n${'x'.repeat(63_000)}`;
     const run = { identity: { conversation: scope, runId: 'old-run', authority: {
-      kind: 'agentui-host', hostId: scope.hostId, binding: { namespace: 'codex-app-server',
+      kind: 'openpane-host', hostId: scope.hostId, binding: { namespace: 'codex-app-server',
         installationId: installation.installationId, opaqueSessionId: 'private-thread-binding' },
     } }, reference: { kind: 'session', formatVersion: 1, binding: installation.binding, opaque: 'private-thread-binding' } };
     original.append(scope, { events: [message('partial', text)], runs: [run], decisions: [{
@@ -166,7 +166,7 @@ for (const activeRun of [false, true]) {
     assert.deepEqual(recovered.document.domain.messages.at(-1), { ...last, revision: 2, complete: true });
     assert.equal(recovered.document.domain.messages.length, 64);
     assert.equal(warnings.length, 1);
-    assert.equal(warnings[0].options.code, 'AGENTUI_CODEX_RECOVERY_CAPACITY');
+    assert.equal(warnings[0].options.code, 'OPENPANE_CODEX_RECOVERY_CAPACITY');
     assert.deepEqual(recovered.document.domain.currentRun, activeRun ? { kind: 'running', runId: 'full-run' } : null);
     const other = reopened.inspect(fresh).snapshot.document.domain.messages;
     assert.equal(other[0].complete, true);

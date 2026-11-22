@@ -12,7 +12,7 @@ import { activityProvider } from './selective-activity-provider.mjs';
 import { png } from '../host/image-fixtures.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const audit = mkdtempSync(join(tmpdir(), 'agentui-activity-evidence-'));
+const audit = mkdtempSync(join(tmpdir(), 'openpane-activity-evidence-'));
 const selected = page => page.getByRole('region', { name: 'Committed activity', exact: true });
 const domain = async page => JSON.parse(await selected(page).locator('pre').textContent());
 const command = (revision = 1, status = { kind: 'running' }) => ({ kind: 'command-updated', activity: {
@@ -31,12 +31,12 @@ async function committed() {
   artifactDirectories.push(custom.directory);
   artifactDirectories.push(child.directory);
   const childManifest = JSON.parse(readFileSync(join(child.repo, 'package.json'), 'utf8'));
-  childManifest.agentui.extension.namespace = 'activity-companion';
+  childManifest.openpane.extension.namespace = 'activity-companion';
   child.write('package.json', JSON.stringify(childManifest));
   child.write('desktop/index.tsx', readFileSync(join(root, 'tests/application/fixtures/activity-companion.tsx'), 'utf8'));
   const childCommit = child.commit();
   const rootManifest = JSON.parse(readFileSync(join(custom.repo, 'package.json'), 'utf8'));
-  rootManifest.agentui.extensions = [{ repository: child.repo, commit: childCommit }];
+  rootManifest.openpane.extensions = [{ repository: child.repo, commit: childCommit }];
   custom.write('package.json', JSON.stringify(rootManifest));
   const source = readFileSync(join(root, 'tests/application/fixtures/selective-activity.tsx'), 'utf8');
   custom.write('desktop/index.tsx', source);
@@ -58,7 +58,7 @@ async function committed() {
   return retainedArtifact;
 }
 async function surface(t, assets, startup, extensions = []) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-activity-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-activity-'));
   let host, browser;
   t.after(async () => {
     const results = await Promise.allSettled([browser?.close(), host?.close()]);
@@ -184,7 +184,7 @@ test('committed selective activity consumes a real generic feed and preserves na
 
 test('the same committed activity artifact retains a decoded native image beside Codex command and file notifications', { timeout: 90_000 }, async t => {
   const artifact = await committed(t);
-  const temporary = mkdtempSync(join(tmpdir(), 'agentui-activity-codex-'));
+  const temporary = mkdtempSync(join(tmpdir(), 'openpane-activity-codex-'));
   t.after(() => rmSync(temporary, { recursive: true, force: true }));
   const log = join(temporary, 'codex.jsonl'), implementation = join(temporary, 'fixture.mjs'), executable = join(temporary, 'codex');
   const fixture = readFileSync(join(root, 'tests/host/fixtures/codex-agent.mjs'), 'utf8')

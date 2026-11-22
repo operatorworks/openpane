@@ -8,10 +8,10 @@ import { extensionFixture, wait } from '../../../tests/application/browser-suppo
 import { crewService } from './support/crew-service.mjs';
 
 const directory = fileURLToPath(new URL('../', import.meta.url));
-const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).agentui.extension;
+const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).openpane.extension;
 const token = 'PRIVATE_CREW_BROWSER_TOKEN_19';
 const instance = { namespace: 'crew', installationId: 'personal', generation: '1', protocolVersion: '1' };
-const shots = process.env.AGENTUI_SCREENSHOT_DIRECTORY;
+const shots = process.env.OPENPANE_SCREENSHOT_DIRECTORY;
 
 async function open(t, { configured = true, colorScheme = 'light', operationDeadlineMs } = {}) {
   const first = randomUUID(), second = randomUUID();
@@ -390,8 +390,8 @@ test('without a Crew installation the workspace shows setup guidance and calls n
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Not configured', 'Crew not configured');
   await f.page.getByRole('button', { name: 'Open Crew' }).click();
   const setup = f.page.getByRole('region', { name: 'Crew setup' });
-  await setup.getByText('AGENTUI_EXTENSION_CREW_TOKEN').waitFor();
-  await setup.getByText('~/.local/share/agentui/extensions.json').waitFor();
+  await setup.getByText('OPENPANE_EXTENSION_CREW_TOKEN').waitFor();
+  await setup.getByText('~/.local/share/openpane/extensions.json').waitFor();
   assert.equal(await setup.locator('input').count(), 0, 'no token entry field');
   assert.deepEqual(f.requests.filter(url => !url.startsWith(f.host.origin)), []);
   assert.deepEqual(f.violations, []);

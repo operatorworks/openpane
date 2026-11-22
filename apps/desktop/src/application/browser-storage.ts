@@ -1,7 +1,7 @@
-import type { ConversationScope } from '@agentui/contracts';
-import { parseScope } from '@agentui/contracts';
-import { identifier, record } from '@agentui/contracts/decode';
-import type { DraftStoragePort } from '@agentui/client';
+import type { ConversationScope } from '@openpane/contracts';
+import { parseScope } from '@openpane/contracts';
+import { identifier, record } from '@openpane/contracts/decode';
+import type { DraftStoragePort } from '@openpane/client';
 
 import type { OwnedViewStorage, SavedView, ViewStorageFactory } from './view-state.js';
 
@@ -28,7 +28,7 @@ function decodeView(value: unknown, hostId: string): SavedView {
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     let blocked = false;
-    const request = indexedDB.open('agentui-browser-views', 1);
+    const request = indexedDB.open('openpane-browser-views', 1);
     request.onupgradeneeded = () => request.result.createObjectStore('records');
     request.onsuccess = () => { if (blocked) request.result.close(); else resolve(request.result); };
     request.onerror = () => reject(request.error);
@@ -40,7 +40,7 @@ async function claim(viewId: string, waitForPreviousDocument = false): Promise<(
   return new Promise((resolve, reject) => {
     const controller = new AbortController();
     const timer = waitForPreviousDocument ? setTimeout(() => controller.abort(), 1500) : undefined;
-    void navigator.locks.request(`agentui-view:${viewId}`, waitForPreviousDocument ? { signal: controller.signal } : { ifAvailable: true }, lock => {
+    void navigator.locks.request(`openpane-view:${viewId}`, waitForPreviousDocument ? { signal: controller.signal } : { ifAvailable: true }, lock => {
       clearTimeout(timer);
       if (!lock) { resolve(null); return; }
       return new Promise<void>(release => resolve(release));
@@ -73,7 +73,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
 
   static async open(onFailure: (error: unknown) => void): Promise<BrowserViewStorage> {
     if (!globalThis.indexedDB || !navigator.locks) throw new Error('This browser cannot safely save an exclusive view. IndexedDB and Web Locks are required.');
-    const inherited = sessionStorage.getItem('agentui.viewId');
+    const inherited = sessionStorage.getItem('openpane.viewId');
     let viewId = inherited ?? crypto.randomUUID();
     let release = await claim(viewId, inherited !== null);
     if (!release) {
@@ -82,7 +82,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
     }
     if (!release) throw new Error('Could not acquire an exclusive view. Reload the app.');
     try {
-      sessionStorage.setItem('agentui.viewId', viewId);
+      sessionStorage.setItem('openpane.viewId', viewId);
       return new BrowserViewStorage(viewId, await openDatabase(), release, onFailure);
     } catch (error) { release(); throw error; }
   }
@@ -100,7 +100,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
 
   select(): void {
     if (this.closing) throw new Error('This view no longer owns local storage.');
-    sessionStorage.setItem('agentui.viewId', this.viewId);
+    sessionStorage.setItem('openpane.viewId', this.viewId);
   }
 
   async savedViews(hostId: string, after: string | null = null): ReturnType<OwnedViewStorage['savedViews']> {

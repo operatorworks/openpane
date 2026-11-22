@@ -7,7 +7,7 @@ const base = { view: null, action: null, error: '', stalled: false, arrived: nul
 const closed = successor => ({ ...base, view: { predecessor: null, carried: null, closure: 'cancelled', successor } });
 const carried = { carriedTurns: 2, omittedTurns: 0, uncertainTurns: 3, carriedBytes: 2048, limitBytes: 65536 };
 const NO_CARRY = 'Tools, approvals and the agent’s memory did not carry over.';
-const GIVE_UP = { status: 'AgentUI could not confirm this continuation yet.', disclosure: false, choices: ['Check again', 'Start a new chat'] };
+const GIVE_UP = { status: 'OpenPane could not confirm this continuation yet.', disclosure: false, choices: ['Check again', 'Start a new chat'] };
 
 test('the boundary names each closure, inflects its counts and drops zero-count sentences', () => {
   assert.equal(boundaryNote({ closure: 'failed', carried }),
@@ -28,7 +28,7 @@ test('each closed-chat state shows its own line and choices', () => {
   for (const value of [{ ...closed(null), action: 'start' }, { ...closed(null), action: 'move' }, closed({ kind: 'starting' }), closed({ kind: 'confirmed', scope })]) {
     assert.deepEqual(continuationNotice(value), { status: 'Continuing…', disclosure: false, choices: [] });
   }
-  assert.deepEqual(continuationNotice(closed({ kind: 'pending' })), { status: 'The provider saved the continuation but has not delivered the carried context. AgentUI will not send it again.',
+  assert.deepEqual(continuationNotice(closed({ kind: 'pending' })), { status: 'The provider saved the continuation but has not delivered the carried context. OpenPane will not send it again.',
     disclosure: false, choices: ['Check again', 'Start a new chat'] });
   assert.deepEqual(continuationNotice(closed({ kind: 'unconfirmed' })), { status: 'Continue is not confirmed. Checking again cannot start a second conversation.',
     disclosure: false, choices: ['Check again', 'Try again'] });
@@ -36,7 +36,7 @@ test('each closed-chat state shows its own line and choices', () => {
     busy: ['The provider is still finishing work here.', ['Try again']],
     limit: ['The agent is over a provider limit.', ['Try again', 'Start a new chat']],
     unavailable: ['The provider could not carry context.', ['Start a new chat']],
-    'continued-elsewhere': ['This conversation was continued outside AgentUI.', ['Start a new chat']],
+    'continued-elsewhere': ['This conversation was continued outside OpenPane.', ['Start a new chat']],
   };
   for (const [refusal, [status, choices]] of Object.entries(refusals)) {
     assert.deepEqual(continuationNotice(closed({ kind: 'refused', refusal })), { status, disclosure: false, choices }, refusal);
@@ -55,7 +55,7 @@ test('the persistent region announces state lines on a closed chat and the bound
   assert.equal(continuationAnnouncement(closed(null), true), '');
   assert.equal(continuationAnnouncement({ ...closed(null), action: 'start' }, true), 'Continuing…');
   assert.equal(continuationAnnouncement(closed({ kind: 'refused', refusal: 'limit' }), true), 'The agent is over a provider limit.');
-  assert.equal(continuationAnnouncement({ ...base, stalled: true }, true), 'AgentUI could not confirm this continuation yet.');
+  assert.equal(continuationAnnouncement({ ...base, stalled: true }, true), 'OpenPane could not confirm this continuation yet.');
   assert.equal(continuationAnnouncement({ ...base, stalled: true }, false), '');
   const boundary = { closure: 'cancelled', carried: null };
   assert.equal(continuationAnnouncement({ ...base, arrived: 'continue', boundary }, false),

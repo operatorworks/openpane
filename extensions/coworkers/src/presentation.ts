@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { canonicalJson } from '@agentui/contracts';
-import type { RunOutcome, Transcript, TranscriptMessage } from '@agentui/contracts/conversation';
-import type { ProviderInstance, ProviderModel, ProviderPresentation } from '@agentui/sdk';
+import { canonicalJson } from '@openpane/contracts';
+import type { RunOutcome, Transcript, TranscriptMessage } from '@openpane/contracts/conversation';
+import type { ProviderInstance, ProviderModel, ProviderPresentation } from '@openpane/sdk';
 import { requestStatusSchema, TERMINAL_STATUSES } from './client.js';
 import type { RequestStatus } from './client.js';
 
@@ -21,7 +21,7 @@ const id = z.string().min(1).max(1024);
 const instanceSchema = z.strictObject({ namespace: id, installationId: id, generation: id, protocolVersion: id });
 const scopeSchema = z.strictObject({ hostId: id, conversationId: id });
 const sessionSchema = z.strictObject({ namespace: id, installationId: id, opaqueSessionId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u) });
-export const bindingSchema = z.strictObject({ kind: z.literal('agentui-created'),
+export const bindingSchema = z.strictObject({ kind: z.literal('openpane-created'),
   creation: z.strictObject({ kind: z.literal('create'), operationId: id, scope: scopeSchema,
     agent: z.strictObject({ instance: instanceSchema, kind: z.literal('agent'), opaqueId: z.string().max(64).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/u) }) }),
   authority: z.strictObject({ kind: z.literal('remote-provider'), binding: sessionSchema }) });

@@ -101,17 +101,17 @@ Facts verified in this repository at `e5db45f`:
 
 - The platform already covers more than theming. `packages/sdk/src/extensions.ts` defines `ExtensionManifest` with entry kinds `server`, `desktop` and `ios`. A server entry contributes providers through `ProviderContributions.add` and `addAgui`. A UI entry (`packages/sdk/src/react.ts`, `UiExtensionEntry`) contributes `modules`, `contentLayout`, `overrides.transcript` and `overrides.activity`.
 - Every UI contribution is scoped to an open conversation. No navigation, view or route contribution exists.
-- A theme is not an extension kind. Extensions import `@agentui/theme/react` and `@agentui/ui-primitives/desktop` and nest `ThemeScope` with `colors` overrides. Only `colors` and `appearance` can be overridden.
+- A theme is not an extension kind. Extensions import `@openpane/theme/react` and `@openpane/ui-primitives/desktop` and nest `ThemeScope` with `colors` overrides. Only `colors` and `appearance` can be overridden.
 - The rail is hard-coded in `apps/desktop/src/shell/BrowserApplication.tsx` with `useState<'chats' | 'settings'>`. `DesktopShell` in `apps/desktop/src/shell/Shell.tsx` takes `activeView?: 'chats' | 'settings'`. There is no router.
 - The client talks to the host with JSON `POST` operations in the closed union `ServiceRequest` (`packages/contracts/src/service.ts`). No operation reaches a server extension except through provider conversations.
 - The Tauri path re-validates every operation in `apps/desktop/src-tauri/src/wire.rs` (`enum Request`, `deny_unknown_fields`, and a scope match). The native transport has a 20-second deadline.
 - A server entry cannot read its installation's service origin today. `ServerExtensionContext` has only `namespace`, `providers` and `credentials`. A provider contribution ID must equal a grant `id` (`apps/host/src/provider-credentials.ts`).
-- `customizationPlugin` in `scripts/local-customization.mjs` rejects contained sources owned by a package whose name starts with `@agentui/`.
+- `customizationPlugin` in `scripts/local-customization.mjs` rejects contained sources owned by a package whose name starts with `@openpane/`.
 - Desktop UI extensions are compiled in. `apps/desktop/src/application/customization-selection.ts` exports an empty array. `scripts/local-customization.mjs` replaces it for external builds.
-- `examples/crew` is a Crew provider, not a UI extension. Its `discover` returns only the one configured member (`examples/crew/src/provider.ts`, `CrewProviderOptions.memberId`). It builds its manifest in code and has no `package.json.agentui.extension`.
+- `examples/crew` is a Crew provider, not a UI extension. Its `discover` returns only the one configured member (`examples/crew/src/provider.ts`, `CrewProviderOptions.memberId`). It builds its manifest in code and has no `package.json.openpane.extension`.
 - `AgentDescriptor` (`packages/contracts/src/service.ts`) has no installation ID and no provider agent ID. `ConversationCatalogEntry` has only `scope` and `preview`. The `conversations` table stores the installation as JSON, has no time column, and is listed in conversation-ID order.
 - `DesktopShell` keeps every view mounted and toggles `hidden`. `ConversationView` holds per-instance draft and guard state and renders an element with a fixed `id`.
-- The launcher (`scripts/agentui-launch.mjs`) starts `node apps/host/dist/main.js desktop …`. `COMMANDS.desktop` in `apps/host/src/main.ts` does not list `extensions`.
+- The launcher (`scripts/openpane-launch.mjs`) starts `node apps/host/dist/main.js desktop …`. `COMMANDS.desktop` in `apps/host/src/main.ts` does not list `extensions`.
 - `tests/extensions/providers/conformance/ledger.mjs` is a non-AG-UI HTTP provider that runs its own loop inside `observe`. It is the template for a polling provider.
 - `SERVICE_WIRE_VERSION = 14` and `EXTENSION_SDK_VERSION = '0.11.0'` live in `packages/contracts/src/compatibility.ts`. About 20 test files and `templates/customization/package.json` pin the SDK version literal.
 
@@ -134,7 +134,7 @@ Facts verified upstream:
 | D7 | Coworkers reply delivery polls inside `observe`, through one scheduler per installation with a request budget. | The upstream AG-UI route is deferred. The host observes every saved conversation, so unbudgeted polling would grow without bound. | Waiting for upstream streaming. |
 | D8 | Crew "update" is replace-then-retire. Crew "delete" is retire. | Crew's recorded design fixes instructions at spawn and forbids deletion. See [07-upstream-requests.md](07-upstream-requests.md). | Requesting mutable instructions or hard delete. |
 | D9 | Styling uses a nested `ThemeScope` plus an extension-owned stylesheet file. | Spacing, radius and typography tokens are fixed, so layout idiom needs CSS. The Tauri CSP forbids inline styles. | Adding new theme token roles: wider change with no second consumer. |
-| D10–D13 | Bundling rule, working-tree server entries, package names outside `@agentui/`, local-host-only bundled server extensions. | See [04-bundled-extensions-and-launch.md](04-bundled-extensions-and-launch.md). | See that file. |
+| D10–D13 | Bundling rule, working-tree server entries, package names outside `@openpane/`, local-host-only bundled server extensions. | See [04-bundled-extensions-and-launch.md](04-bundled-extensions-and-launch.md). | See that file. |
 | D14 | The conversation filter reads the installation stored with each conversation, with no schema change. | Retired, deleted and replaced agents keep their conversations in the workspace. No migration is needed. | Filtering by current agent descriptors: drops those conversations. A new indexed column: a schema change for a single-user data set. |
 
 ## Target architecture
@@ -185,8 +185,8 @@ Before: a UI extension can only decorate an open conversation. After: a UI exten
 
 | Request | Owner | Consumers | Blocks | Unblock evidence |
 |---|---|---|---|---|
-| `$HOME/.agents/projects/crew/requests/2026-11-17-member-management-for-agentui.md` | Matt, Crew | Planned: AgentUI WP9. AgentUI is a demonstrated consumer of Crew's existing routes only. Prospective: Birbforge interface. | WP9 only | Response at `$HOME/.agents/projects/crew/responses/2026-11-17-member-management-for-agentui.md` with accepted items and a 40-character commit; tarball under `vendor/crew-client/<commit>/`. |
-| `$HOME/.agents/projects/crabber-coworkers/requests/2026-11-17-coworker-management-api.md` | Matt, crabber-coworkers | Planned: AgentUI WP10. None demonstrated. | WP10 only | Response at `$HOME/.agents/projects/crabber-coworkers/responses/2026-11-17-coworker-management-api.md` with accepted items, both owner decisions and a 40-character commit. |
+| `$HOME/.agents/projects/crew/requests/2026-11-17-member-management-for-agentui.md` | Matt, Crew | Planned: OpenPane WP9. OpenPane is a demonstrated consumer of Crew's existing routes only. Prospective: Birbforge interface. | WP9 only | Response at `$HOME/.agents/projects/crew/responses/2026-11-17-member-management-for-agentui.md` with accepted items and a 40-character commit; tarball under `vendor/crew-client/<commit>/`. |
+| `$HOME/.agents/projects/crabber-coworkers/requests/2026-11-17-coworker-management-api.md` | Matt, crabber-coworkers | Planned: OpenPane WP10. None demonstrated. | WP10 only | Response at `$HOME/.agents/projects/crabber-coworkers/responses/2026-11-17-coworker-management-api.md` with accepted items, both owner decisions and a 40-character commit. |
 
 Both requests are proposals. Neither is accepted or implemented. No new repository is proposed. The owner of this repository owns both upstream repositories, so the plan includes the upstream work as packages U-Crew and U-Coworkers ([07-upstream-requests.md](07-upstream-requests.md)).
 

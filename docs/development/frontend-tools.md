@@ -1,10 +1,10 @@
 # Frontend tool coordination
 
-`frontendToolsFor(host)` from `@agentui/host/frontend-tools` coordinates frontend calls in the SQLite database of the supplied `openLocalHost` handle. The core `@agentui/host` entry does not load the AG-UI runtime. The explicit subpath uses the handle's existing connection, transactions and live authorization; it does not open a second database connection. Its producer port belongs to trusted provider and host-policy wiring. Its client port belongs to a transport that has already authenticated the executing device. These ports do not authenticate request payloads themselves.
+`frontendToolsFor(host)` from `@openpane/host/frontend-tools` coordinates frontend calls in the SQLite database of the supplied `openLocalHost` handle. The core `@openpane/host` entry does not load the AG-UI runtime. The explicit subpath uses the handle's existing connection, transactions and live authorization; it does not open a second database connection. Its producer port belongs to trusted provider and host-policy wiring. Its client port belongs to a transport that has already authenticated the executing device. These ports do not authenticate request payloads themselves.
 
 ```ts
-import { openLocalHost } from '@agentui/host';
-import { frontendToolsFor } from '@agentui/host/frontend-tools';
+import { openLocalHost } from '@openpane/host';
+import { frontendToolsFor } from '@openpane/host/frontend-tools';
 
 const host = openLocalHost(options);
 const tools = frontendToolsFor(host);
@@ -12,16 +12,16 @@ const producer = tools.producer(scope);
 const client = tools.client(scope, authenticatedActor);
 ```
 
-`options`, `scope` and `authenticatedActor` come from trusted host wiring. Every port operation checks the host's current scope authorization. Closing the host invalidates existing ports. Fabricated or copied handles cannot attach to the coordinator. A trusted producer may register an AgentUI-hosted or remote-provider run; device and provider transports remain separate integrations.
+`options`, `scope` and `authenticatedActor` come from trusted host wiring. Every port operation checks the host's current scope authorization. Closing the host invalidates existing ports. Fabricated or copied handles cannot attach to the coordinator. A trusted producer may register an OpenPane-hosted or remote-provider run; device and provider transports remain separate integrations.
 
 ## Run and activation identity
 
 Each SDK tool activation has a unique `activationId`. A run pin exposes frozen `bindings` with each advertised tool's name and activation identity. `pin.invoke(name, arguments, activationId)` requires the captured identity. Missing or mismatched identities return `activation-mismatch` before a handler runs.
 
-When the actual run is not known yet, `retainFrontendTools` from `@agentui/sdk/tools` captures the original generations synchronously. It exposes frozen `definitions` and `bindings` without an invocation method. Retire or replace those generations after capture, then call `retained.bind(actualRun)` to obtain a pin over the original handlers.
+When the actual run is not known yet, `retainFrontendTools` from `@openpane/sdk/tools` captures the original generations synchronously. It exposes frozen `definitions` and `bindings` without an invocation method. Retire or replace those generations after capture, then call `retained.bind(actualRun)` to obtain a pin over the original handlers.
 
 ```ts
-import { retainFrontendTools } from '@agentui/sdk/tools';
+import { retainFrontendTools } from '@openpane/sdk/tools';
 
 const retained = retainFrontendTools({ generations, platform: 'desktop' });
 try {

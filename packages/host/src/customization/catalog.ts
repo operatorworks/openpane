@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import type { ExtensionManifest } from '@agentui/sdk';
+import type { ExtensionManifest } from '@openpane/sdk';
 import { CustomizationError } from './contract.js';
 import type { CommittedInputs } from './repository.js';
 import type { NpmInputs } from './packages.js';

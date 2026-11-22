@@ -1,5 +1,5 @@
 import { describeAgent } from '../../apps/host/build/tsc/agents.js';
-import { recordedInstallation } from '@agentui/host/recorded';
+import { recordedInstallation } from '@openpane/host/recorded';
 const recordedAgentId = describeAgent(recordedInstallation, { kind: 'ready' }, { kind: 'unsupported', reason: 'Recorded text-only fixture.' }).id;
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -9,9 +9,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
-import { createBrowserConnection } from '@agentui/client/service';
-import { createConversationStore } from '@agentui/client';
-import { transcriptProjection } from '@agentui/contracts/conversation';
+import { createBrowserConnection } from '@openpane/client/service';
+import { createConversationStore } from '@openpane/client';
+import { transcriptProjection } from '@openpane/contracts/conversation';
 import { DatabaseSync } from 'node:sqlite';
 
 const root = new URL('../../', import.meta.url);
@@ -39,7 +39,7 @@ async function stop(process) {
   try { await process.exited; } finally { clearTimeout(timer); }
 }
 async function fixture(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-http-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-http-'));
   const children = [];
   const requests = new Set();
   const f = { directory, origin: '', hostId: '', process: null };

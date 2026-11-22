@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { canonicalJson } from '@agentui/contracts';
-import type { BackendProvider, ConnectedProvider, CreationIntent, ProviderCommand, ProviderPresentation } from '@agentui/sdk';
+import { canonicalJson } from '@openpane/contracts';
+import type { BackendProvider, ConnectedProvider, CreationIntent, ProviderCommand, ProviderPresentation } from '@openpane/sdk';
 import { instance, request } from './model.js';
 import type { ReportModel } from './model.js';
 import { ReportStore } from './store.js';
@@ -11,14 +11,14 @@ export function reportProvider(path: string) {
   async function create(value: CreationIntent<'reports'>, lookup = false) {
     const result = store.settle(value, lookup);
     if (result.kind !== 'confirmed') return result;
-    if (result.value.kind !== 'agentui-created') throw new Error('Invalid report creation');
+    if (result.value.kind !== 'openpane-created') throw new Error('Invalid report creation');
     return { ...result, value: result.value };
   }
   async function submit(value: ProviderCommand<ReportModel, 'reports'>, lookup = false) {
     if (value.kind !== 'send') return unsupported;
     const result = store.settle(value, lookup);
     if (result.kind !== 'confirmed') return result;
-    if (result.value.kind === 'agentui-created') throw new Error('Invalid report settlement');
+    if (result.value.kind === 'openpane-created') throw new Error('Invalid report settlement');
     return { ...result, value: result.value };
   }
   const connected: ConnectedProvider<ReportModel, 'reports'> = {

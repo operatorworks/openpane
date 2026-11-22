@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { createBrowserConnection } from '@agentui/client/service';
+import { createBrowserConnection } from '@openpane/client/service';
 import { BrowserViewStorage } from './browser-storage.js';
 import { createApplicationController } from './application-controller.js';
 import type { ApplicationController, ApplicationSnapshot } from './application-controller.js';

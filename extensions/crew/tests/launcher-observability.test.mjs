@@ -31,7 +31,7 @@ async function fixture(t, collector, settings) {
     if (request.url === '/v1/members') return json({ apiVersion: '1', members: [{ memberId, engine: 'codex', profile: 'private-remote-profile-7f83' }], next: null });
     response.writeHead(404); response.end();
   });
-  const directory = await mkdtemp(join(tmpdir(), 'agentui-crew-launcher-'));
+  const directory = await mkdtemp(join(tmpdir(), 'openpane-crew-launcher-'));
   const hostDirectory = join(directory, 'host'), tokenFile = join(directory, 'private-token');
   const configFile = join(directory, 'crew-provider.json');
   const installationId = 'private-installation-4bac', generation = 'private-generation-d1cb';
@@ -42,7 +42,7 @@ async function fixture(t, collector, settings) {
   const host = launchProcess(t, ['extensions/crew/run.mjs', configFile], environment);
   t.after(() => rm(directory, { recursive: true, force: true }));
   const started = startup(host, line => {
-    const match = /^AgentUI with Crew is ready at (http:\/\/[^/]+)\/browser\.html$/.exec(line);
+    const match = /^OpenPane with Crew is ready at (http:\/\/[^/]+)\/browser\.html$/.exec(line);
     return match && { origin: match[1] };
   });
   return { calls, host, started, environment,
@@ -55,7 +55,7 @@ test('Crew launcher exports bounded request spans and keeps collector credential
   const traceId = '11111111111111111111111111111111', parentId = '2222222222222222';
   const collector = await receiver(t);
   const f = await fixture(t, collector, { OTEL_TRACES_EXPORTER: 'otlp', OTEL_EXPORTER_OTLP_PROTOCOL: 'http/json',
-    OTEL_SERVICE_NAME: 'agentui-crew-launcher-test', OTEL_RESOURCE_ATTRIBUTES: `private.resource=${resourceCanary}`,
+    OTEL_SERVICE_NAME: 'openpane-crew-launcher-test', OTEL_RESOURCE_ATTRIBUTES: `private.resource=${resourceCanary}`,
     OTEL_EXPORTER_OTLP_HEADERS: 'x-collector-token=general,x-general-token=general%20token',
     OTEL_EXPORTER_OTLP_TRACES_HEADERS: 'x-collector-token=private%20collector%3Dtoken' });
   const ready = await f.started;
@@ -71,10 +71,10 @@ test('Crew launcher exports bounded request spans and keeps collector credential
   f.host.process.kill('SIGTERM');
   await exitWithin(f.host);
   assertBoundedRequestSpans(collector.received, {
-    serviceName: 'agentui-crew-launcher-test',
+    serviceName: 'openpane-crew-launcher-test',
     collectorHeaders: { 'x-collector-token': 'private collector=token', 'x-general-token': 'general token' },
-    expected: ['metadata', 'search'].map(operation => ({ 'agentui.operation': operation,
-      'agentui.credential_class': 'browser-development', 'agentui.outcome': 'ok', 'http.response.status_code': 200 })),
+    expected: ['metadata', 'search'].map(operation => ({ 'openpane.operation': operation,
+      'openpane.credential_class': 'browser-development', 'openpane.outcome': 'ok', 'http.response.status_code': 200 })),
     canaries: [...f.secrets, metadata.body.value.hostId, metadata.body.value.principalId, privateSearch, privateHeader, resourceCanary,
       traceId, parentId, 'private collector=token', 'general token'],
   });

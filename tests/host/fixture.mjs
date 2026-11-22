@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openLocalHost, createRecordedDriver } from '@agentui/host';
+import { openLocalHost, createRecordedDriver } from '@openpane/host';
 
 export const scope = { hostId: 'host-a', conversationId: 'conversation-a' };
 export const other = { hostId: 'host-a', conversationId: 'conversation-b' };
@@ -31,7 +31,7 @@ export const completed = output => ({ kind: 'completed', output });
 export const command = (id, body = { kind: 'send', text: 'hello' }, conversation = scope) =>
   ({ version: 1, scope: conversation, clientCommandId: id, body });
 export function fixture(t, overrides = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'agentui-host-'));
+  const dir = mkdtempSync(join(tmpdir(), 'openpane-host-'));
   const path = join(dir, 'host.sqlite'), backendPath = join(dir, 'recorded.jsonl');
   const driver = createRecordedDriver({ installation: installed, backendPath, decodeEvent: projection.decodeEvent, resolve: async cmd => completed(note(cmd.body.kind)), ...overrides });
   const hosts = [];
@@ -44,7 +44,7 @@ export function fixture(t, overrides = {}) {
   return { dir, path, backendPath, driver, open };
 }
 export function run(conversation = scope, runId = 'run-a') {
-  return { identity: { conversation, runId, authority: { kind: 'agentui-host', hostId: conversation.hostId,
+  return { identity: { conversation, runId, authority: { kind: 'openpane-host', hostId: conversation.hostId,
     binding: { namespace: 'recorded', installationId: installed.installationId, opaqueSessionId: 'private-session-secret' } } },
   reference: { kind: 'session', formatVersion: 1, binding: installed.binding, opaque: 'private-session-secret' } };
 }

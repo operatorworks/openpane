@@ -1,8 +1,8 @@
 import { rmdirSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-const waitMs = Number(process.env.AGENTUI_REFRESH_WAIT_MS);
-const source = process.env.AGENTUI_REFRESH_SOURCE;
+const waitMs = Number(process.env.OPENPANE_REFRESH_WAIT_MS);
+const source = process.env.OPENPANE_REFRESH_SOURCE;
 function removeSource(): void {
   if (!source) return;
   for (const remove of [() => unlinkSync(source), () => rmdirSync(dirname(source))]) {

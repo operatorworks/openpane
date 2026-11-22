@@ -87,7 +87,7 @@ export class RefreshSession {
     try {
       signal.throwIfAborted();
       if (input.kind === 'request') {
-        directory = await mkdtemp(join(tmpdir(), 'agentui-mcp-refresh-'));
+        directory = await mkdtemp(join(tmpdir(), 'openpane-mcp-refresh-'));
         signal.throwIfAborted();
         source = join(directory, 'source.json');
         await writeFile(source, JSON.stringify(input.reference), { flag: 'wx', mode: 0o600 });
@@ -97,8 +97,8 @@ export class RefreshSession {
         `extensions-refresh-${input.kind}`, '--data-dir', this.startup.hostDirectory, '--request', input.id];
       if (input.kind === 'request' && source) args.push('--source', source, '--expected-revision', String(input.expectedSelectionRevision));
       const child = spawn(this.startup.executable, args, { cwd: this.startup.invocationDirectory, detached: true,
-        stdio: ['pipe', 'pipe', 'pipe'], env: { LANG: 'C', AGENTUI_REFRESH_WAIT_MS: String(this.startup.waitMs),
-          ...(source ? { AGENTUI_REFRESH_SOURCE: source } : {}) } });
+        stdio: ['pipe', 'pipe', 'pipe'], env: { LANG: 'C', OPENPANE_REFRESH_WAIT_MS: String(this.startup.waitMs),
+          ...(source ? { OPENPANE_REFRESH_SOURCE: source } : {}) } });
       cleanupAllowed = false;
       this.children.add(child);
       const collected = await this.collect(child, signal);

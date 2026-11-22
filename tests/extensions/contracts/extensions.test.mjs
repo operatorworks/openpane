@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createElement, forwardRef, lazy, memo } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ThemeScope } from '@agentui/ui-primitives/desktop';
-import { EXTENSION_SDK_VERSION, checkExtensionEntrypoint, parseExtensionManifest, validateExtensionLifetime } from '@agentui/sdk';
-import { validateConversationModules, validateUiExtensionContributions } from '@agentui/sdk/react';
+import { ThemeScope } from '@openpane/ui-primitives/desktop';
+import { EXTENSION_SDK_VERSION, checkExtensionEntrypoint, parseExtensionManifest, validateExtensionLifetime } from '@openpane/sdk';
+import { validateConversationModules, validateUiExtensionContributions } from '@openpane/sdk/react';
 import { callableEntry, createNotesFixture, manifest, ServerEntry, textTool, UiEntry } from './fixture.ts';
 import { crew, crewPresentation } from '../providers/contracts/crew.ts';
 
@@ -175,7 +175,7 @@ test('transcript slot validates known override shapes and shares module componen
 });
 
 test('operation registration rejects invalid, duplicate and late ids and fails the activation', async () => {
-  const { createProviderRegistry } = await import('@agentui/host');
+  const { createProviderRegistry } = await import('@openpane/host');
   const authority = { credentials: {}, issue: () => ({ credential: null, expectedAuthority: 'remote-provider', assertAuthorized() {} }), async close() {} };
   const operation = { async run() { return { kind: 'ok', output: null }; } };
   const activateWith = async body => {

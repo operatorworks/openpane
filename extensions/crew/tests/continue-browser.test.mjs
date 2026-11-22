@@ -169,7 +169,7 @@ test('each Crew refusal shows its own text and buttons; Try again and Start a ne
     ['busy', { status: 409, code: 'busy' }, 'The provider is still finishing work here.', ['Try again']],
     ['limit', { status: 409, code: 'usage_limit' }, 'The agent is over a provider limit.', ['Try again', 'Start a new chat']],
     ['unavailable', { status: 409, code: 'handoff_too_large' }, 'The provider could not carry context.', ['Start a new chat']],
-    ['elsewhere', { status: 409, code: 'handed_off' }, 'This conversation was continued outside AgentUI.', ['Start a new chat']],
+    ['elsewhere', { status: 409, code: 'handed_off' }, 'This conversation was continued outside OpenPane.', ['Start a new chat']],
   ];
   const scopes = {};
   for (const [id] of cases) scopes[id] = await closedChat(f, remote, id, `Refused as ${id}`);

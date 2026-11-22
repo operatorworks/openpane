@@ -24,8 +24,8 @@ test('iOS type declarations and native package use the same locked runtime versi
   }
   assert.equal(native.engines.node, read('.node-version').trim());
   assert.equal(`npm@${native.engines.npm}`, json('package.json').packageManager);
-  for (const dependency of ['@agentui/theme', '@agentui/ui-primitives']) {
-    assert.equal(platform.dependencies[dependency], json(`packages/${dependency.slice('@agentui/'.length)}/package.json`).version);
+  for (const dependency of ['@openpane/theme', '@openpane/ui-primitives']) {
+    assert.equal(platform.dependencies[dependency], json(`packages/${dependency.slice('@openpane/'.length)}/package.json`).version);
     assert.equal(json('package-lock.json').packages['apps/ios'].dependencies[dependency], platform.dependencies[dependency]);
   }
   const hermes = lock.packages['node_modules/hermes-compiler'].version;
@@ -36,7 +36,7 @@ test('all iOS entry points reject malformed or extra simulator arguments before 
   const invalidArguments = [[], ['not-a-simulator'], ['g'.repeat(36)], ['-'.repeat(36)],
     ['a'.repeat(35)], ['a'.repeat(37)], [''],
     ['8C8C1971-6462-4016-BE9B-DBBBD9DCB0C6', 'extra']];
-  for (const entry of ['agentui-ios', 'apps/ios/native/run.sh', 'apps/ios/native/verify.sh']) {
+  for (const entry of ['openpane-ios', 'apps/ios/native/run.sh', 'apps/ios/native/verify.sh']) {
     for (const args of invalidArguments) {
       const result = spawnSync('/bin/bash', [entry, ...args], { cwd: root, encoding: 'utf8', timeout: 10000 });
       assert.equal(result.status, 1, `${entry} ${args}: ${result.stderr}`);
@@ -56,7 +56,7 @@ test('simulator UUID parsing accepts either case and returns the canonical upper
 });
 
 test('native build source snapshots track build inputs and ignore unrelated review changes', () => {
-  const fixture = mkdtempSync(join(tmpdir(), 'agentui-ios-source-'));
+  const fixture = mkdtempSync(join(tmpdir(), 'openpane-ios-source-'));
   try {
     mkdirSync(join(fixture, 'apps/ios/native'), { recursive: true });
     mkdirSync(join(fixture, 'reviews'));
@@ -102,18 +102,18 @@ test('native build source snapshots track build inputs and ignore unrelated revi
 });
 
 test('verification preserves completed evidence on failure and records the build receipt', async () => {
-  const fixture = mkdtempSync(join(tmpdir(), 'agentui-ios-verify-'));
+  const fixture = mkdtempSync(join(tmpdir(), 'openpane-ios-verify-'));
   try {
     const native = join(fixture, 'apps/ios/native');
     const work = join(native, '.work');
-    const product = join(work, 'build/Build/Products/Release-iphonesimulator/AgentUI.app');
+    const product = join(work, 'build/Build/Products/Release-iphonesimulator/OpenPane.app');
     const installed = join(fixture, 'installed');
     const bin = join(fixture, 'bin');
     for (const dir of [product, installed, bin, join(work, 'evidence')]) mkdirSync(dir, { recursive: true });
     writeFileSync(join(native, 'verify.sh'), read('apps/ios/native/verify.sh'));
     writeFileSync(join(native, 'run.sh'), read('apps/ios/native/run.sh'));
     writeFileSync(join(native, 'prepare.sh'), read('apps/ios/native/prepare.sh'));
-    writeFileSync(join(native, 'common.sh'), `${read('apps/ios/native/common.sh')}\nios_source_snapshot() { echo snapshot; }\nios_bundle_id() { echo example.app; }\nios_bundle_executable() { echo AgentUI; }\n`);
+    writeFileSync(join(native, 'common.sh'), `${read('apps/ios/native/common.sh')}\nios_source_snapshot() { echo snapshot; }\nios_bundle_id() { echo example.app; }\nios_bundle_executable() { echo OpenPane; }\n`);
     writeFileSync(join(work, 'build-source.txt'), 'snapshot\n');
     writeFileSync(join(work, 'build-simulator.txt'), '8C8C1971-6462-4016-BE9B-DBBBD9DCB0C6\n');
     writeFileSync(join(work, 'build-prepared-inputs.sha256'), 'receipt from build\n');
@@ -121,7 +121,7 @@ test('verification preserves completed evidence on failure and records the build
     writeFileSync(join(work, 'evidence/previous.txt'), 'complete evidence');
     for (const dir of [product, installed]) {
       writeFileSync(join(dir, 'main.jsbundle'), 'bundle');
-      writeFileSync(join(dir, 'AgentUI'), 'native executable');
+      writeFileSync(join(dir, 'OpenPane'), 'native executable');
     }
     const commands = {
       xcrun: `#!/bin/bash\ncase "$*" in\n  *"bootstatus"*) echo "$*" >> "$BOOT_LOG"; [[ "$*" == *' -b' && "\${FAIL_BOOT:-}" != 1 ]] || exit 1; if [[ "\${WAIT_BOOT:-}" == 1 ]]; then touch "$BOOT_READY"; while [[ ! -e "$BOOT_RELEASE" ]]; do /bin/sleep .05; done; fi;;\n  *"list devices"*) echo 8C8C1971-6462-4016-BE9B-DBBBD9DCB0C6;;\n  *get_app_container*) echo "$INSTALLED";;\n  *"simctl launch"*) echo 'example.app: 123';;\n  *"launchctl list"*) echo '123 0 UIKitApplication:example.app[abc]';;\n  *screenshot*) [[ "\${FAIL_SCREENSHOT:-}" != 1 ]] || exit 1; touch "\${@: -1}";;\nesac\n`,
@@ -141,10 +141,10 @@ test('verification preserves completed evidence on failure and records the build
     writeFileSync(join(work, 'build-simulator.txt'), 'AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA\n');
     assert.match(run().stderr, /Run ios:run for this simulator/);
     writeFileSync(join(work, 'build-simulator.txt'), '8C8C1971-6462-4016-BE9B-DBBBD9DCB0C6\n');
-    writeFileSync(join(installed, 'AgentUI'), 'different native executable');
+    writeFileSync(join(installed, 'OpenPane'), 'different native executable');
     assert.match(run().stderr, /Installed native executable differs/);
     assert.equal(readFileSync(join(work, 'evidence/previous.txt'), 'utf8'), 'complete evidence');
-    writeFileSync(join(installed, 'AgentUI'), 'native executable');
+    writeFileSync(join(installed, 'OpenPane'), 'native executable');
     const bootFailure = run({ FAIL_BOOT: '1' });
     assert.notEqual(bootFailure.status, 0);
     assert.match(bootFailure.stderr, /Unable to boot the simulator/);
@@ -190,11 +190,11 @@ test('verification preserves completed evidence on failure and records the build
 });
 
 test('native run freezes the receipt that passed preparation validation', async () => {
-  const fixture = mkdtempSync(join(tmpdir(), 'agentui-ios-build-'));
+  const fixture = mkdtempSync(join(tmpdir(), 'openpane-ios-build-'));
   try {
     const native = join(fixture, 'apps/ios/native');
     const work = join(native, '.work');
-    const product = join(work, 'build/Build/Products/Release-iphonesimulator/AgentUI.app');
+    const product = join(work, 'build/Build/Products/Release-iphonesimulator/OpenPane.app');
     const bin = join(fixture, 'bin');
     for (const dir of [product, bin, join(native, 'ios')]) mkdirSync(dir, { recursive: true });
     writeFileSync(join(native, 'run.sh'), read('apps/ios/native/run.sh'));
@@ -204,7 +204,7 @@ test('native run freezes the receipt that passed preparation validation', async 
     writeFileSync(join(work, 'prepared-inputs.sha256'), receipt);
     const commands = {
       node: '#!/bin/sh\nexit 0\n', xcrun: '#!/bin/sh\nif [ "${FAIL_INSTALL:-}" = 1 ] && [ "$2" = install ]; then exit 1; fi\nexit 0\n',
-      xcodebuild: '#!/bin/sh\nif [ "${WAIT_BUILD:-}" = 1 ]; then touch "$BUILD_READY"; while [ ! -e "$BUILD_RELEASE" ]; do /bin/sleep .05; done; fi\n[ "${CHANGE_RECEIPT:-}" = 1 ] && echo changed > .work/prepared-inputs.sha256\necho bundle > .work/build/Build/Products/Release-iphonesimulator/AgentUI.app/main.jsbundle\n',
+      xcodebuild: '#!/bin/sh\nif [ "${WAIT_BUILD:-}" = 1 ]; then touch "$BUILD_READY"; while [ ! -e "$BUILD_RELEASE" ]; do /bin/sleep .05; done; fi\n[ "${CHANGE_RECEIPT:-}" = 1 ] && echo changed > .work/prepared-inputs.sha256\necho bundle > .work/build/Build/Products/Release-iphonesimulator/OpenPane.app/main.jsbundle\n',
     };
     for (const [name, contents] of Object.entries(commands)) writeFileSync(join(bin, name), contents, { mode: 0o755 });
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };

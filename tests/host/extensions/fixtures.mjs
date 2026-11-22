@@ -5,7 +5,7 @@ import { registerHooks } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
 import { createCrewFixture } from '../../extensions/providers/contracts/crew.ts';
 
 const artifact = new URL('../../../apps/host/build/tsc/artifact.js', import.meta.url).href;
@@ -23,7 +23,7 @@ const fixtures = new Map();
 export const secret = 'PRIVATE_EXTENSION_CREDENTIAL_81';
 export const service = 'http://127.0.0.1:12345';
 export function options(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-server-lifecycle-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-server-lifecycle-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   return { directory, port: 0, assetsDirectory: fileURLToPath(new URL('../../../apps/desktop/web-dist-browser/', import.meta.url)) };
 }
@@ -32,13 +32,13 @@ export function listenerLog() {
   return { emitter, get active() { return emitter.listenerCount('update'); }, maximum: 0, events: [], deliveries: [] };
 }
 export function entry(t, { label = 'entry', namespace = 'example-crew', listeners = listenerLog(), ...hooks } = {}) {
-  const directory = mkdtempSync(join(tmpdir(), 'agentui-server-entry-'));
+  const directory = mkdtempSync(join(tmpdir(), 'openpane-server-entry-'));
   t.after(() => { fixtures.delete(directory); rmSync(directory, { recursive: true, force: true }); });
   const instance = { namespace, installationId: 'crew-personal', generation: label, protocolVersion: 'crew-v2' };
   const { crewBackend, crew, crewPresentation } = createCrewFixture(instance);
   const calls = { import: 0, activate: 0, connect: 0, discover: 0, close: 0, dispose: 0, commands: 0, resolve: 0, creates: [], lookups: [] };
   const fixture = { calls, hooks, listeners, context: null, credential: null, label };
-  fixture.confirmed = operation => ({ kind: 'confirmed', value: { kind: 'agentui-created', creation: operation,
+  fixture.confirmed = operation => ({ kind: 'confirmed', value: { kind: 'openpane-created', creation: operation,
     authority: { kind: 'remote-provider', binding: { namespace: instance.namespace,
       installationId: instance.installationId, opaqueSessionId: `${label}-session` } } }, evidence: { operationId: operation.operationId } });
   async function creation(kind, operation) {

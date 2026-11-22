@@ -1,6 +1,6 @@
 import { lazy, useSyncExternalStore } from 'react';
-import { EXTENSION_SDK_VERSION } from '@agentui/sdk';
-import type { ConversationModuleProps, UiExtensionEntry } from '@agentui/sdk/react';
+import { EXTENSION_SDK_VERSION } from '@openpane/sdk';
+import type { ConversationModuleProps, UiExtensionEntry } from '@openpane/sdk/react';
 
 export default {
   kind: 'desktop', sdkVersion: EXTENSION_SDK_VERSION,

@@ -35,7 +35,7 @@ function metadataFixture() {
 }
 
 function temporary(context) {
-  const folder = mkdtempSync(join(tmpdir(), 'agentui-consumer-test-'));
+  const folder = mkdtempSync(join(tmpdir(), 'openpane-consumer-test-'));
   context.after(() => rmSync(folder, { recursive: true, force: true }));
   return folder;
 }
