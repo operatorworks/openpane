@@ -58,7 +58,7 @@ export async function startCustomizationPreview({ source, hostUrl, port }) {
   const server = await createServer({ ...config, configFile: false, root: join(root, 'apps/desktop'), mode: 'browser', appType: 'custom',
     plugins: [previewRoutes(host, origin), ...config.plugins],
     // Only installed host ABI dependencies are prebundled. Working-source dependencies must stay visible to the source policy.
-    optimizeDeps: { noDiscovery: true, include: ['react', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-markdown'] },
+    optimizeDeps: { noDiscovery: true, include: ['react', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-markdown', 'fast-sha256'] },
     server: { ...config.server, port: chosenPort, strictPort: true, hmr: false, ws: false, open: false,
       fs: { allow: [root, ...external.roots] } } });
   try { await server.listen(); }
