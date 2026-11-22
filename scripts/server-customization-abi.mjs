@@ -30,6 +30,6 @@ export async function serverCustomizationAbi() {
   }
   graph.sort((a, b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : JSON.stringify(a) > JSON.stringify(b) ? 1 : 0);
   const imports = Object.freeze({ '@openpane/sdk': sdk });
-  // Hash domain tag predates the OpenPane rename; changing it would change every recorded artifact identity.
+  // Versioned hash domain tag kept from before the OpenPane rename; it is not a product name, and recorded goldens depend on it.
   return Object.freeze({ imports, files: Object.freeze(files), identity: hash(JSON.stringify(['agentui-server-abi-v1', Object.keys(imports), graph])) });
 }

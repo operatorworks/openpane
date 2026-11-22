@@ -19,7 +19,7 @@ Observed revision: `origin/main` at `775fd7299d186c2c75d9c59e9285ad66b2631c05`. 
 | Client methods for the existing instructions route and for the items above | Strong. They wrap stable v1 routes. | Conceded. | Request `memberInstructions`, `member`, `retireMember` and `listProfiles`. |
 | Client `listConversations` | Strong. It wraps a stable v1 route. | Conceded. | In mission, but not requested: no work package in this plan calls it. OpenPane lists conversations from its own catalog. |
 
-Request document: `$HOME/.agents/projects/crew/requests/2026-11-17-member-management-for-openpane.md`.
+Request document: `$HOME/.agents/projects/crew/requests/2026-11-17-member-management-for-agentui.md`.
 
 Effect on this plan:
 

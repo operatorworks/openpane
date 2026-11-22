@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 [[ "$(pod --version)" == 1.16.2 ]] || { echo 'Use CocoaPods 1.16.2.' >&2; exit 1; }
 mkdir -p .work
 if [[ ! -d .work/app ]]; then
-  npx --yes @react-native-community/cli@20.2.0 init OpenPaneUpdateProbe \
+  npx --yes @react-native-community/cli@20.2.0 init AgentUIUpdateProbe \
     --version 0.86.0 --skip-install --skip-git-init --directory "$PWD/.work/app"
 fi
 # The probe replaces the template app dependencies with its minimal locked set.

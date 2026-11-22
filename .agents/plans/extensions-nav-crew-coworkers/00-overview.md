@@ -185,7 +185,7 @@ Before: a UI extension can only decorate an open conversation. After: a UI exten
 
 | Request | Owner | Consumers | Blocks | Unblock evidence |
 |---|---|---|---|---|
-| `$HOME/.agents/projects/crew/requests/2026-11-17-member-management-for-openpane.md` | Matt, Crew | Planned: OpenPane WP9. OpenPane is a demonstrated consumer of Crew's existing routes only. Prospective: Birbforge interface. | WP9 only | Response at `$HOME/.agents/projects/crew/responses/2026-11-17-member-management-for-openpane.md` with accepted items and a 40-character commit; tarball under `vendor/crew-client/<commit>/`. |
+| `$HOME/.agents/projects/crew/requests/2026-11-17-member-management-for-agentui.md` | Matt, Crew | Planned: OpenPane WP9. OpenPane is a demonstrated consumer of Crew's existing routes only. Prospective: Birbforge interface. | WP9 only | Response at `$HOME/.agents/projects/crew/responses/2026-11-17-member-management-for-agentui.md` with accepted items and a 40-character commit; tarball under `vendor/crew-client/<commit>/`. |
 | `$HOME/.agents/projects/crabber-coworkers/requests/2026-11-17-coworker-management-api.md` | Matt, crabber-coworkers | Planned: OpenPane WP10. None demonstrated. | WP10 only | Response at `$HOME/.agents/projects/crabber-coworkers/responses/2026-11-17-coworker-management-api.md` with accepted items, both owner decisions and a 40-character commit. |
 
 Both requests are proposals. Neither is accepted or implemented. No new repository is proposed. The owner of this repository owns both upstream repositories, so the plan includes the upstream work as packages U-Crew and U-Coworkers ([07-upstream-requests.md](07-upstream-requests.md)).

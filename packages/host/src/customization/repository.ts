@@ -64,7 +64,7 @@ function treeFiles(tree: Buffer, budget: SourceBudget): TreeFile[] {
 
 export interface SourceFile { readonly path: string; readonly sha256: string; readonly executable: boolean }
 export function sourceFile({ path, sha256, executable }: SourceFile): SourceFile { return Object.freeze({ path, sha256, executable }); }
-// Hash domain tag predates the OpenPane rename; changing it would change every recorded artifact identity.
+// Versioned hash domain tag kept from before the OpenPane rename; it is not a product name, and recorded goldens depend on it.
 export function treeIdentity(files: readonly SourceFile[]): string { return identity(['agentui-tree-v1', files]); }
 export interface CommittedInputs { readonly identity: string; readonly files: readonly SourceFile[] }
 export interface RepositoryTree {

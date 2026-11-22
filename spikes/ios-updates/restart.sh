@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 label="${1:?Usage: restart.sh no-rebuild-or-B simulator-UDID}"
 simulator="${2:?Supply the dedicated simulator UDID}"
 [[ "$label" == no-rebuild || "$label" == B ]] || { echo 'Choose no-rebuild or B.' >&2; exit 1; }
-bundle_id=org.reactjs.native.example.OpenPaneUpdateProbe
+bundle_id=org.reactjs.native.example.AgentUIUpdateProbe
 mkdir -p .work/evidence
 {
   echo "Source SHA: $(git rev-parse HEAD)"

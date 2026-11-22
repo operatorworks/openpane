@@ -1,6 +1,6 @@
-# Build and launch OpenPane on iOS Simulator
+# Build and launch AgentUI on iOS Simulator
 
-OpenPane packages its React Native shell in a local iOS Release app. It opens a disconnected screen and explains that host connection and conversations are unavailable. Packaging is tracked by `agentui-kq76`. Host connection, reconnect, and conversation navigation remain in `agentui-3xme` and its prerequisites.
+AgentUI packages its React Native shell in a local iOS Release app. It opens a disconnected screen and explains that host connection and conversations are unavailable. Packaging is tracked by `agentui-kq76`. Host connection, reconnect, and conversation navigation remain in `agentui-3xme` and its prerequisites.
 
 ## Prepare your Mac
 
@@ -21,14 +21,14 @@ Choose an available simulator UDID. The build targets that simulator and does no
 From the repository root, replace `SIMULATOR_UDID` with the chosen UDID:
 
 ```sh
-./openpane-ios SIMULATOR_UDID
+./agentui-ios SIMULATOR_UDID
 ```
 
 The launcher selects Node 24.22.3 and npm 11.19.1. It installs the root locked workspaces and builds the public theme and native primitive exports. It then runs `npm ci` in `apps/ios/native` and `pod install --deployment`. Preparation compares `Podfile.lock` before and after installation and fails on drift.
 
-The build checks the preparation input hashes, boots the selected simulator, and compiles the shared `OpenPane` scheme in Release mode with signing disabled. It removes the previous embedded JavaScript bundle and clears inherited React Native bundling overrides before building. It checks that `main.jsbundle` exists, installs the app, and launches `homes.birb.openpane`. Confirm that the screen says **OpenPane**, **Not connected**, and **This developer build**.
+The build checks the preparation input hashes, boots the selected simulator, and compiles the shared `AgentUI` scheme in Release mode with signing disabled. It removes the previous embedded JavaScript bundle and clears inherited React Native bundling overrides before building. It checks that `main.jsbundle` exists, installs the app, and launches `homes.birb.agentui`. Confirm that the screen says **AgentUI**, **Not connected**, and **This developer build**.
 
-The app is `apps/ios/native/.work/build/Build/Products/Release-iphonesimulator/OpenPane.app`. The native build log is `apps/ios/native/.work/build.log`. Installation or build failures stop the launcher.
+The app is `apps/ios/native/.work/build/Build/Products/Release-iphonesimulator/AgentUI.app`. The native build log is `apps/ios/native/.work/build.log`. Installation or build failures stop the launcher.
 
 To run preparation and build separately, use the pinned Node and npm versions:
 
@@ -54,14 +54,14 @@ No output means that the port has no listener. If a Metro process is running, st
 Terminate and relaunch the installed app:
 
 ```sh
-xcrun simctl terminate SIMULATOR_UDID homes.birb.openpane
-xcrun simctl launch SIMULATOR_UDID homes.birb.openpane
+xcrun simctl terminate SIMULATOR_UDID homes.birb.agentui
+xcrun simctl launch SIMULATOR_UDID homes.birb.agentui
 ```
 
 Confirm that the same disconnected screen returns. Capture the screen for the qualification record:
 
 ```sh
-xcrun simctl io SIMULATOR_UDID screenshot /tmp/openpane-ios-relaunch.png
+xcrun simctl io SIMULATOR_UDID screenshot /tmp/agentui-ios-relaunch.png
 ```
 
 Record the source revision, tool versions, simulator identity, build result, and installed bundle hash with the screenshot. A successful TypeScript check or native compilation alone does not prove that the screen rendered.
@@ -92,7 +92,7 @@ The qualification below records Xcode and simulator versions rather than enforci
 
 The committed application source `0ec18a925f8f8628a4e72a253608705c0542598d` passed on November 14, 2026, with a clean working tree. The environment was macOS 26.6.2, Xcode 26.2 build 17C52, Node 24.22.3, npm 11.19.1, and CocoaPods 1.16.2. The dedicated iPhone 17 Pro simulator ran iOS 26.3.1 build 23D8133, with UDID `8C8C1971-6462-4016-BE9B-DBBBD9DCB0C6`.
 
-The launcher prepared dependencies, built Release with signing disabled, installed `homes.birb.openpane`, and launched the app. The offline check compared the installed bundle with the build product, relaunched the app with no listener on port 8081, and recorded a running app process. Codex inspected the [relaunch screenshot](ios-app-evidence/relaunch.png) and observed the OpenPane disconnected screen with readable text and no clipping.
+The launcher prepared dependencies, built Release with signing disabled, installed `homes.birb.agentui`, and launched the app. The offline check compared the installed bundle with the build product, relaunched the app with no listener on port 8081, and recorded a running app process. Codex inspected the [relaunch screenshot](ios-app-evidence/relaunch.png) and observed the AgentUI disconnected screen with readable text and no clipping.
 
 Fresh native preparation also passed at a different checkout path with no native dependency output directories initially present. Upstream download caches remained available. Deployment mode preserved the native lockfile after the Hermes path normalization. Repository build, type checks, lint, and all 33 tests passed. ShellCheck and whitespace checks passed.
 

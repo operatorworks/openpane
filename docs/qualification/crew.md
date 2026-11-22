@@ -2,17 +2,17 @@
 
 Assessment date is 2026-11-17. This assessment covers `agentui-osyo`, the Crew example provider extension. It qualifies creation, streaming, host restart and resume against a real Crew service. It lists the capability gaps that remain.
 
-The extension is `crewProvider` from `openpane-extension-crew/provider`. It is a registered public provider contribution. It discovers one configured existing Crew member and creates fresh OpenPane-owned conversations against it. It never imports existing Crew conversation history. Crew remains the execution, approval, cancellation and recovery authority. The [example README](../../extensions/crew/README.md) describes configuration and behavior.
+The extension is `crewProvider` from `agentui-extension-crew/provider`. It is a registered public provider contribution. It discovers one configured existing Crew member and creates fresh AgentUI-owned conversations against it. It never imports existing Crew conversation history. Crew remains the execution, approval, cancellation and recovery authority. The [example README](../../extensions/crew/README.md) describes configuration and behavior.
 
-The deployment model is the one in [AGENTS.md](../../AGENTS.md). One owner runs OpenPane and Crew on a private overlay network, which is the trust boundary. There is no device pairing or service attestation.
+The deployment model is the one in [AGENTS.md](../../AGENTS.md). One owner runs AgentUI and Crew on a private overlay network, which is the trust boundary. There is no device pairing or service attestation.
 
 ## Exact inputs
 
 | Input | Identity |
 | --- | --- |
-| OpenPane source for the real run | `main` at `8be32fc` |
+| AgentUI source for the real run | `main` at `8be32fc` |
 | Crew service | `f3327346d979270a18c9f46b9cfe6a075b1cb157` |
-| Crew image | `openpane-crew-mvp:main-f332734` |
+| Crew image | `agentui-crew-mvp:main-f332734` |
 | Crew database schema | 37 |
 | Crew profile admission | `BIRBCREW_LIVE_PROFILES`, no attestation |
 | Crew member | `961f93a5-68d4-4f79-a1c2-eb94f3a2ecaf`, engine `codex`, profile `chatgpt-gpt-6.1-sol.approval.v1` |
@@ -21,9 +21,9 @@ The deployment model is the one in [AGENTS.md](../../AGENTS.md). One owner runs 
 
 ## Real Crew run
 
-The run used the private spark deployment on 2026-11-17. The host ran `node examples/crew/run.mjs <config>` from OpenPane `main` at `8be32fc`. A browser drove the ordinary provider chooser, composer and transcript.
+The run used the private spark deployment on 2026-11-17. The host ran `node examples/crew/run.mjs <config>` from AgentUI `main` at `8be32fc`. A browser drove the ordinary provider chooser, composer and transcript.
 
-1. OpenPane created owned conversation `e700aae6-44d5-4e1a-b9f5-692e726bbbb4` against the existing member.
+1. AgentUI created owned conversation `e700aae6-44d5-4e1a-b9f5-692e726bbbb4` against the existing member.
 2. Send request `0fdd9a97-8400-46a0-9aa9-afb520c5e30f` streamed a 40-line reply.
 3. The host was stopped and restarted after the run. One conversation was listed. The prompt and reply each appeared once. No other Crew conversations were imported.
 4. Second send `fdfe707d-8597-47c9-9f28-66a26a8c737b` on the same conversation streamed. The host was killed at 26 of 60 lines and restarted. The fresh baseline showed all 60 unique lines once. The earlier turn stayed intact.
@@ -73,7 +73,7 @@ The generic provider host tests in `tests/application/provider-*.test.mjs` cover
 
 ## Verification
 
-Commands ran from the OpenPane worktree with Node `24.22.3` first in `PATH`:
+Commands ran from the AgentUI worktree with Node `24.22.3` first in `PATH`:
 
 ```sh
 npm ci

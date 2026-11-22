@@ -1,5 +1,5 @@
 {
-  "name": "OpenPaneUpdateProbe",
+  "name": "AgentUIUpdateProbe",
   "version": "0.0.1",
   "private": true,
   "dependencies": {

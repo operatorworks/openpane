@@ -1,6 +1,6 @@
-# Build and launch OpenPane on macOS
+# Build and launch AgentUI on macOS
 
-OpenPane packages a React shell in a local Tauri application. It opens a disconnected landing page with built-in recovery controls. Host connection, host transport, conversation state, credential storage, and customization activation remain separate work in `agentui-otsp` and its prerequisites. Packaging is tracked by `agentui-gxrk`.
+AgentUI packages a React shell in a local Tauri application. It opens a disconnected landing page with built-in recovery controls. Host connection, host transport, conversation state, credential storage, and customization activation remain separate work in `agentui-otsp` and its prerequisites. Packaging is tracked by `agentui-gxrk`.
 
 ## Prepare your Mac
 
@@ -25,14 +25,14 @@ The Tauri hook builds the shared workspace packages, starts Vite on `127.0.0.1:1
 From the repository root, run:
 
 ```sh
-./openpane
+./agentui
 ```
 
 The executable launcher selects Node and npm versions from `.node-version` and `package.json`, installs locked dependencies, builds the bundle, and opens a fresh app instance. It resolves the repository from its own location, so an absolute invocation works from another directory. Installation or build failures stop before opening the app.
 
 The launcher prioritizes macOS system tools and fixes the build output at `apps/desktop/src-tauri/target`, even if your environment sets `CARGO_TARGET_DIR` elsewhere.
 
-To build without opening the app, use the pinned toolchain and run `npm run desktop:bundle`. The resulting bundle is `apps/desktop/src-tauri/target/release/bundle/macos/OpenPane.app`.
+To build without opening the app, use the pinned toolchain and run `npm run desktop:bundle`. The resulting bundle is `apps/desktop/src-tauri/target/release/bundle/macos/AgentUI.app`.
 
 The build hook compiles shared package exports and the desktop frontend. Cargo builds the native executable and embeds the frontend assets. The `.app` is ad-hoc signed for local use. Distribution signing, notarization, a universal binary, and an installer are not qualified.
 
@@ -40,7 +40,7 @@ Tauri consumes `apps/desktop/web-dist`. Existing package exports remain in `apps
 
 ## Resolve a shadowed macOS tool
 
-The `./openpane` launcher already prioritizes macOS system tools. If a direct bundle command reports that `xattr` does not recognize `-r`, check `command -v xattr`. A Python environment can shadow Apple's `/usr/bin/xattr`. Run the direct build with system tools first:
+The `./agentui` launcher already prioritizes macOS system tools. If a direct bundle command reports that `xattr` does not recognize `-r`, check `command -v xattr`. A Python environment can shadow Apple's `/usr/bin/xattr`. Run the direct build with system tools first:
 
 ```sh
 PATH="/usr/bin:/bin:$PATH" npm run desktop:bundle
@@ -51,8 +51,8 @@ This changes the build process's tool lookup without changing your system instal
 ## Check the shell
 
 1. Stop the Vite development process.
-2. Open the production `.app` with `./openpane`.
-3. With no host running, confirm that the native window shows **Connect this Mac**, says to start the OpenPane host on this Mac, and offers **Reconnect**. Start the local host on `127.0.0.1:7140`, select **Reconnect**, and confirm that the chats view opens.
+2. Open the production `.app` with `./agentui`.
+3. With no host running, confirm that the native window shows **Connect this Mac**, says to start the AgentUI host on this Mac, and offers **Reconnect**. Start the local host on `127.0.0.1:7140`, select **Reconnect**, and confirm that the chats view opens.
 4. Click **Restore default view**. Confirm that the built-in landing page remains visible.
 5. Click **Reload app**. Confirm that the same page returns.
 6. Quit the app and open the same bundle again.
@@ -85,7 +85,7 @@ The local checks below passed on November 14, 2026, against source commit `bdb27
 | rustc | 1.98.1, 48a229cea |
 | Cargo | 1.98.1, 797e8a9bc |
 | Tauri crate and CLI | 2.12.5 and 2.12.4 |
-| Bundle identifier | `homes.birb.openpane` |
+| Bundle identifier | `homes.birb.agentui` |
 | Native target | arm64 only |
 | Signing | Ad-hoc with hardened runtime, no team identity, no notarization |
 | Executable SHA-256 | `c4f296ce6d317508d9920b3967034a30d76937d6214d5bc87650ec25e59fe88c` |

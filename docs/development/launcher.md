@@ -119,7 +119,7 @@ For SSH launches, the remote host uses its exported `OPENCODE_GO_API_KEY` when p
 
 Run the same command with the same target, agent, and workspace. The launcher reuses the host data directory and local client origin. Open a saved conversation to continue it. Closing or reconnecting the client does not automatically resend commands.
 
-The launcher stores its tools separately from conversation data. Rebuilding the app preserves saved history. Existing manual hosts and their data directories remain separate from launcher-managed hosts.
+The launcher stores its tools separately from conversation data. Rebuilding the app preserves saved history. Data saved by AgentUI builds, before the OpenPane rename, is not carried over: AgentUI used `~/.local/share/agentui`, `homes.birb.agentui` app and Keychain identifiers, and stored row kinds OpenPane does not read. Delete that directory and those Keychain items after switching. Existing manual hosts and their data directories remain separate from launcher-managed hosts.
 
 ## Resolve startup failures
 

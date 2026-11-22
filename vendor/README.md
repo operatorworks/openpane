@@ -43,7 +43,7 @@ Reproduce the artifact from a separate directory. Do not replace a working
 Switchboard checkout to build the dependency.
 Since Switchboard #42, `npm ci` in the source downloads the `@ag-ui/core`
 devDependency from
-`https://raw.githubusercontent.com/operatorworks/openpane/661216eab627be33067951ffad7a1691127a80fe/vendor/ag-ui/ed2c1d5b63299d3f08676a1418cc2640bbe55fd1/ag-ui-core-1.0.4.tgz`,
+`https://raw.githubusercontent.com/mattsp1290/agentui/661216eab627be33067951ffad7a1691127a80fe/vendor/ag-ui/ed2c1d5b63299d3f08676a1418cc2640bbe55fd1/ag-ui-core-1.0.4.tgz`,
 the PR49 fork archive retained in OpenPane, so rebuilding needs network access
 to GitHub.
 

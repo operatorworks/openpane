@@ -75,7 +75,7 @@ async function builderIdentity() {
     } }] });
   const paths = [...Object.keys(result.metafile.inputs), 'package-lock.json'].sort();
   const hashes = await Promise.all(paths.map(async path => [path, hash(await readFile(join(root, path)))]));
-  // Hash domain tag predates the OpenPane rename; changing it would change every recorded artifact identity.
+  // Versioned hash domain tag kept from before the OpenPane rename; it is not a product name, and recorded goldens depend on it.
   return { identity: hash(JSON.stringify(['agentui-server-builder-v1', esbuildVersion, hashes])), esbuildVersion };
 }
 

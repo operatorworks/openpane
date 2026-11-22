@@ -1,6 +1,6 @@
 # Fresh deployment-mode preparation evidence
 
-Requested by handoff `openpane-h-5gd2`. Executed November 13, 2026 at 8:52 PM America/New_York (01:52 UTC November 14).
+Requested by handoff `agentui-h-5gd2`. Executed November 13, 2026 at 8:52 PM America/New_York (01:52 UTC November 14).
 
 PASS at source `f4f8fcfda7ac3afde2bad94b36223a2cc25bc661` on the separate evidence branch `codex/ios-fresh-preparation`.
 
@@ -12,4 +12,4 @@ Native artifact caches were warm, as shown by cache-hit lines. DerivedData at `.
 
 Historical correction: the earlier `prepare-clean.log.gz` was captured before commit 230f062 added `pod install --deployment`; it does not establish fresh execution of the current script. The diff for 230f062 shows that change. The historical deployment log was a later check on an existing generated tree. Preserve those historical records; this new run supplies the missing current-script fresh-tree evidence. Linux has independently corrected the historical labels at 1dad289, which is newer than the requested base; this branch intentionally remains based on f4f8fcf and changes only new evidence files.
 
-No scripts, dependency inputs, qualification document, architecture files, or shared integration branch were changed. This result does not qualify physical-device signing, live update recovery, or integrated OpenPane. Linux owns evidence integration and the repeated review/fix cycle for PR3.
+No scripts, dependency inputs, qualification document, architecture files, or shared integration branch were changed. This result does not qualify physical-device signing, live update recovery, or integrated AgentUI. Linux owns evidence integration and the repeated review/fix cycle for PR3.

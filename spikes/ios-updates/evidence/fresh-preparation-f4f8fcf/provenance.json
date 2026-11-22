@@ -122,8 +122,8 @@
       "bash",
       "spikes/ios-updates/prepare.sh"
     ],
-    "cwd": "~/git/openpane",
-    "toolchain_path_prefix": "/tmp/openpane-ios-tools/node_modules/.bin"
+    "cwd": "~/git/agentui",
+    "toolchain_path_prefix": "/tmp/agentui-ios-tools/node_modules/.bin"
   },
   "prepare_exit_status": 0,
   "lock_comparison": {

@@ -436,7 +436,7 @@ mod tests {
         let public = serde_json::to_string(&status).unwrap();
         assert!(!public.contains(marker));
         assert!(public.contains("saved"));
-        assert_ne!(configuration().service, "homes.birb.openpane.native.v1");
+        assert_ne!(configuration().service, "homes.birb.agentui.native.v1");
         {
             let _lock = crate::keychain::INTERACTION.lock().unwrap();
             unsafe {

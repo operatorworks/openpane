@@ -5,7 +5,7 @@ import { selectPackage, type NpmInputs } from './packages.js';
 import { SourceBudget } from './budget.js';
 import { readCommittedRepository, type CommittedInputs, type RepositoryTree } from './repository.js';
 
-// Hash domain tag predates the OpenPane rename; changing it would change every recorded artifact identity.
+// Versioned hash domain tag kept from before the OpenPane rename; it is not a product name, and recorded goldens depend on it.
 export function packageIdentity(treeId: string, subdirectory: string): string { return identity(['agentui-package-v1', treeId, subdirectory]); }
 
 export interface ResolvedCustomizationPackage {

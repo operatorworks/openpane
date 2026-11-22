@@ -41,6 +41,6 @@ The Rust implementation is in `apps/desktop/src-tauri/src/native.rs`. The JavaSc
 
 ## Provider keys
 
-The macOS Keychain is used only for Pi and OpenCode Go provider key setup. See [secure bootstrap](secure-bootstrap.md). Earlier builds stored a host access record under the Keychain service `homes.birb.openpane.native.v1`. Current builds never read it. Delete that item in Keychain Access if it is present.
+The macOS Keychain is used only for Pi and OpenCode Go provider key setup. See [secure bootstrap](secure-bootstrap.md). Earlier builds stored a host access record under the Keychain service `homes.birb.agentui.native.v1`. Current builds never read it. Delete that item in Keychain Access if it is present.
 
 Provider keys never enter JavaScript, browser storage, URLs, preferences, logs, or customization Git.

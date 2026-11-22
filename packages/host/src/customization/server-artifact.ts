@@ -128,7 +128,7 @@ function canonical(value: unknown): unknown {
   return value;
 }
 export function serverCustomizationArtifactId(value: Omit<ServerCustomizationArtifact, 'artifactId'>): string {
-  // Hash domain tag predates the OpenPane rename; changing it would change every recorded artifact identity.
+  // Versioned hash domain tag kept from before the OpenPane rename; it is not a product name, and recorded goldens depend on it.
   return identity(['agentui-server-artifact-v1', canonical(value)]);
 }
 export function parseServerCustomizationArtifact(value: unknown): ServerCustomizationArtifact {

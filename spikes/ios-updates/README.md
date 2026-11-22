@@ -11,7 +11,7 @@ From the repository root:
 
 ```sh
 bash spikes/ios-updates/prepare.sh
-xcrun simctl create 'OpenPane update qualification' \
+xcrun simctl create 'AgentUI update qualification' \
   com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro \
   com.apple.CoreSimulator.SimRuntime.iOS-26-3
 # Set PROBE_SIMULATOR to the returned UUID.
@@ -21,7 +21,7 @@ xcrun simctl bootstatus "$PROBE_SIMULATOR" -b
 bash spikes/ios-updates/rebuild.sh A "$PROBE_SIMULATOR"
 ```
 
-Inspect the simulator for `OpenPane update probe A`. Save a screenshot with the
+Inspect the simulator for `AgentUI update probe A`. Save a screenshot with the
 command printed by `rebuild.sh`. A successful build or launch command alone does
 not prove the screen rendered. All generated files live in ignored `spikes/ios-updates/.work/`.
 
@@ -51,7 +51,7 @@ xcrun simctl io "$PROBE_SIMULATOR" screenshot spikes/ios-updates/.work/evidence/
 
 There should be no
 listener on port 8081 (`lsof -nP -iTCP:8081 -sTCP:LISTEN`). That check plus the
-Release bundle URL in generated `spikes/ios-updates/.work/app/ios/OpenPaneUpdateProbe/AppDelegate.swift`
+Release bundle URL in generated `spikes/ios-updates/.work/app/ios/AgentUIUpdateProbe/AppDelegate.swift`
 confirms this workflow does not depend on a running Metro server.
 
 `prepare.sh` generates the MIT-licensed React Native Community template 0.86.0
@@ -64,7 +64,7 @@ to a backup directory and run it again. The npm lock and Podfile lock are genera
 dependency records, excluded from the implementation line budget. Application
 code and native template output stay in `spikes/ios-updates/.work/`.
 
-For a physical device, open `spikes/ios-updates/.work/app/ios/OpenPaneUpdateProbe.xcworkspace`, select
+For a physical device, open `spikes/ios-updates/.work/app/ios/AgentUIUpdateProbe.xcworkspace`, select
 your own development team and connected device, set the scheme Run configuration
 to Release, then build and run from Xcode. Repeat for B and restart without Metro.
 This route needs your signing setup and Developer Mode on the device. It was not
@@ -72,8 +72,8 @@ executed in this qualification. Simulator `CODE_SIGNING_ALLOWED=NO` commands do
 not qualify signing or physical-device installation.
 
 The qualification used an isolated Node installation created with
-`npm install --prefix /tmp/openpane-ios-tools node@24.22.3 npm@11.19.1`, then prepended
-`/tmp/openpane-ios-tools/node_modules/.bin` to PATH. Any installation manager that
+`npm install --prefix /tmp/agentui-ios-tools node@24.22.3 npm@11.19.1`, then prepended
+`/tmp/agentui-ios-tools/node_modules/.bin` to PATH. Any installation manager that
 provides the exact required versions works.
 
 Preparation evidence and checkout-path limits are recorded in

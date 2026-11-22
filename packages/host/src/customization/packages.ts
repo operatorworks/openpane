@@ -19,7 +19,7 @@ export type NpmInputs = { readonly kind: 'absent' } | {
 export function npmIdentity(input: {
   readonly treeId: string; readonly path: string; readonly selected: SourceFile;
 } & Pick<Extract<NpmInputs, { kind: 'locked' }>, 'packageJson' | 'lockfile' | 'workspaces' | 'localInputs'>): string {
-  // Hash domain tag predates the OpenPane rename; changing it would change every recorded artifact identity.
+  // Versioned hash domain tag kept from before the OpenPane rename; it is not a product name, and recorded goldens depend on it.
   return identity(['agentui-npm-v1', input.treeId, input.path, input.selected, input.packageJson, input.lockfile, input.workspaces, input.localInputs]);
 }
 export interface SelectedPackage { readonly directory: string; readonly customization: CustomizationSource | undefined; readonly npm: NpmInputs }

@@ -9,7 +9,7 @@ Apple tooling. Native dependency changes also require dependency installation
 and a new native build. Desktop customization remains independent.
 
 The standalone React Native probe proves the simulator rebuild path. It does
-not mount OpenPane, implement a product update notification, or qualify integrated
+not mount AgentUI, implement a product update notification, or qualify integrated
 Apple task `agentui-onxu`. Physical-device signing and installation remain untested.
 
 ## Why rebuild-only
@@ -69,7 +69,7 @@ The probe has its own dependency tree and does not change the main workspace loc
 | Linux integration regression at `f4f8fcf`, excluding spikes | PASS | [26 tests, build, check, lint](https://github.com/operatorworks/openpane/actions/runs/43540852662/job/132280830858) |
 | Compatible live-update recovery | UNQUALIFIED | No updater tested |
 | Physical-device signing/install/restart | UNQUALIFIED | No physical device or signing assumed |
-| Integrated OpenPane behavior | UNQUALIFIED | Standalone probe only |
+| Integrated AgentUI behavior | UNQUALIFIED | Standalone probe only |
 | Cold-cache native build | UNQUALIFIED | Warm caches and retained DerivedData |
 | VoiceOver / accessibility | UNQUALIFIED | Not exercised |
 

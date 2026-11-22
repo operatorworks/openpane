@@ -58,7 +58,7 @@ Each request span has kind `SERVER` and these attributes:
 | Attribute | Values |
 | --- | --- |
 | `openpane.operation` | The admitted service operation. Failures before admission use `admission`. |
-| `openpane.credential_class` | The client kind: `browser-development` or `native`. No credential is involved. The attribute keeps its old name so existing queries and dashboards continue to work. |
+| `openpane.credential_class` | The client kind: `browser-development` or `native`. No credential is involved. Before the OpenPane rename this attribute and the others were prefixed `agentui.`, and the service was `agentui-host`; update older queries and dashboards. |
 | `openpane.outcome` | `ok`, `forbidden`, `invalid`, `unavailable`, `create-rejected`, or an image failure: `invalid-image`, `image-scope`, `image-upload-conflict`, `image-unsupported`, `image-capacity`, or `image-integrity`. |
 | `http.response.status_code` | The response code actually written. Omitted if no response headers were sent. |
 
