@@ -211,8 +211,12 @@ async function dragFiles(page, files, { drop = true, text = false } = {}) {
     const panel = document.querySelector('.conversation-panel');
     const fire = type => panel.dispatchEvent(new DragEvent(type, { dataTransfer: transfer, bubbles: true, cancelable: true }));
     fire('dragenter'); fire('dragover');
-    await new Promise(resolve => requestAnimationFrame(resolve));
-    const over = document.querySelector('.composer').getAttribute('data-drop');
+    // React commits the hover state on its own schedule; give it a short window, then read what the composer shows.
+    let over = null;
+    for (let frame = 0; frame < 30 && over === null; frame++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      over = document.querySelector('.composer').getAttribute('data-drop');
+    }
     if (drop) fire('drop');
     return over;
   }, { files, drop, text });
@@ -249,4 +253,24 @@ test('dropping images on the conversation attaches one PNG or JPEG and explains 
   assert.match(await card.textContent(), /chart\.png/, 'a refused drop keeps the existing image');
   await page.getByRole('button', { name: 'Remove', exact: true }).click();
   await card.waitFor({ state: 'detached' });
+});
+
+test('removing an image mid-upload frees the composer for the next drop, and generic types are decided by name', async t => {
+  const page = await quietConversation(t);
+  const alert = page.locator('.composer [role="alert"]'), card = page.getByLabel('Attached image');
+  assert.equal(await dragFiles(page, [['notes.pdf', 'application/pdf', 10]], { drop: false }), 'reject', 'known non-image types are refused on hover');
+  await page.evaluate(() => { globalThis.holdUpload = new Promise(resolve => { globalThis.releaseUpload = resolve; }); });
+  await dragFiles(page, [['first.png', 'image/png', [...png]]]);
+  await card.getByRole('status').filter({ hasText: 'Uploading…' }).waitFor();
+  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await card.waitFor({ state: 'detached' });
+  await page.evaluate(() => { globalThis.holdUpload = null; });
+  const over = await dragFiles(page, [['second.png', 'application/octet-stream', [...png]]]);
+  assert.equal(over, 'accept');
+  await card.getByRole('status').filter({ hasText: 'Ready' }).waitFor();
+  assert.match(await card.textContent(), /second\.png/);
+  assert.equal(await alert.count(), 0);
+  await page.evaluate(() => globalThis.releaseUpload());
+  await page.waitForTimeout(100);
+  assert.match(await card.textContent(), /second\.png/, 'the removed upload finishing late does not replace the new image');
 });

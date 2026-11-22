@@ -83,7 +83,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
       />
     : null;
   const workspaceConversation = slots.workspace ? activeConversation : null;
-  const toolsEligible = Boolean(app.active) && slots.contentLayout.kind !== 'claimed' &&
+  const toolsEligible = Boolean(app.active) && !layoutClaimed &&
     custom.namespaces.some(owner => owner.kind === 'ready' && owner.presentation.modules.length > 0);
   const toolsTarget = app.active && toolsEligible ? (() => {
     const scope = app.active.scope, entry = app.catalog.items.find(item => item.scope.conversationId === scope.conversationId && item.scope.hostId === scope.hostId);

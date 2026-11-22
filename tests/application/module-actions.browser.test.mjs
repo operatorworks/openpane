@@ -24,9 +24,13 @@ test('nested action identity includes each parent and namespace, with one pendin
     return { modules: ['Left','Right'].map(label => ({ id: label, label, component() { return null; },
       children: [label === 'Left' ? ${module('Left child')} : ${module('Right child')}] })), dispose() {} };`), false,
   `, { manifest: { ...manifest, namespace: 'sibling' }, ${entry(`return { modules: [${module('Sibling')}], dispose() {} };`)} }`);
-  const panel = (await tools(page)).getByRole('complementary', { name: 'Customization fixture' });
+  const region = await tools(page), panel = region.getByRole('complementary', { name: 'Customization fixture' });
   await panel.getByRole('region', { name: 'Left', exact: true }).getByRole('region', { name: 'Left child', exact: true }).waitFor();
+  assert.match(await region.getByRole('paragraph').first().textContent(), /^Runs in .+\.$/);
   await chats(page);
+  // Tools left the conversation column: no tool fieldset or visible customization panel there.
+  assert.equal(await page.locator('.chat-view').getByRole('group', { name: 'Custom tools' }).count(), 0);
+  assert.equal(await page.locator('.chat-view').getByRole('complementary', { name: /^Customization / }).count(), 0);
   await draft(page, 'Keep the nested action draft');
   await tools(page);
   await page.getByRole('button', { name: 'Run Left child', exact: true }).evaluate(button => { button.click(); button.click(); });

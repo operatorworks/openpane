@@ -969,6 +969,9 @@ test('a conversation that does not report permissions stays unsupported across r
   f.behavior.permissions = () => held.promise;
   const pending = f.app.conversationActions(f.app.getSnapshot().active).permissions.read();
   held.resolve({ kind: 'unsupported', reason: 'This conversation does not report permissions.' }); await pending;
+  const active = f.app.getSnapshot().active;
+  await active.store.setDraft('A command marks permissions for refresh');
+  await f.app.conversationActions(active).submit(() => active.store.send()).catch(() => {});
   await f.app.reconnect(); await new Promise(resolve => setImmediate(resolve));
   stop();
   assert.deepEqual([...new Set(kinds)], ['unsupported']);

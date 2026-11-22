@@ -180,16 +180,19 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
     const result = intakeFile(files);
     if (result.kind === 'reject') return refuse(result.reason);
     const generation = removals.current;
+    // The guard covers only the local file read; once the store has the bytes, its own upload state takes over.
     intaking.current = store;
+    const release = () => { if (intaking.current === store) intaking.current = null; };
     void (async () => {
       try {
         const bytes = new Uint8Array(await result.file.arrayBuffer());
+        release();
         // Remove while reading wins: a late read must not bring the image back.
         if (generation === removals.current) await store.selectImage({ name: result.file.name, bytes });
       } catch (error) {
         refuse(error instanceof Error ? error.message : 'The image could not be changed.');
       } finally {
-        if (intaking.current === store) intaking.current = null;
+        release();
       }
     })();
   }
@@ -210,7 +213,9 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
     onDragLeave(event: DragEvent) {
       if (!event.dataTransfer.types.includes('Files')) return;
       dragDepth.current = Math.max(0, dragDepth.current - 1);
-      if (dragDepth.current === 0) setDrop(null);
+      // A child removed mid-drag never sends its leave; leaving for a node outside the panel ends the hover regardless.
+      const into = event.relatedTarget;
+      if (dragDepth.current === 0 || (into instanceof Node && !event.currentTarget.contains(into))) { dragDepth.current = 0; setDrop(null); }
     },
     onDrop(event: DragEvent) {
       if (!event.dataTransfer.types.includes('Files')) return;
@@ -235,7 +240,7 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
   const conversationKey = `${active.viewId}/${active.scope.hostId}/${active.scope.conversationId}`;
   const context = { conversation: active.scope, activity: view.document, commands: actions.commands, permissions: actions.permissions };
   const nativeMessages = <>
-      {view.document.domain.messages.length === 0 && <p className="conversation-greeting">A conversation that stays with you.</p>}
+      {view.document.domain.messages.length === 0 && !view.document.domain.activities?.length && !continuation?.boundary && <p className="conversation-greeting">A conversation that stays with you.</p>}
       {view.document.domain.messages.map(message => <article className={`message message-${message.role}`} key={message.messageId}>
         <strong>{message.role === 'user' ? 'You' : presentation.assistant}</strong>
         {message.role === 'assistant' ? <AssistantReply text={message.text} /> : message.text && <p>{message.text}</p>}
@@ -292,7 +297,7 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
         {(image.status === 'failed' || image.status === 'interrupted') && <button type="button" disabled={!enabled}
           onClick={() => imageAction(() => active.store.retryImage())}>Retry</button>}
         <button type="button" className="composer-image-remove" aria-label="Remove" title="Remove image" disabled={Boolean(storageFailure)}
-          onClick={() => { removals.current++; imageAction(() => active.store.removeImage()); }}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" /></svg></button>
+          onClick={() => { removals.current++; intaking.current = null; imageAction(() => active.store.removeImage()); }}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" /></svg></button>
       </div>}
       {image && !acceptsImages && <p className="composer-note">{active.agent.imageInput.kind === 'unsupported' ? active.agent.imageInput.reason : 'This agent cannot receive images.'} Remove the image to send.</p>}
       {imageError?.store === active.store && <p className="composer-note" role="alert">{imageError.message}</p>}
@@ -306,12 +311,12 @@ export function ConversationView({ actions, active, enabled, storageFailure, obs
             event.target.value = '';
             if (file) attach([file]);
           }} />
-          <button type="button" className="composer-setting composer-add" aria-label={image ? 'Replace image' : 'Add image'} title="Add image, or drop a PNG or JPEG"
+          <button type="button" className="composer-setting composer-add" aria-label={image ? 'Replace image' : 'Add image'} title={blocked ?? 'Add image, or drop a PNG or JPEG'}
             disabled={Boolean(blocked)} onClick={() => imageInput.current?.click()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg></button>
         </>}
         {composerControls?.(enabled && editor.kind === 'saved' && !responding)}<div className="composer-send-actions">
         {run && run.kind !== 'ended' && !concluded && <button type="button" className="composer-setting" disabled={!connected || !active.agent.commands.includes('cancel') || stopping} onClick={stop}>{stopping ? 'Stopping…' : 'Stop'}</button>}
-        <button className="composer-send" aria-label="Send" disabled={!canSend}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg></button></div>
+        <button className="composer-send" aria-label="Send" title="Send" disabled={!canSend}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg></button></div>
       </div>
     </form>
     <CommandRecovery view={view} actions={actions} enabled={enabled} canRetry={available} retry={id => active.store.retry(id)} />

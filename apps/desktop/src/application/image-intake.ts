@@ -2,6 +2,8 @@ import { IMAGE_MAX_BYTES } from '@openpane/contracts/image';
 
 const IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg'];
 const IMAGE_NAME = /\.(png|jpe?g)$/i;
+/** Types some sources report for any file; the name decides for these. */
+const GENERIC_TYPES: readonly string[] = ['', 'application/octet-stream'];
 
 export type DropVerdict = { readonly kind: 'accept' } | { readonly kind: 'reject'; readonly reason: string };
 export type IntakeResult = { readonly kind: 'file'; readonly file: File } | { readonly kind: 'reject'; readonly reason: string };
@@ -20,7 +22,7 @@ export function dragVerdict(types: readonly string[], items: DataTransferItemLis
   const files = items ? [...items].filter(item => item.kind === 'file') : [];
   if (files.length > 1) return { kind: 'reject', reason: ONE_IMAGE };
   const type = files[0]?.type ?? '';
-  if (type.startsWith('image/') && !IMAGE_TYPES.includes(type)) return { kind: 'reject', reason: IMAGE_TYPE };
+  if (!IMAGE_TYPES.includes(type) && !GENERIC_TYPES.includes(type)) return { kind: 'reject', reason: IMAGE_TYPE };
   return { kind: 'accept' };
 }
 
@@ -28,7 +30,7 @@ export function dragVerdict(types: readonly string[], items: DataTransferItemLis
 export function intakeFile(files: readonly File[]): IntakeResult {
   if (files.length !== 1) return { kind: 'reject', reason: ONE_IMAGE };
   const [file] = files as [File];
-  const typed = IMAGE_TYPES.includes(file.type) || (file.type === '' && IMAGE_NAME.test(file.name));
+  const typed = IMAGE_TYPES.includes(file.type) || (GENERIC_TYPES.includes(file.type) && IMAGE_NAME.test(file.name));
   if (!typed) return { kind: 'reject', reason: IMAGE_TYPE };
   if (file.size > IMAGE_MAX_BYTES) return { kind: 'reject', reason: IMAGE_SIZE };
   return { kind: 'file', file };
