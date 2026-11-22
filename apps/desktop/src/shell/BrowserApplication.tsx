@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { DesktopShell } from './Shell.js';
 import { HostStatusLabel } from './HostStatusLabel.js';
 import { applicationEnabled } from '../application/application-controller.js';
@@ -11,6 +12,7 @@ import { useDesktopCustomizations } from '../application/DesktopCustomizations.j
 import { CustomizationModules, type ModuleSurface } from '../application/CustomizationModules.js';
 import { ConversationSearch } from '../application/ConversationSearch.js';
 import { ComposerAgentControls } from '../application/ComposerAgentControls.js';
+import { NewConversation } from '../application/NewConversation.js';
 import { continuationAnnouncement } from '../application/continuation-copy.js';
 import { ExtensionsList, ExtensionWorkspace, conversationSlots, extensionRows, openableRow } from '../application/ExtensionsView.js';
 import { conversationLabel } from '@openpane/contracts/conversation';
@@ -20,12 +22,23 @@ type ConnectionPresentation =
   | { readonly kind: 'browser' }
   | { readonly kind: 'native'; readonly controls: ReactElement; readonly reconnect: () => void };
 
+/** Applies a view change as one animated step where the platform supports view transitions, so shared parts morph. */
+function reveal(update: () => void): void {
+  const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced || typeof document.startViewTransition !== 'function') return update();
+  document.startViewTransition(() => flushSync(update));
+}
+
 export function BrowserApplication({ children, artifact, controller: supplied, connection = { kind: 'browser' }, suspended = false }: {
   readonly children?: ReactNode; readonly artifact?: ReactNode; readonly controller?: ApplicationController;
   readonly connection?: ConnectionPresentation;
   readonly suspended?: boolean;
 }) {
   const { controller, snapshot: app } = useApplication(supplied);
+  // The new-conversation composer's text, and whether it is opening a conversation. While it opens, the new-conversation
+  // screen stays up; the conversation replaces it in one step once its first message is on its way.
+  const [launchText, setLaunchText] = useState('');
+  const [opening, setOpening] = useState(false);
   useEffect(() => {
     // The webview receives OS file drops itself; a file dropped anywhere the conversation panel did not handle must
     // not navigate the window away from the app.
@@ -51,6 +64,27 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const choices = metadata?.agents ?? [];
   const pi = choices.find(agent => 'runtime' in agent && agent.runtime.engine === 'pi');
   const setupPi = () => setSelectedView('settings');
+  /** Starts a conversation from the new-conversation screen, carrying its text over as the draft or the first message. */
+  async function startConversation(agentId: string | undefined, send: boolean): Promise<void> {
+    if (opening) return;
+    const text = launchText, before = controller.getSnapshot().active;
+    let started = false;
+    setOpening(true);
+    try {
+      await controller.create(agentId);
+      const active = controller.getSnapshot().active;
+      // A refused creation reports its own error; the typed text stays where it was.
+      if (!active || active === before) return;
+      started = true;
+      if (text) await active.store.setDraft(text);
+      if (send && text.trim()) await controller.conversationActions(active).submit(() => active.store.send());
+    } catch {
+      // The conversation shows what happened to the draft and the send; nothing is lost.
+    } finally {
+      // Clear the text in the same step that swaps the screens, so the composer morphs with its text still in it.
+      reveal(() => { setOpening(false); if (started) setLaunchText(''); });
+    }
+  }
   const selected = choices.find(agent => agent.id === app.active?.agent.id && agent.availability.kind === 'ready')
     ?? choices.find(agent => agent.id === metadata?.defaultAgentId && agent.availability.kind === 'ready')
     ?? choices.find(agent => agent.availability.kind === 'ready');
@@ -91,14 +125,15 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   })() : null;
   // The footer carries the conversation's disclosure wherever its composer is on screen.
   const composerVisible = Boolean(activeConversation) && ((selectedView === 'chats' && !slots.workspace) || (workspaceOpen && Boolean(slots.workspace)));
-  const conversation = !slots.workspace && activeConversation
+  const canStart = enabled && app.saved.pendingCreation === null && !opening;
+  const conversation = !slots.workspace && activeConversation && !opening
     ? activeConversation
-    : <section className="conversation-panel empty-workspace">
-        <p className="eyebrow">YOUR LOCAL WORKSPACE</p>
-        <h1>A conversation that stays with you.</h1>
-        <p>{app.host.kind === 'ready' && !selected ? 'No agents are available to start a conversation.' : 'Connect to your local host, then start a conversation. Your chats and drafts stay here when you come back.'}</p>
-        <div className="composer empty-composer"><p>Choose your chat settings.</p><ComposerAgentControls agents={choices} agent={selected ?? null} hasConversation={false} enabled={enabled && app.saved.pendingCreation === null} onStartConversation={id => void controller.create(id)} onSetupPi={setupPi} /></div>
-      </section>;
+    : <NewConversation text={launchText} onText={setLaunchText} placeholder={presentation.placeholder}
+        note={app.host.kind === 'ready' && !selected ? 'No agents are available to start a conversation.'
+          : app.host.kind !== 'ready' ? 'Connect to your local host, then start a conversation. Your chats and drafts stay here when you come back.' : null}
+        canSend={canStart && Boolean(selected?.commands.includes('send')) && Boolean(launchText.trim())}
+        onSend={() => void startConversation(selected?.id, true)}
+        controls={<ComposerAgentControls agents={choices} agent={selected ?? null} hasConversation={false} enabled={canStart} onStartConversation={id => void startConversation(id, false)} onSetupPi={setupPi} />} />;
   const hostAlerts = <>
     {app.storageFailure && <div className="application-alert" role="alert"><strong>Local storage unavailable. Commands are blocked.</strong><p>{app.storageFailure}</p><p>Existing records have not been discarded. Restore browser storage access, then reload.</p></div>}
     {app.error && <p className="application-alert" role="alert">{app.error}</p>}
