@@ -7,7 +7,7 @@ import { createProviderRegistry } from '@openpane/host';
 import { frontendToolsFor } from '@openpane/host/frontend-tools';
 import { createServerExtensions } from '@openpane/host/extensions';
 import { entry } from '../host/extensions/fixtures.mjs';
-import { fixture as hostFixture, scope as hostScope, snapshot } from '../host/fixture.mjs';
+import { fixture as hostFixture, scope as hostScope, snapshot, until } from '../host/fixture.mjs';
 import { SERVICE_WIRE_VERSION } from '@openpane/contracts/compatibility';
 import { extension, fixture, create, stored, send, unavailable, actualInput, offered, aguiExtension, secret, selected } from './provider-send-fixture.mjs';
 
@@ -224,7 +224,7 @@ for (const duplicate of [false, true]) {
     const entered = Promise.withResolvers(), release = Promise.withResolvers();
     const a = extension({ submit: (operation, { effect }) => effect(operation),
       async reconcile(operation, { effect }) {
-        if (a.calls.reconciles.length === 2) entered.resolve();
+        if (a.calls.reconciles.length === 1) entered.resolve();
         await release.promise;
         return effect(operation, 'completed');
       } });
@@ -232,13 +232,16 @@ for (const duplicate of [false, true]) {
     await port.submit(send(scope));
     a.connected.submit = async operation => { a.calls.submits.push(operation); return { kind: 'pending', evidence: { queued: true } }; };
     const left = port.submit(send(scope, 'left')), right = port.submit(send(scope, duplicate ? 'left' : 'right'));
+    const pending = Promise.all([left, right]);
     await entered.promise;
-    release.resolve();
-    const results = await Promise.all([left, right]);
+    try {
+      await assert.rejects(until(() => a.calls.reconciles.length > 1, 200), /Condition timed out/);
+    } finally { release.resolve(); await pending; }
+    const results = await pending;
     assert.equal(results.filter(result => result.kind === 'receipt').length, duplicate ? 2 : 1);
     if (duplicate) assert.equal(results[0].receipt.hostOperationId, results[1].receipt.hostOperationId);
     else assert.equal(results.find(result => result.kind === 'rejected').reason, 'send-awaiting-confirmation');
-    assert.deepEqual(a.calls.reconciles, [a.calls.submits[0], a.calls.submits[0]]);
+    assert.deepEqual(a.calls.reconciles, [a.calls.submits[0]]);
     assert.equal(a.calls.submits.length, 2);
     assert.equal(f.inspect(db => db.prepare('SELECT COUNT(*) AS n FROM commands').get().n), 2);
     assert.equal((await port.receipt('send')).state.kind, 'completed');
