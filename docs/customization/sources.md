@@ -1,5 +1,7 @@
 # Committed customization sources
 
+See the [customization guide](../extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview.
+
 The source API retrieves committed inputs. An internal preparation helper installs their locked dependencies into disposable copies. The [desktop builder](../../templates/customization/README.md) uses prepared graphs to build and browser-qualify the complete application.
 
 The Node host resolves the committed package and its pinned external sources through its dedicated entry point.

@@ -1,8 +1,12 @@
+import { palettes, type Appearance, type ThemeColors } from '@openpane/theme';
+import { ThemeScope } from '@openpane/ui-primitives/desktop';
+import { BuiltinColors } from './BuiltinColors.js';
 import { Suspense, type ReactNode } from 'react';
 import type { ConversationContentLayoutProps } from '@openpane/sdk/react';
 import { CustomizationBoundary, type ContentLayoutSelection } from './DesktopCustomizations.js';
 
-export function CustomizationContent({ selection, conversationKey, transcript, nativeTranscript, modules, before = null }: ConversationContentLayoutProps & {
+export function CustomizationContent({ contentPalette = palettes, selection, conversationKey, transcript, nativeTranscript, modules, before = null }: ConversationContentLayoutProps & {
+  readonly contentPalette?: Readonly<Record<Appearance, ThemeColors>>;
   readonly selection: ContentLayoutSelection;
   readonly conversationKey: string;
   readonly nativeTranscript: ReactNode;
@@ -11,15 +15,17 @@ export function CustomizationContent({ selection, conversationKey, transcript, n
 }) {
   const fallback = <>{transcript}{modules}</>;
   let content = fallback;
-  if (selection.kind === 'conflict') {
-    content = <><p role="alert">Content layout conflict. {selection.namespaces.join(', ')} claim the layout. The default arrangement remains active.</p>{fallback}</>;
+  if (selection.kind === 'missing') {
+    content = <><BuiltinColors><p role="alert">Selected {selection.namespace} layout is unavailable. The default arrangement remains active.</p></BuiltinColors>{fallback}</>;
+  } else if (selection.kind === 'conflict') {
+    content = <><BuiltinColors><p role="alert">Content layout conflict. {selection.namespaces.join(', ')} claim the layout. The default arrangement remains active.</p></BuiltinColors>{fallback}</>;
   } else if (selection.kind === 'claimed') {
     const Layout = selection.owner.presentation.contentLayout;
-    content = <Suspense fallback={<><p role="status">Content layout is loading. Module actions will return when it is ready.</p>{nativeTranscript}</>}>
+    content = <Suspense fallback={<><BuiltinColors><p role="status">Content layout is loading. Module actions will return when it is ready.</p></BuiltinColors>{nativeTranscript}</>}>
       <CustomizationBoundary key={`${selection.owner.lifetime}/${conversationKey}`} fail={selection.owner.fail} fallback={nativeTranscript}>
         <Layout transcript={transcript} modules={modules} />
       </CustomizationBoundary>
     </Suspense>;
   }
-  return <div className="conversation-content">{before}{content}</div>;
+  return <ThemeScope className="conversation-content" palette={contentPalette}>{before}{content}</ThemeScope>;
 }

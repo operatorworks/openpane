@@ -28,7 +28,8 @@
     "react-dom": "19.3.1",
     "@openpane/ui-primitives": "0.0.0",
     "@openpane/client": "0.0.0",
-    "react-markdown": "10.1.0"
+    "react-markdown": "10.1.0",
+    "@openpane/theme": "0.0.0"
   },
   "devDependencies": {
     "@types/react": "19.3.0",

@@ -15,6 +15,10 @@ import { ComposerAgentControls } from '../application/ComposerAgentControls.js';
 import { NewConversation } from '../application/NewConversation.js';
 import { continuationAnnouncement } from '../application/continuation-copy.js';
 import { ExtensionsList, ExtensionWorkspace, conversationSlots, extensionRows, openableRow } from '../application/ExtensionsView.js';
+import { ThemeScope } from '@openpane/ui-primitives/desktop';
+import { palettes } from '@openpane/theme';
+import { usePersonalization } from '../application/use-personalization.js';
+import { PersonalizationSettings } from '../application/PersonalizationSettings.js';
 import { conversationLabel } from '@openpane/contracts/conversation';
 import type { ApplicationController, OpenConversation } from '../application/application-controller.js';
 
@@ -92,8 +96,15 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   }, []);
   const [selectedView, setSelectedView] = useState<'chats' | 'extensions' | 'settings'>('chats');
   const [selectedExtension, setSelectedExtension] = useState<string | null>(null);
-  const [customizationEnabled, setCustomizationEnabled] = useState(true);
-  const custom = useDesktopCustomizations({ customizations: customization, sink: controller.frontendGenerations, enabled: children === undefined && customizationEnabled });
+  const personalization = usePersonalization();
+  const { document: preferences, session: personalizationSession } = personalization;
+  const customizationEnabled = personalization.readiness === 'ready' && preferences.ui.enabled;
+  const customizationsOn = children === undefined && customizationEnabled;
+  const selectedPalette = preferences.palette;
+  const paletteResource = selectedPalette.kind === 'imported' ? personalization.saved?.palettes.find(item => item.digest === selectedPalette.digest && item.kind === 'ready') : undefined;
+  const contentPalette = paletteResource?.kind === 'ready' ? paletteResource.document.colors : palettes;
+  const custom = useDesktopCustomizations({ customizations: customization, sink: controller.frontendGenerations, enabled: customizationsOn,
+    disabledNamespaces: preferences.ui.disabledNamespaces, slots: preferences.ui.slots, loading: personalization.readiness === 'loading' });
   const [recoveryChoice, setRecoveryChoice] = useState<{ scopeKey: string; agentId: string } | null>(null);
   const pendingScope = app.saved.pendingCreation?.scope;
   const pendingScopeKey = JSON.stringify([pendingScope?.hostId, pendingScope?.conversationId]);
@@ -153,8 +164,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   // Tools leave the conversation column: it keeps load notices, a claimed layout places everything, Extensions runs the rest.
   const layoutClaimed = custom.contentLayout.kind === 'claimed';
   const modules = moduleList(layoutClaimed ? 'all' : 'status');
-  const customizationsOn = children === undefined && customizationEnabled;
-  const rows = extensionRows({ customizations: customization, activations: custom.namespaces, enabled: customizationsOn, metadata });
+  const rows = extensionRows({ customizations: customization, activations: custom.namespaces, enabled: customizationsOn, disabledNamespaces: preferences.ui.disabledNamespaces, metadata });
   const workspaceRow = openableRow(rows.find(row => row.namespace === selectedExtension));
   const workspaceOpen = selectedView === 'extensions' && workspaceRow !== null;
   // One element, placed in one slot: the Chats view, or the open workspace of the active conversation's namespace.
@@ -163,7 +173,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const activeConversation = app.active && activeActions
     ? <ConversationView
         key={`${app.active.viewId}/${app.active.scope.hostId}/${app.active.scope.conversationId}`}
-        transcript={slots.transcript} activity={custom.activity} contentLayout={slots.contentLayout} modules={slots.modules} permissionState={app.permissionState} observation={app.observation} continuation={app.continuation} actions={activeActions} active={app.active} enabled={enabled} storageFailure={app.storageFailure} agent={agent} customizationNotices={customizationNotices}
+        contentPalette={contentPalette} transcript={slots.transcript} activity={custom.activity} contentLayout={slots.contentLayout} modules={slots.modules} permissionState={app.permissionState} observation={app.observation} continuation={app.continuation} actions={activeActions} active={app.active} enabled={enabled} storageFailure={app.storageFailure} agent={agent} customizationNotices={customizationNotices}
         composerControls={canSwitch => <ComposerAgentControls agents={slots.composerAgents} agent={app.active?.agent ?? null} hasConversation enabled={canSwitch && app.saved.pendingCreation === null} onStartConversation={id => void controller.create(id)} onSetupPi={setupPi} />}
       />
     : null;
@@ -198,14 +208,19 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     </select></label>}
     <button disabled={!enabled} onClick={() => void controller.recoverCreation(recoveryAgent ?? undefined)}>Recover creation</button>
   </div>;
+  const personalizationNotice = <>{personalization.diagnostic && <p className="application-alert" role="alert">{personalization.diagnostic}</p>}
+    {selectedPalette.kind === 'imported' && !paletteResource && <p role="alert">Selected palette is unavailable. Reimport it or choose builtin in Settings.</p>}
+    {personalization.recovery.appearance === 'session' && <p role="alert">Default appearance restored for this session.</p>}
+    {personalization.recovery.view === 'session' && <p role="alert">Default view restored for this session.</p>}</>;
   const extensionsView = <div className="extensions-view" inert={suspended}>
     {workspaceOpen
-      ? <ExtensionWorkspace row={workspaceRow} metadata={metadata} workspaces={app.workspaces} active={app.active} controller={controller}
-          conversation={workspaceConversation} status={<>{hostAlerts}{creationRecovery}</>} onBack={() => setSelectedExtension(null)} />
+      ? <ExtensionWorkspace contentPalette={contentPalette} row={workspaceRow} metadata={metadata} workspaces={app.workspaces} active={app.active} controller={controller}
+          conversation={workspaceConversation} status={<>{personalizationNotice}{hostAlerts}{creationRecovery}</>} onBack={() => setSelectedExtension(null)} />
       : <ExtensionsList rows={rows} enabled={!suspended} onOpen={setSelectedExtension}
-          tools={toolsEligible ? moduleList('tools') : null} conversation={toolsTarget} />}
+          tools={toolsEligible ? <ThemeScope palette={contentPalette} className="content-theme">{moduleList('tools')}</ThemeScope> : null} conversation={toolsTarget} />}
   </div>;
   const controls = <div className="application-controls">
+    {!workspaceOpen && personalizationNotice}
     <h2 className="sidebar-title">{selectedView === 'chats' ? 'Chats' : selectedView === 'extensions' ? 'Extensions' : 'Settings'}</h2>
     {app.capturedSends.length > 0 && <section aria-label="Captured tools"><h3>Captured tools</h3>
       <p>Tools are retained for these sends. Execution is not enabled.</p>
@@ -264,7 +279,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
           <p>In a browser, reopen this host with the OpenPane Mac app to use protected setup. You can also supply OPENCODE_GO_API_KEY in the host environment.</p></>}
         <p>Pi supports text chat, saved conversations, and Stop. Tools and file access are unavailable in this integration.</p>
       </section>
-      <section className="settings-section"><h2>Appearance</h2><p>Follows system light or dark appearance.</p><label><input type="checkbox" checked={customizationEnabled} onChange={event => setCustomizationEnabled(event.target.checked)} />Enable customizations</label></section>
+      <PersonalizationSettings state={personalization} customizations={customization} namespaces={custom.namespaces} />
       <section className="settings-section"><h2>About this build</h2>{artifact}</section>
     </section>;
   // On the rail, outside the keyed conversation and outside the chats pane the shell hides while a workspace is open.
@@ -282,9 +297,10 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h4m4 0h8M4 12h8m4 0h4M4 18h2m4 0h10"/><circle cx="10" cy="6" r="2"/><circle cx="14" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></svg>
     </button>
   </nav>;
-  return <DesktopShell navigation={rail} activeView={selectedView} protectedContent={controls} defaultView={views} settingsView={settings}
+  if (personalization.readiness === 'loading') return <ThemeScope><p role="status">Loading local preferences…</p></ThemeScope>;
+  return <DesktopShell appearance={preferences.appearance === 'system' ? undefined : preferences.appearance} onRestoreAppearance={() => void personalizationSession.resetAppearance()} navigation={rail} activeView={selectedView} protectedContent={controls} defaultView={views} settingsView={settings}
     extensionsView={extensionsView} workspaceOpen={workspaceOpen} restoreMode={children === undefined ? 'managed' : 'remount'}
-    onRestore={() => { setCustomizationEnabled(false); setSelectedView('chats'); }}
+    onRestore={() => { void personalizationSession.restoreDefaultView(); setSelectedView('chats'); }}
     status={app.active ? <ConversationStatus active={app.active} /> : 'No conversation open'}
     buildLabel={composerVisible && app.active ? conversationPresentation(app.active.agent, agent).footer : presentation.buildLabel}>{children}</DesktopShell>;
 }

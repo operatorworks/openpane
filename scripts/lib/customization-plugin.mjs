@@ -1,4 +1,4 @@
-import { readFile, realpath } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkCustomizationSource, isWorkerRequest, sourcePolicies } from './customization-source-policy.mjs';
@@ -31,7 +31,7 @@ export function mergePlans(bundled, external) {
   for (const entry of external.entries) {
     if (names.has(entry.manifest.namespace)) throw new Error(`Customization namespace ${entry.manifest.namespace} is both bundled and external`);
   }
-  return { roots: [...new Set([...bundled.roots, ...external.roots])], entries: [...bundled.entries, ...external.entries], identity: external.identity };
+  return { ...(external.kind === 'development' ? { kind: 'development', workingRoot: external.workingRoot } : {}), roots: [...new Set([...bundled.roots, ...external.roots])], entries: [...bundled.entries, ...external.entries], identity: external.identity };
 }
 
 function checkSource(code, id, label) {
@@ -45,6 +45,8 @@ function checkSource(code, id, label) {
 
 export function customizationPlugin(plan) {
   const contained = id => plan.roots.some(root => within(root, id));
+  const importRoots = importer => plan.workingRoot && within(plan.workingRoot, importer) ? [plan.workingRoot] : plan.roots;
+  const cssRoots = plan.workingRoot ? [plan.roots.filter(root => root !== plan.workingRoot), [plan.workingRoot]] : [plan.roots];
   const reserved = name => (name ?? '').startsWith('@openpane/') || Object.hasOwn(SHARED, name);
   const owners = new Map();
   async function owner(path) {
@@ -63,9 +65,14 @@ export function customizationPlugin(plan) {
   const source = `export default [${plan.entries.map(entry => `{manifest:${JSON.stringify(entry.manifest)},load:()=>import(${JSON.stringify(entry.source)})}`).join(',')}];`;
   return {
     name: 'openpane-committed-customization', enforce: 'pre',
-    config: () => ({ tsconfig, resolve: { dedupe: Object.keys(SHARED) }, css: { postcss: { plugins: [customizationCssPolicy(plan.roots)] } },
+    config: () => ({ tsconfig, resolve: { dedupe: Object.keys(SHARED) }, css: { postcss: { plugins: cssRoots.map(roots => customizationCssPolicy(roots)) } },
       oxc: { jsx: { runtime: 'automatic', importSource: 'react' } } }),
     async resolveId(specifier, importer, options) {
+      if (plan.kind === 'development' && importer?.split('?')[0] === selection && plan.entries.some(entry => entry.source === specifier && within(plan.workingRoot, entry.source))) {
+        const path = await realpath(specifier);
+        if (!within(plan.workingRoot, path) || !(await stat(path)).isFile()) throw new Error('Preview desktop entry must remain a contained regular file inside the selected working package.');
+        return path;
+      }
       if (!importer || !contained(importer.split('?')[0])) return;
       if (specifier.startsWith('\0')) return;
       if (sharedImport(specifier)) {
@@ -79,7 +86,7 @@ export function customizationPlugin(plan) {
       if (result?.id.startsWith('\0') && !result.external) return result;
       if (!result || result.external || !isAbsolute(result.id.split('?')[0])) throw new Error(`Unsupported customization import: ${specifier}`);
       const path = await realpath(result.id.split('?')[0]);
-      if (!contained(path)) throw new Error(`Missing or unsupported contained customization source: ${specifier}`);
+      if (!importRoots(importer.split('?')[0]).some(root => within(root, path))) throw new Error(`Missing or unsupported contained customization source: ${specifier}`);
       if (reserved(await owner(path))) throw new Error('Duplicate shared customization dependency');
       return result;
     },
@@ -91,7 +98,7 @@ export function customizationPlugin(plan) {
         if (reserved(await owner(path))) throw new Error('Duplicate shared customization dependency');
         const root = plan.roots.find(root => within(root, path));
         const { assetUrls } = checkSource(await readFile(path, 'utf8'), path, relative(root, path));
-        for (const reference of assetUrls) await checkCustomizationAsset(reference, path, plan.roots);
+        for (const reference of assetUrls) await checkCustomizationAsset(reference, path, importRoots(path));
       }
     },
   };

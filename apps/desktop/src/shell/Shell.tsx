@@ -1,6 +1,8 @@
 import { Component, useState, type ReactNode } from 'react';
 import { Button, Surface, Text, ThemeScope } from '@openpane/ui-primitives/desktop';
 
+import { palettes, type Appearance } from '@openpane/theme';
+
 type ContentState = { readonly kind: 'ready' } | { readonly kind: 'failed' };
 
 type ContentBoundaryProps = { readonly children: ReactNode; readonly revision: number };
@@ -53,7 +55,9 @@ function DefaultView() {
   </div>;
 }
 
-export function DesktopShell({ children, defaultView, settingsView, extensionsView, workspaceOpen = false, protectedContent, navigation, activeView, onRestore, restoreMode = 'remount', status, buildLabel }: {
+export function DesktopShell({ appearance, onRestoreAppearance, children, defaultView, settingsView, extensionsView, workspaceOpen = false, protectedContent, navigation, activeView, onRestore, restoreMode = 'remount', status, buildLabel }: {
+  readonly appearance?: Appearance | undefined;
+  readonly onRestoreAppearance?: () => void;
   readonly children?: ReactNode;
   readonly defaultView?: ReactNode;
   readonly settingsView?: ReactNode;
@@ -73,11 +77,12 @@ export function DesktopShell({ children, defaultView, settingsView, extensionsVi
   const revision = view.kind === 'initial' ? 0 : view.revision;
   const showSettings = settingsView !== undefined && activeView === 'settings';
   const showExtensions = extensionsView !== undefined && activeView === 'extensions';
-  return <ThemeScope className="desktop-shell" data-workspace-view={activeView} data-workspace-open={showExtensions && workspaceOpen ? 'true' : undefined}>
+  return <ThemeScope appearance={appearance} className="desktop-shell" data-workspace-view={activeView} data-workspace-open={showExtensions && workspaceOpen ? 'true' : undefined}>
     <header className="shell-header">
       <div className="brand"><span className="brand-mark" aria-hidden="true">a</span><strong>OpenPane</strong><span className="platform-label">Desktop</span></div>
       <details className="recovery-menu"><summary>View options</summary><nav aria-label="Recovery controls">
         <Button tone="secondary" onClick={() => { onRestore?.(); setView((current) => ({ kind: 'default', revision: current.kind === 'default' ? current.revision + 1 : 1 })); }}>Restore default view</Button>
+        {onRestoreAppearance && <Button tone="secondary" onClick={onRestoreAppearance}>Restore default appearance</Button>}
         <Button tone="secondary" onClick={() => window.location.reload()}>Reload app</Button>
       </nav></details>
     </header>
@@ -86,7 +91,7 @@ export function DesktopShell({ children, defaultView, settingsView, extensionsVi
     <main id="main-content">
       <div className="shell-view" hidden={showSettings || showExtensions}>
         <ContentBoundary key={boundaryKey} revision={revision}>
-          {view.kind === 'initial' ? children ?? defaultView ?? <DefaultView /> : defaultView ?? <DefaultView />}
+          <ThemeScope palette={palettes} className="content-theme">{view.kind === 'initial' ? children ?? defaultView ?? <DefaultView /> : defaultView ?? <DefaultView />}</ThemeScope>
         </ContentBoundary>
       </div>
       {settingsView !== undefined && <div className="shell-view" hidden={!showSettings}>

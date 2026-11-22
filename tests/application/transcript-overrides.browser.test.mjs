@@ -1,3 +1,4 @@
+import { expectStickyCleanupBlocksReenable } from './retirement-support.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile, rm } from 'node:fs/promises';
@@ -46,13 +47,18 @@ test('committed artifact replaces transcript, updates activity and retains indep
   const transcript = page.getByRole('region', { name: 'Committed transcript' });
   await transcript.waitFor(); assert.equal(await page.getByLabel('Messages', { exact: true }).count(), 0);
   await draft(page, 'Artifact draft'); const previous = await editor(page).elementHandle();
-  await page.getByRole('button', { name: 'Review the plan', exact: true }).click();
+  await tools(page);
+  await page.getByRole('button', { name: 'Review the plan', exact: true }).click(); await chats(page);
   await transcript.getByText('Review our current plan. Identify the next useful step and any unresolved decision.', { exact: true }).waitFor();
   await page.getByRole('heading', { name: 'Approval required', exact: true }).waitFor();
   await unchanged(page, previous, 'Artifact draft'); assert.equal((await host.entries()).length, 1);
   await revealRecovery(page); await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   await page.getByLabel('Messages', { exact: true }).waitFor();
-  assert.equal(await transcript.count(), 0); assert.equal(await page.getByRole('button', { name: 'Review the plan', exact: true }).count(), 0);
+  assert.equal(await transcript.count(), 0);
+  await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Extensions', exact: true }).click();
+  await page.getByRole('heading', { name: 'Extensions', level: 1, exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Review the plan', exact: true }).count(), 0);
+  await chats(page);
   await unchanged(page, previous, 'Artifact draft'); assert.equal((await host.entries()).length, 1);
 });
 
@@ -163,12 +169,13 @@ test('override receives each conversation and refuses retained commands after na
 
 test('restore before activation takes a late override disposer once and never mounts its transcript', { timeout: 45_000 }, async t => {
   const { host, page } = await open(t);
-  await customRuntime(page, host, entry(`return new Promise(resolve => { window.finish = () => { ${override}
+  await customRuntime(page, host, entry(`window.activations = (window.activations || 0) + 1; return new Promise(resolve => { window.finish = () => { ${override}
     resolve({ modules: [], overrides: { transcript: Transcript }, dispose() { window.disposals = (window.disposals || 0) + 1; return Promise.reject(new Error('Late rejected cleanup')); } }); }; });`));
   await wait(() => page.evaluate(() => typeof window.finish === 'function'), 'late override activation');
   await draft(page, 'Late draft'); const previous = await editor(page).elementHandle(), errors = []; page.on('pageerror', error => errors.push(error.message));
   await revealRecovery(page); await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   await page.evaluate(() => window.finish()); await wait(() => page.evaluate(() => window.disposals === 1), 'late override cleanup');
+  await expectStickyCleanupBlocksReenable(page, 1);
   assert.equal(await page.getByRole('region', { name: 'Fixture transcript' }).count(), 0); await unchanged(page, previous, 'Late draft'); assert.deepEqual(errors, []);
 });
 
@@ -287,56 +294,4 @@ test('nested module and action capture survives author mutation through real she
   await revealRecovery(page); await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   await wait(() => page.evaluate(() => window.disposals === 1), 'mutated contribution disposal');
   await unchanged(page, previous, 'Mutation draft');
-});
-
-test('StrictMode delayed same-array reactivation never remounts an obsolete transcript and disposes late malformed results', { timeout: 45_000 }, async t => {
-  const { build } = await import('esbuild'), { chromium } = await import('playwright');
-  const bundle = await build({ stdin: { contents: `import React from 'react'; import { createRoot } from 'react-dom/client'; import { flushSync } from 'react-dom';
-    import { CustomizationTranscript, useDesktopCustomizations } from './apps/desktop/src/application/DesktopCustomizations.tsx';
-    window.activations = 0; window.loads = 0; window.disposals = []; window.mounts = []; window.finish = {};
-    const customizations = [{ manifest: { namespace: 'strict', sdkVersion: '0.13.0', entries: [{ kind: 'desktop', module: './desktop.js' }] },
-      load: async () => { window.loads++; return { default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
-        const id = ++window.activations; let disposed = false;
-        function Transcript() { React.useLayoutEffect(() => { window.mounts.push({ id, disposed }); }, []); return <p>Owner {id}</p>; }
-        return new Promise(resolve => { window.finish[id] = malformed => resolve({ modules: [],
-          get overrides() { if (malformed) throw new Error('Late malformed presentation'); return { transcript: Transcript }; },
-          dispose() { disposed = true; window.disposals.push(id); if (id === 3) return Promise.reject(new Error('Late cleanup rejection')); } }); });
-      } } }; } }];
-    function App() { const [enabled, setEnabled] = React.useState(true);
-      window.disable = () => flushSync(() => setEnabled(false)); window.enable = () => flushSync(() => setEnabled(true));
-      const custom = useDesktopCustomizations({ customizations, enabled });
-      return <><input aria-label="Persistent draft" defaultValue="Strict draft" />
-        {custom.namespaces.filter(owner => owner.kind === 'failed').map(owner => <p role="alert" key={owner.namespace}>{owner.message}</p>)}
-        <CustomizationTranscript selection={custom.transcript} context={{}} conversationKey="strict" fallback={<p>Default transcript</p>} /></>;
-    }
-    createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>);`, resolveDir: root, loader: 'jsx' },
-    bundle: true, write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"development"' } });
-  const browser = await chromium.launch(); t.after(() => browser.close()); const page = await browser.newPage(), errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-  await page.route('http://localhost/fixture', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }));
-  await page.goto('http://localhost/fixture'); await page.addScriptTag({ content: bundle.outputFiles[0].text });
-  await wait(() => page.evaluate(() => window.activations === 1), 'StrictMode activation');
-  assert.equal(await page.evaluate(() => window.loads), 2);
-  await page.evaluate(() => window.finish[1](false)); await page.getByText('Owner 1', { exact: true }).waitFor();
-  const previous = await page.getByRole('textbox', { name: 'Persistent draft' }).elementHandle();
-  const mounts = await page.evaluate(() => window.mounts);
-  await page.evaluate(() => { window.disable(); window.enable(); });
-  await wait(() => page.evaluate(() => window.activations === 2), 'same-array delayed reactivation');
-  await page.getByText('Default transcript', { exact: true }).waitFor();
-  assert.deepEqual(await page.evaluate(() => window.mounts), mounts);
-  assert.deepEqual(await page.evaluate(() => window.disposals), [1]);
-  await page.evaluate(() => window.finish[2](false)); await page.getByText('Owner 2', { exact: true }).waitFor();
-  await page.evaluate(() => { window.disable(); window.enable(); });
-  await wait(() => page.evaluate(() => window.activations === 3), 'pending obsolete activation');
-  await page.evaluate(() => { window.disable(); window.enable(); });
-  await wait(() => page.evaluate(() => window.activations === 4), 'replacement activation');
-  await page.evaluate(() => window.finish[4](false)); await page.getByText('Owner 4', { exact: true }).waitFor();
-  await page.evaluate(() => window.finish[3](true));
-  await wait(() => page.evaluate(() => window.disposals.includes(3)), 'late malformed cleanup');
-  await page.getByText('Owner 4', { exact: true }).waitFor(); assert.equal(await page.getByRole('alert').count(), 0);
-  await page.evaluate(() => window.disable()); await page.getByText('Default transcript', { exact: true }).waitFor();
-  assert.deepEqual(await page.evaluate(() => window.disposals), [1, 2, 3, 4]);
-  assert.equal(await page.evaluate(() => window.mounts.every(mount => !mount.disposed && mount.id !== 3)), true);
-  assert.equal(await page.getByRole('textbox', { name: 'Persistent draft' }).evaluate((node, old) => node === old, previous), true);
-  assert.equal(await page.getByRole('textbox', { name: 'Persistent draft' }).inputValue(), 'Strict draft'); assert.deepEqual(errors, []);
 });

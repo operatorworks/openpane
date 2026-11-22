@@ -69,8 +69,8 @@ export const server = {
 
 test('shipped Plan review template typechecks against the actual receipt and command contracts', async () => {
   const template = await readFile(new URL('../../../templates/customization/desktop/index.tsx', import.meta.url), 'utf8');
-  await assertCompileCases({ config: 'apps/desktop/tsconfig.json',
-    prefix: template.replace("import { reviewPrompt } from '../shared/prompts.js';", "const reviewPrompt = 'Review the plan';"), cases: [['', null]] });
+  await assertCompileCases({ config: 'apps/desktop/tsconfig.json', extension: 'tsx',
+    prefix: template.replace("import './review.css';", '').replace("import { reviewPrompt } from '../shared/prompts.js';", "const reviewPrompt = 'Review the plan';"), cases: [['', null]] });
 });
 
 test('slot selection requires a ready owner with its captured component', () => assertCompileCases({

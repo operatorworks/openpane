@@ -28,12 +28,6 @@
 
 /* Keep navigation and the composer in place while the conversation scrolls. */
 .desktop-shell:has(.application-controls) {
-  --aui-color-canvas: #ffffff !important;
-  --aui-color-surface: #f7f7f8 !important;
-  --aui-color-raised: #eeeeef !important;
-  --aui-color-border: #e4e4e7 !important;
-  --aui-color-text: #242424 !important;
-  --aui-color-muted: #68686e !important;
   height: 100dvh;
   min-height: 0;
   display: grid;
@@ -41,14 +35,6 @@
   grid-template-rows: 52px minmax(0, 1fr) 30px;
   overflow: hidden;
   font-size: 14px;
-}
-.desktop-shell[data-appearance="dark"]:has(.application-controls) {
-  --aui-color-canvas: #191919 !important;
-  --aui-color-surface: #212121 !important;
-  --aui-color-raised: #303030 !important;
-  --aui-color-border: #343434 !important;
-  --aui-color-text: #ececec !important;
-  --aui-color-muted: #a0a0a0 !important;
 }
 .desktop-shell:has(.application-controls) .shell-header {
   grid-column: 1 / -1;
@@ -171,7 +157,6 @@
   padding: 0; border: 0; background: transparent;
 }
 .desktop-shell:has(.view-rail) .shell-header .brand { display: none; }
-.desktop-shell[data-workspace-view="chats"] .shell-header { display: none; }
 .view-rail {
   grid-column: 1; grid-row: 1 / -1; display: flex; flex-direction: column;
   align-items: center; gap: 12px; padding: 18px 6px 16px;
@@ -288,6 +273,8 @@
 .extension-status-strip .application-alert, .extension-status-strip .creation-recovery { margin: 0; flex-basis: 100%; }
 .extension-workspace { flex: 1; min-height: 0; display: flex; overflow: hidden; container-type: inline-size; }
 .extension-workspace > * { flex: 1; min-width: 0; }
+.workspace-theme { display: flex; min-height: 0; min-width: 0; }
+.workspace-theme > * { flex: 1; min-height: 0; min-width: 0; }
 .extension-loading { padding: 24px; color: var(--aui-color-muted); }
 .desktop-shell[data-workspace-open="true"] { grid-template-columns: 56px 0 minmax(0, 1fr); }
 .desktop-shell[data-workspace-open="true"] .application-controls { display: none; }
@@ -322,3 +309,12 @@
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none; }
 }
+
+.content-theme { display: contents; }
+.personalization-json { display: block; width: 100%; min-height: 12rem; font-family: monospace; }
+.palette-list { display: grid; gap: 1rem; padding: 0; list-style: none; }
+.palette-list li { overflow-wrap: anywhere; }
+.personalization-controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.palette-preview { padding: 1rem; border: 1px solid var(--aui-color-border); background: var(--aui-color-canvas); color: var(--aui-color-text); }
+
+.builtin-colors > * { background: var(--aui-color-canvas); color: var(--aui-color-text); }

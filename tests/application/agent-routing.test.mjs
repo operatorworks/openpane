@@ -1,6 +1,6 @@
 import { NO_OBSERVABILITY } from '../../apps/host/build/tsc/observability.js';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -79,6 +79,7 @@ test('authorized agent API and browser route two recorded agents and retain unav
   }
 
   const custom = repository();
+  custom.write('desktop/index.tsx', readFileSync(new URL('./fixtures/global-layout.tsx', import.meta.url), 'utf8'));
   t.after(() => rmSync(custom.directory, { recursive: true, force: true }));
   buildCustom(custom);
   const assets = readArtifactBytes(join(custom.directory, 'browser'), 'browser-development');

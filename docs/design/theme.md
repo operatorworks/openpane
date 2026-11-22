@@ -1,5 +1,7 @@
 # Default theme and primitives
 
+See the [customization guide](../extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview.
+
 The theme packages give desktop and iOS modules the same semantic colors, spacing, typography, and motion durations.
 Desktop uses DOM elements. Native uses React Native controls.
 Neither package depends on the host or an agent adapter.
@@ -39,6 +41,10 @@ Font sizes use `--aui-font-size-*`.
 The other families are `--aui-space-*`, `--aui-radius-*`, `--aui-leading-*`, `--aui-weight-*`, `--aui-text-color-*`, `--aui-motion-*`, `--aui-control-*`, `--aui-button-*`, and `--aui-disabled-opacity`.
 `ThemeScope` applies them automatically.
 The stylesheet contract test checks every theme variable reference against the emitted variables.
+
+## Application palettes
+
+Desktop Settings stores appearance choices and imported light/dark palette pairs separately from executable UI. Pass a paired `palette` to `ThemeScope` to select its map after resolving appearance; `colors` remains a single-map module override. A scope accepts one input or the other. The application keeps builtin navigation, Settings and recovery outside selected content palettes. See the [customization guide](../extensions/customization-guide.md) for the V1 file contract and origin-local persistence/recovery.
 
 ## Native modules
 

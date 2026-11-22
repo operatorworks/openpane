@@ -17,3 +17,20 @@ test('a bundled extension reads Loading, not Not configured, until the host repo
   assert.equal(rowOf(metadata([{ namespace, state: 'active', operations: [], installations: [] }])).state, 'Not configured');
   assert.equal(rowOf(metadata([{ namespace, state: 'active', operations: [], installations: [{ installationId: 'books', status: 'available' }] }])).state, 'Ready');
 });
+
+test('desktop disablement keeps an available host provider independently visible', () => {
+  const [row] = extensionRows({ customizations, activations: [], enabled: true, disabledNamespaces: ['ledger'], metadata: metadata([
+    { namespace, state: 'active', operations: [], installations: [{ installationId: 'books', status: 'available' }] },
+  ]) });
+  assert.equal(row.desktopState, 'Disabled'); assert.equal(row.hostState, 'Available'); assert.equal(openableRow(row), null);
+});
+
+for (const enabled of [false, true]) test(`cleanup failure keeps restart guidance while desktop enablement is ${enabled}`, () => {
+  const [row] = extensionRows({ customizations,
+    activations: [{ namespace, kind: 'failed', message: 'Executable UI cleanup failed. Restart the app before enabling this namespace.' }],
+    enabled, disabledNamespaces: ['ledger'], metadata: metadata([
+      { namespace, state: 'active', operations: [], installations: [{ installationId: 'books', status: 'available' }] },
+    ]) });
+  assert.equal(row.state, 'Failed'); assert.match(row.detail, /Restart/);
+  assert.equal(row.desktopState, 'Failed'); assert.equal(row.hostState, 'Available'); assert.equal(openableRow(row), null);
+});

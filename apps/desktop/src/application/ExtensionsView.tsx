@@ -1,3 +1,5 @@
+import { ThemeScope } from '@openpane/ui-primitives/desktop';
+import { palettes, type Appearance, type ThemeColors } from '@openpane/theme';
 import { Suspense, useEffect, type ReactNode } from 'react';
 import type { ConversationScope, Json } from '@openpane/contracts';
 import { sameScope } from '@openpane/contracts';
@@ -13,6 +15,9 @@ export interface ExtensionRow {
   readonly label: string;
   readonly state: ExtensionRowState;
   readonly detail: string | null;
+  readonly desktopState: string;
+  readonly hostState: string;
+  readonly bundled: boolean;
   readonly owner: Extract<NamespaceActivation, { readonly kind: 'ready' }> | null;
   readonly workspace: WorkspaceContribution | null;
 }
@@ -59,9 +64,9 @@ export function conversationSlots({ row, active, metadata, custom, modules, agen
 }
 
 /** One row per namespace in the static desktop selection or the host's configured server extensions, sorted by namespace. */
-export function extensionRows({ customizations, activations, enabled, metadata }: {
+export function extensionRows({ customizations, activations, enabled, disabledNamespaces = [], metadata }: {
   readonly customizations: readonly DesktopCustomization[]; readonly activations: readonly NamespaceActivation[];
-  readonly enabled: boolean; readonly metadata: ServiceMetadata | null;
+  readonly enabled: boolean; readonly disabledNamespaces?: readonly string[]; readonly metadata: ServiceMetadata | null;
 }): readonly ExtensionRow[] {
   const bundled = new Set(customizations.map(item => item.manifest.namespace));
   const names = [...new Set([...bundled, ...(metadata?.extensions ?? []).map(item => item.namespace)])].sort();
@@ -71,10 +76,12 @@ export function extensionRows({ customizations, activations, enabled, metadata }
     const owner = activation?.kind === 'ready' ? activation : null;
     const workspace = owner?.presentation.workspace ?? null;
     const row = (state: ExtensionRowState, detail: string | null = null): ExtensionRow =>
-      ({ namespace, label: workspace?.label ?? namespace, state, detail, owner, workspace });
+      ({ namespace, label: workspace?.label ?? namespace, state, detail, owner, workspace, bundled: bundled.has(namespace),
+        desktopState: activation?.kind === 'failed' ? 'Failed' : !bundled.has(namespace) ? 'No desktop code' : !enabled || disabledNamespaces.includes(namespace) ? 'Disabled' : activation?.kind === 'ready' ? 'Ready' : 'Loading',
+        hostState: metadata === null ? 'Unknown' : !descriptor ? 'Not configured' : descriptor.state === 'failed' ? 'Failed' : descriptor.installations.length === 0 ? 'Not configured' : descriptor.installations.every(item => item.status === 'unavailable') ? 'Unavailable' : 'Available' });
     if (!bundled.has(namespace)) return row(descriptor?.state === 'failed' ? 'Failed' : 'No view', descriptor?.state === 'failed' ? SERVER_FAILURE : null);
-    if (!enabled) return row('Disabled', 'Customizations are off. Turn on Enable customizations in Settings to open this extension.');
     if (activation?.kind === 'failed') return row('Failed', activation.message);
+    if (!enabled || disabledNamespaces.includes(namespace)) return row('Disabled', 'Executable UI is off. Enable this desktop UI in Settings to open it.');
     if (descriptor?.state === 'failed') return row('Failed', SERVER_FAILURE);
     if (!activation || activation.kind === 'loading') return row('Loading');
     if (!workspace) return row('No view');
@@ -106,6 +113,8 @@ export function ExtensionsList({ rows, onOpen, enabled, tools = null, conversati
             <div className="extension-row-text">
               <strong>{row.label}</strong>
               <span className="extension-state" data-state={row.state}>{row.state}</span>
+              <p>Desktop UI: {row.desktopState} · Host: {row.hostState}</p>
+              {row.bundled && <p>Code is included in this desktop build.</p>}
               {row.detail && <p>{row.detail}</p>}
             </div>
             {selectable && <button type="button" disabled={!enabled} aria-label={`Open ${row.label}`} onClick={() => onOpen(row.namespace)}>Open</button>}
@@ -120,7 +129,8 @@ export function ExtensionsList({ rows, onOpen, enabled, tools = null, conversati
   </section>;
 }
 
-export function ExtensionWorkspace({ row, metadata, workspaces, active, controller, conversation, status, onBack }: {
+export function ExtensionWorkspace({ contentPalette = palettes, row, metadata, workspaces, active, controller, conversation, status, onBack }: {
+  readonly contentPalette?: Readonly<Record<Appearance, ThemeColors>>;
   readonly row: OpenableRow;
   readonly metadata: ServiceMetadata | null;
   readonly workspaces: Readonly<Record<string, WorkspaceConversations>>;
@@ -187,7 +197,7 @@ export function ExtensionWorkspace({ row, metadata, workspaces, active, controll
     <div className="extension-workspace" data-extension-workspace={namespace}>
       <Suspense fallback={<p role="status" className="extension-loading">Loading {row.label}…</p>}>
         <CustomizationBoundary key={row.owner.lifetime} fail={row.owner.fail} fallback={<p role="alert">{row.label} could not load.</p>}>
-          <View {...props} />
+          <ThemeScope palette={contentPalette} className="workspace-theme"><View {...props} /></ThemeScope>
         </CustomizationBoundary>
       </Suspense>
     </div>

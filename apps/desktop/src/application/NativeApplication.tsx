@@ -6,11 +6,14 @@ import { ThemeScope, Surface } from '@openpane/ui-primitives/desktop';
 import { BrowserApplication } from '../shell/BrowserApplication.js';
 import { createApplicationController } from './application-controller.js';
 import type { ApplicationController } from './application-controller.js';
+import { usePersonalization } from './use-personalization.js';
+import { PersonalizationSettings } from './PersonalizationSettings.js';
 import { BrowserViewStorage } from './browser-storage.js';
 
 type Session = { readonly id: string; readonly controller: ApplicationController };
 const nativeInvoke: MacNativeInvoke = command => invoke('native_access', { command });
 export function NativeApplication() {
+  const personalization = usePersonalization();
   const [session, setSession] = useState<Session | null>(null);
   const current = useRef<Session | null>(null);
   const pending = useRef(false);
@@ -40,10 +43,13 @@ export function NativeApplication() {
     {error && <p role="alert">{error}</p>}
     {busy && <p role="status">Connecting to the local host…</p>}
   </section>;
+  if (personalization.readiness === 'loading') return <p role="status">Loading local preferences…</p>;
   return session
     ? <BrowserApplication key={session.id} controller={session.controller} connection={{ kind: 'native', controls, reconnect: () => void connect() }} suspended={busy} />
-    : <ThemeScope className="desktop-shell"><Surface className="landing"><h1>Connect this Mac</h1>
+    : <ThemeScope appearance={personalization.document.appearance === 'system' ? undefined : personalization.document.appearance} className="desktop-shell"><Surface className="landing"><h1>Connect this Mac</h1>
         <p>Start the OpenPane host on this Mac, then reconnect.</p>
+        {personalization.diagnostic && <p role="alert">{personalization.diagnostic}</p>}
         {controls}<button disabled={busy} onClick={() => void connect()}>Reconnect</button>
+        <details><summary>Appearance and local recovery</summary><PersonalizationSettings state={personalization} customizations={[]} namespaces={[]} /></details>
       </Surface></ThemeScope>;
 }

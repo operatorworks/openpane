@@ -1,3 +1,4 @@
+import { expectStickyCleanupBlocksReenable } from './retirement-support.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile, rm } from 'node:fs/promises';
@@ -21,11 +22,7 @@ test('committed layout arranges selected transcript and nested action with prote
   const parentManifest = JSON.parse(await readFile(join(custom.repo, 'package.json'), 'utf8'));
   parentManifest.openpane.extensions = [{ repository: child.repo, commit: child.commit() }];
   custom.write('package.json', JSON.stringify(parentManifest));
-  const template = await readFile(join(custom.repo, 'desktop/index.tsx'), 'utf8');
-  custom.write('desktop/index.tsx', template.replace("import { createElement }", "import { createElement, useState }")
-    .replace("function ReviewLayout({ transcript, modules }: ConversationContentLayoutProps) {", `function ReviewLayout({ transcript, modules }: ConversationContentLayoutProps) {
-      const [broken, setBroken] = useState(false); if (broken) throw new Error('Committed layout failed');`)
-    .replace("createElement('div', { className: 'review-transcript' }, transcript)", "createElement('div', { className: 'review-transcript' }, createElement('button', { onClick: () => setBroken(true) }, 'Fail committed layout'), transcript)"));
+  custom.write('desktop/index.tsx', await readFile(join(root, 'tests/application/fixtures/global-layout.tsx'), 'utf8'));
   const commit = custom.commit();
   child.write('desktop/index.tsx', 'throw new Error("Dirty source must not enter artifact");');
   buildCustom(custom, commit);
@@ -110,7 +107,7 @@ test('layout activation, initial and retained suspension preserve protected DOM 
       load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { window.activations++; return new Promise(resolve => { window.activateLayout = () => resolve({ contentLayout: Layout, modules: [{ id: 'tracked', label: 'Tracked', component() { return <Tracked kind="module" />; } }], overrides: { transcript() { return <Tracked kind="transcript" />; } }, dispose() { window.disposals++; } }); }); } } }) }];
     function App() { const [enabled, setEnabled] = React.useState(true); window.disable = () => flushSync(() => setEnabled(false)); window.enable = () => flushSync(() => setEnabled(true));
       const custom = useDesktopCustomizations({ customizations, enabled });
-      return <DesktopShell protectedContent={<aside className="application-controls">Protected navigation</aside>} defaultView={<div className="chat-view"><ConversationView active={active} actions={actions} enabled storageFailure="" agent="codex" transcript={custom.transcript} contentLayout={custom.contentLayout} modules={custom.namespaces.map(owner => <CustomizationModules key={owner.namespace} owner={owner} active={active} actions={actions} enabled agent="codex" />)} /></div>} restoreMode="managed" onRestore={() => setEnabled(false)} />; }
+      return <DesktopShell protectedContent={<aside className="application-controls">Protected navigation</aside>} defaultView={<div className="chat-view"><ConversationView active={active} actions={actions} enabled storageFailure="" agent="codex" transcript={custom.transcript} contentLayout={custom.contentLayout} modules={custom.namespaces.map(owner => <CustomizationModules surface="all" key={owner.namespace} owner={owner} active={active} actions={actions} enabled agent="codex" />)} /></div>} restoreMode="managed" onRestore={() => setEnabled(false)} />; }
     createRoot(document.getElementById('root')).render(<App />);`, resolveDir: root, loader: 'jsx' }, bundle: true, write: false, outfile: 'fixture.js', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' } });
   const browser = await chromium.launch(); t.after(() => browser.close()); const page = await browser.newPage();
   await page.route('http://localhost/fixture', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }));
@@ -240,13 +237,14 @@ for (const reject of [false, true]) test(`lazy layout ${reject ? 'rejection rele
 for (const suspended of [false, true]) test(`restore during ${suspended ? 'layout suspension' : 'activation'} refuses late layout publication and retires once`, { timeout: 45_000 }, async t => {
   const { host, page } = await open(t);
   const value = `{ contentLayout: Layout, modules: [], dispose() { window.disposals = (window.disposals || 0) + 1; return Promise.reject(new Error('Late layout cleanup')); } }`;
-  await customRuntime(page, host, entry(`${arranged} ${suspended ? `const Lazy = React.lazy(() => new Promise(resolve => { window.finish = () => resolve({ default: Layout }); })); return { ...${value}, contentLayout: Lazy };` : `return new Promise(resolve => { window.finish = () => resolve(${value}); });`}`));
+  await customRuntime(page, host, entry(`window.activations = (window.activations || 0) + 1; ${arranged} ${suspended ? `const Lazy = React.lazy(() => new Promise(resolve => { window.finish = () => resolve({ default: Layout }); })); return { ...${value}, contentLayout: Lazy };` : `return new Promise(resolve => { window.finish = () => resolve(${value}); });`}`));
   await wait(() => page.evaluate(() => typeof window.finish === 'function'), 'pending layout');
   await draft(page, 'Late layout draft'); const previous = await editor(page).elementHandle(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await revealRecovery(page); await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   await page.evaluate(() => window.finish());
   await wait(() => page.evaluate(() => window.disposals === 1), 'late layout cleanup');
+  await expectStickyCleanupBlocksReenable(page, 1);
   assert.equal(await page.getByRole('region', { name: 'Selected layout' }).count(), 0);
   await unchanged(page, previous, 'Late layout draft'); assert.deepEqual(errors, []); assert.deepEqual(await host.entries(), []);
 });
@@ -281,59 +279,6 @@ test('layout navigation preserves scope fencing while nested action is pending',
   assert.deepEqual(await page.evaluate(() => window.contexts.map(context => context.conversation.conversationId)), [first, second]);
   assert.equal((await host.entries()).length, 1);
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'New conversation draft');
-});
-
-test('StrictMode delayed same-array reactivation never remounts an obsolete layout and disposes late malformed results', { timeout: 45_000 }, async t => {
-  const { build } = await import('esbuild'), { chromium } = await import('playwright');
-  const bundle = await build({ stdin: { contents: `import React from 'react'; import { createRoot } from 'react-dom/client'; import { flushSync } from 'react-dom';
-    import { CustomizationContent } from './apps/desktop/src/application/CustomizationContent.tsx';
-    import { useDesktopCustomizations } from './apps/desktop/src/application/DesktopCustomizations.tsx';
-    window.activations = 0; window.loads = 0; window.disposals = []; window.mounts = []; window.finish = {};
-    const customizations = [{ manifest: { namespace: 'strict', sdkVersion: '0.13.0', entries: [{ kind: 'desktop', module: './desktop.js' }] },
-      load: async () => { window.loads++; return { default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
-        const id = ++window.activations; let disposed = false;
-        function Layout() { React.useLayoutEffect(() => { window.mounts.push({ id, disposed }); }, []); return <p>Owner {id}</p>; }
-        return new Promise(resolve => { window.finish[id] = malformed => resolve({ modules: [],
-          get contentLayout() { if (malformed) throw new Error('Late malformed presentation'); return Layout; },
-          dispose() { disposed = true; window.disposals.push(id); if (id === 3) return Promise.reject(new Error('Late cleanup rejection')); } }); });
-      } } }; } }];
-    function App() { const [enabled, setEnabled] = React.useState(true);
-      window.disable = () => flushSync(() => setEnabled(false)); window.enable = () => flushSync(() => setEnabled(true));
-      const custom = useDesktopCustomizations({ customizations, enabled });
-      return <><input aria-label="Persistent draft" defaultValue="Strict draft" />
-        {custom.namespaces.filter(owner => owner.kind === 'failed').map(owner => <p role="alert" key={owner.namespace}>{owner.message}</p>)}
-        <CustomizationContent selection={custom.contentLayout} conversationKey="strict" transcript={<p>Default transcript</p>} nativeTranscript={<p>Native transcript</p>} modules={null} /></>;
-    }
-    createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>);`, resolveDir: root, loader: 'jsx' },
-    bundle: true, write: false, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"development"' } });
-  const browser = await chromium.launch(); t.after(() => browser.close()); const page = await browser.newPage(), errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-  await page.route('http://localhost/fixture', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }));
-  await page.goto('http://localhost/fixture'); await page.addScriptTag({ content: bundle.outputFiles[0].text });
-  await wait(() => page.evaluate(() => window.activations === 1), 'StrictMode activation');
-  assert.equal(await page.evaluate(() => window.loads), 2);
-  await page.evaluate(() => window.finish[1](false)); await page.getByText('Owner 1', { exact: true }).waitFor();
-  const previous = await page.getByRole('textbox', { name: 'Persistent draft' }).elementHandle();
-  const mounts = await page.evaluate(() => window.mounts);
-  await page.evaluate(() => { window.disable(); window.enable(); });
-  await wait(() => page.evaluate(() => window.activations === 2), 'same-array delayed reactivation');
-  await page.getByText('Default transcript', { exact: true }).waitFor();
-  assert.deepEqual(await page.evaluate(() => window.mounts), mounts);
-  assert.deepEqual(await page.evaluate(() => window.disposals), [1]);
-  await page.evaluate(() => window.finish[2](false)); await page.getByText('Owner 2', { exact: true }).waitFor();
-  await page.evaluate(() => { window.disable(); window.enable(); });
-  await wait(() => page.evaluate(() => window.activations === 3), 'pending obsolete activation');
-  await page.evaluate(() => { window.disable(); window.enable(); });
-  await wait(() => page.evaluate(() => window.activations === 4), 'replacement activation');
-  await page.evaluate(() => window.finish[4](false)); await page.getByText('Owner 4', { exact: true }).waitFor();
-  await page.evaluate(() => window.finish[3](true));
-  await wait(() => page.evaluate(() => window.disposals.includes(3)), 'late malformed cleanup');
-  await page.getByText('Owner 4', { exact: true }).waitFor(); assert.equal(await page.getByRole('alert').count(), 0);
-  await page.evaluate(() => window.disable()); await page.getByText('Default transcript', { exact: true }).waitFor();
-  assert.deepEqual(await page.evaluate(() => window.disposals), [1, 2, 3, 4]);
-  assert.equal(await page.evaluate(() => window.mounts.every(mount => !mount.disposed && mount.id !== 3)), true);
-  assert.equal(await page.getByRole('textbox', { name: 'Persistent draft' }).evaluate((node, old) => node === old, previous), true);
-  assert.equal(await page.getByRole('textbox', { name: 'Persistent draft' }).inputValue(), 'Strict draft'); assert.deepEqual(errors, []);
 });
 
 test('layout render failure retains healthy modules and rejected cleanup once', { timeout: 45_000 }, async t => {

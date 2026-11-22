@@ -140,7 +140,7 @@ test('chat workspace separates the icon rail and chat list and opens settings wi
   const settings = page.getByRole('button', { name: 'Settings', exact: true });
   await chats.waitFor();
   assert.equal(await chats.getAttribute('aria-pressed'), 'true');
-  assert.equal(await page.locator('.shell-header').isVisible(), false);
+  assert.equal(await page.locator('.recovery-menu summary').isVisible(), true);
   const rail = await page.getByRole('navigation', { name: 'Workspace views' }).boundingBox();
   const sidebar = await page.locator('.application-controls').boundingBox();
   assert.ok(rail.x + rail.width <= sidebar.x, 'icon rail is a separate pane beside the chat list');
@@ -155,7 +155,7 @@ test('chat workspace separates the icon rail and chat list and opens settings wi
   await revealRecovery(page);
   await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
   assert.equal(await chats.getAttribute('aria-pressed'), 'true');
-  assert.equal(await page.locator('.shell-header').isVisible(), false);
+  assert.equal(await page.locator('.recovery-menu summary').isVisible(), true);
   assert.equal(await page.locator('.settings-panel').isVisible(), false);
 });
 

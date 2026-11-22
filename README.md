@@ -1,5 +1,7 @@
 # OpenPane
 
+See the [customization guide](docs/extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview.
+
 OpenPane is a conversation client for existing agent installations, with React customization for Tauri desktop and a separate React Native iOS client.
 
 The macOS launcher starts the host and desktop client together. Run the host locally or on an SSH-accessible Mac or Linux machine. The launcher provisions the matching runtime, connects automatically, and opens the conversation UI without any access setup. Read [launcher setup](docs/development/launcher.md) for local and remote workspaces. The separate iOS client still starts disconnected.

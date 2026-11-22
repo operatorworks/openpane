@@ -1,5 +1,7 @@
 # Author an extension
 
+See the [customization guide](../extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview.
+
 The existing `@openpane/sdk` package exposes server contracts at its root and UI contracts at `@openpane/sdk/react`.
 The `@openpane/sdk/react-tools` entry combines UI presentation capture with frontend tool generations.
 Installed server code runs with host process privileges.
@@ -321,8 +323,8 @@ Every command and contributed action returns `Promise<SubmitResult>`.
 Preserve rejected admission and uncertain receipt states for the caller.
 Resolving an action does not establish native execution success.
 
-The desktop customization host renders nested modules as labeled sections after the transcript, before approvals and the composer.
-Transcript and modules share one content scrollbar by default.
+The desktop customization host renders nested modules as labeled sections under Conversation tools in Extensions; an explicitly selected content layout may place them with the transcript. Approvals and the composer remain host-owned.
+A selected content layout can place transcript and modules in one content scrollbar. Without that claim, Conversation tools remains in Extensions.
 It renders declarative actions as labeled buttons, suppresses duplicate clicks while an action is pending, and reports the returned submission state.
 The host reports rejected admission, rejected receipts, not-dispatched receipts, uncertain receipts, abandoned receipts, and thrown errors.
 An abandoned receipt means the user stopped waiting on the command; it does not say whether the command ran.
@@ -353,7 +355,7 @@ function MyTranscript({ conversation, activity }: ConversationModuleProps) {
 return { modules: [], overrides: { transcript: MyTranscript }, dispose() {} };
 ```
 
-The desktop activates each namespace once for its contributions.
+The desktop retains each admitted namespace activation for its contributions. Appearance, palette and slot choices do not restart it; selectively disabling another namespace preserves surviving activations. A namespace cannot reactivate until its prior activation and retirement barrier settle. Failed cleanup requires a process/page restart for that namespace.
 The override changes only transcript presentation. The ordinary composer, approvals, Stop, and command recovery keep their owners.
 An activity override replaces command and file presentation while native messages, Markdown and sent images remain visible.
 It receives `ConversationActivityProps`, which extends `ConversationModuleProps` with readonly `updates` equal to `connected`, `reconnecting` or `paused`.
@@ -364,8 +366,7 @@ Return `overrides: { activity: MyActivity }` to claim this combined command and 
 A claimed whole transcript takes precedence over selective activity, including its native fallback during loading or failure.
 Activity loading, conflict or failure uses native activity without replacing messages or the protected composer.
 An outer content layout fallback is fully native and does not mount another activity override.
-The default transcript stays visible while any selected activation is pending or a lazy override is loading.
-If multiple ready namespaces claim the transcript after all activations settle, the host reports their sorted names and keeps the default transcript.
+Settings persists an automatic, builtin or explicit namespace choice for each global slot. In automatic mode, builtin presentation stays visible while an admitted activation is pending; after settlement, multiple claims produce sorted conflict diagnostics and builtin presentation. An explicit choice considers only the named namespace: loading, failure, disablement, absence or a missing claim keeps builtin presentation with a diagnostic and retains the saved choice. Builtin mode always uses builtin presentation. A lazy selected view uses its builtin fallback while loading.
 A failed namespace releases its claim and disposes once; other namespaces remain available.
 Restore default view removes all presentation contributions while preserving the composer and draft.
 This slot does not provide a layout language, split conversations, or live artifact refresh.
@@ -414,16 +415,16 @@ function ReviewLayout({ transcript, modules }: ConversationContentLayoutProps) {
 return { contentLayout: ReviewLayout, modules, dispose() {} };
 ```
 
-The [Plan review template](../../templates/customization/desktop/index.tsx) includes responsive CSS for this arrangement.
-The host supplies one scroll viewport and an inline-size container. The template stacks its columns at or below 640px of available content width.
+This arrangement is opt-in. The [Plan review template](../../templates/customization/desktop/index.tsx) uses a namespace workspace and scoped transcript without claiming a global content layout.
+The host supplies one scroll viewport and an inline-size container. An opt-in content layout can use container queries to adapt to the available content width.
 Permissions, approvals, the composer, Stop, command recovery, and navigation remain outside the layout.
 Activation, failure, suspension, and restore preserve those controls for the same selected conversation.
 Navigation retains the existing conversation identity and command checks. Layouts do not create independently active conversations.
 
 The host captures `contentLayout` once with the same function, memo, forwardRef, and lazy rules as transcript components.
-Layout selection waits for every selected namespace to settle. Multiple ready claims produce sorted diagnostics and the default transcript-then-modules arrangement.
-An omitted layout uses that same default arrangement. Without an active conversation, namespace diagnostics remain visible in customization catalog order and layouts do not render.
-Layout activation, conflict changes, and render failure can remount module and transcript views. Pending action feedback and duplicate-click suppression do not survive a remount.
+Automatic layout selection waits for admitted namespaces to settle. Multiple ready claims produce sorted diagnostics and builtin presentation. Explicit and builtin selection follow the same persisted choice rules as transcript/activity.
+An omitted layout uses builtin presentation with Conversation tools in Extensions. Without an active conversation, namespace diagnostics remain visible in stable namespace order and layouts do not render.
+Layout activation, conflict changes, and render failure can remount module and transcript views. Host-owned pending action feedback and duplicate-click suppression survive presentation remounts for the same namespace generation, conversation, and complete module/action path. A different conversation or namespace generation has separate action state. Authored component React state may still remount.
 Pending commands retain their original identities in the conversation outbox.
 
 While a layout suspends, the host shows native messages, command and file activity, and a loading notice.
@@ -494,7 +495,7 @@ The generation label is captured for diagnostics and owner correlation; the SDK 
 Disposal runs once after all pins and calls drain.
 Its failure rejects every retirement caller.
 Always observe the retirement promise.
-A replacement generation can activate before the previous generation disposes, so extensions must tolerate overlapping activations.
+Independent SDK generation owners can activate a replacement before the previous generation disposes and must tolerate that overlap. The desktop application serializes each namespace. Disabling and re-enabling waits for that namespace's earlier activation and retirement, including held tool pins.
 A disposer must not await its own generation's retirement, since retirement waits for that disposer.
 - **Pins.** Existing pins and calls remain usable until released or settled.
 Release every pin on every run outcome, including cancellation and failure.

@@ -372,11 +372,9 @@ test('with both extensions each workspace renders its own transcript style and C
   await coworkers.getByRole('button', { name: 'Coworkers', exact: true }).click();
   await coworkers.getByRole('button', { name: 'Chat with Ada' }).click();
   await coworkers.locator('#message').waitFor();
-  // The Coworkers palette re-themes the accent for its whole workspace, so the Send button follows that accent and its
-  // on-accent text (as the avatar does) while keeping the host's own shape.
-  assert.equal(await controlStyle(send(coworkers), shape), chatsSend.split('|').slice(0, shape.length).join('|'), 'the Coworkers stylesheet keeps the host Send shape');
-  assert.equal(await controlStyle(send(coworkers), ['color', 'backgroundColor']), await controlStyle(coworkers.locator('.coworkers-header .coworkers-avatar'), ['color', 'backgroundColor']),
-    'the Send button keeps on-accent text on the accent');
+  // Authored workspace colors stay outside the host-owned composer, including all button colors.
+  assert.equal(await controlStyle(send(coworkers), [...shape, 'color', 'backgroundColor']), chatsSend,
+    'the Coworkers workspace leaves the complete builtin Send appearance intact');
   await coworkers.locator('#message').fill('Hello coworker');
   await wait(() => coworkers.getByRole('button', { name: 'Send', exact: true }).isEnabled(), 'coworkers send');
   await coworkers.getByRole('button', { name: 'Send', exact: true }).click();

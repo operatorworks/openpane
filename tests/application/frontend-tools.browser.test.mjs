@@ -48,7 +48,7 @@ for (const failure of ['load', 'ready activation']) test(`capture keeps a health
   await page.evaluate(() => window.settle());
   if (failure === 'ready activation') {
     await wait(() => page.evaluate(() => window.custom.namespaces.every(owner => owner.kind === 'ready')), 'ready sibling before failure');
-    assert.deepEqual(await page.evaluate(() => window.capture()), { kind: 'captured', names: ['healthy__echo', 'failed__echo'] });
+    assert.deepEqual(await page.evaluate(() => window.capture()), { kind: 'captured', names: ['failed__echo', 'healthy__echo'] });
     await page.evaluate(() => window.custom.namespaces.find(owner => owner.namespace === 'failed').fail(Error('Expected activation failure')));
   }
   await wait(() => page.evaluate(() => window.custom.namespaces.some(owner => owner.kind === 'failed')), 'terminal sibling failure');
@@ -82,15 +82,20 @@ test('committed tool and module artifact loads in the actual application alongsi
   const host = await fixture(t, join(custom.directory, 'browser')), page = await host.page(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.getByRole('button', { name: 'New recorded conversation' }).click(); await connected(page);
-  // The committed parent claims the content layout, so its modules stay in the conversation column.
-  await page.getByRole('button', { name: 'Committed tool module 0', exact: true }).click();
+  // The default template claims no global layout; additive modules live under Extensions.
+  await (await tools(page)).getByRole('button', { name: 'Committed tool module 0', exact: true }).click();
   await page.getByRole('button', { name: 'Committed tool module 1', exact: true }).waitFor();
+  await chats(page);
   await draft(page, 'Keep tool draft'); const previous = await editor(page).elementHandle();
-  await page.getByRole('button', { name: 'Review the plan', exact: true }).click();
+  await (await tools(page)).getByRole('button', { name: 'Review the plan', exact: true }).click();
+  await chats(page);
   await page.getByRole('heading', { name: 'Approval required', exact: true }).waitFor();
   await unchanged(page, previous); assert.equal((await host.entries()).length, 1);
   await revealRecovery(page); await page.getByRole('button', { name: 'Restore default view', exact: true }).click();
-  assert.equal(await page.getByRole('button', { name: 'Committed tool module 1', exact: true }).count(), 0);
+  await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Extensions', exact: true }).click();
+  await page.getByRole('heading', { name: 'Extensions', level: 1, exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: /^Committed tool module /, exact: true }).count(), 0);
+  await chats(page);
   await unchanged(page, previous); assert.deepEqual(errors, []);
 });
 
@@ -162,7 +167,7 @@ for (const [label, registration, modules, message] of [
   await page.evaluate(settlement => settlement === 'resolve' ? window.resolveCleanup() : window.rejectCleanup(), settlement);
   await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
   if (settlement === 'remove then reject') {
-    assert.equal(await page.getByRole('alert').filter({ hasText: 'Custom tools could not load.' }).count(), 0);
+    await page.getByRole('alert').filter({ hasText: 'Restart the app before enabling this namespace.' }).waitFor();
     await page.getByLabel('Messages', { exact: true }).waitFor();
   } else {
     const alert = page.getByRole('alert').filter({ hasText: settlement === 'resolve' ? message : 'Tool activation failed and its disposal also failed' });
@@ -192,10 +197,11 @@ test('late tool activation after disable is never published and rejected retirem
   await tools(page);
   assert.equal(await page.getByText('Late tool module').count(), 0);
   await chats(page);
+  await page.getByRole('alert').filter({ hasText: 'Restart the app before enabling this namespace.' }).waitFor();
   await unchanged(page, previous); assert.deepEqual(errors, []);
 });
 
-test('in-process only: actual hook retains A before a run exists and binds after disable and fresh B activation', { timeout: 45_000 }, async t => {
+test('in-process only: actual hook retains A before a run exists and drains its pin and slow call before B activation', { timeout: 45_000 }, async t => {
   const bundle = await build({ stdin: { resolveDir: root, loader: 'jsx', contents: `
     import React from 'react'; import {createRoot} from 'react-dom/client'; import {flushSync} from 'react-dom';
     import {useDesktopCustomizations} from './apps/desktop/src/application/DesktopCustomizations.tsx';
@@ -232,22 +238,29 @@ test('in-process only: actual hook retains A before a run exists and binds after
   await page.evaluate(() => window.disable()); await page.getByText('Eligible 0', { exact: true }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.disposals), []);
   assert.equal(await page.evaluate(() => {try {window.retainStale();return false;}catch(error){return /retired/.test(error.message);}}),true);
-  await page.evaluate(() => window.enable()); await page.getByText('Eligible 1', { exact: true }).waitFor();
-  const b = await page.evaluate(() => {
-    if(window.run!==undefined)throw Error('Replacement must activate before the actual run is supplied');
-    window.supplyRun();window.a=window.retainedA.bind(window.run);window.b=window.pinCurrent();return window.b.bindings[0].activationId;
-  }); assert.notEqual(b,a);
+  await page.evaluate(() => window.enable());
+  assert.equal(await page.getByText('Eligible 0', { exact: true }).count(), 1);
+  assert.equal(await page.evaluate(() => window.activations), 1, 're-enable waits for A retirement');
+  await page.evaluate(() => {
+    if(window.run!==undefined)throw Error('Run must be supplied only after the queued re-enable');
+    window.supplyRun();window.a=window.retainedA.bind(window.run);
+  });
   assert.equal(await page.evaluate(() => {try {window.pinStale();return false;}catch(error){return /retired/.test(error.message);}}),true);
   assert.deepEqual(await page.evaluate(async () => {const b=window.a.bindings[0];return window.a.invoke(b.name,{},b.activationId);}),{kind:'completed',output:'activation 1'});
   await page.evaluate(() => {const b=window.a.bindings[0];window.slow=window.a.invoke(b.name,{slow:true},b.activationId);});
   await wait(() => page.evaluate(() => typeof window.finishSlow === 'function'), 'original slow handler');
   assert.equal(await page.evaluate(() => window.custom.generations.some(g=>g===window.oldGeneration)), false);
-  assert.deepEqual(await page.evaluate(async () => {const binding=window.b.bindings[0];return window.b.invoke(binding.name,{},binding.activationId);}), {kind:'completed',output:'activation 2'});
   await page.evaluate(() => {window.retainedA.release();window.a.release();window.retainedA.release();});
   assert.deepEqual(await page.evaluate(async () => {const b=window.a.bindings[0];return window.a.invoke(b.name,{},b.activationId);}),{kind:'refused',code:'released'});
   assert.deepEqual(await page.evaluate(() => window.disposals), []);
+  assert.equal(await page.evaluate(() => window.activations), 1, 'A in-flight call still holds the retirement barrier');
   assert.deepEqual(await page.evaluate(async () => {window.finishSlow();return window.slow;}), {kind:'completed',output:'activation 1'});
   await wait(() => page.evaluate(() => window.disposals.length === 1), 'A drains after slow call and pin');
+  await page.getByText('Eligible 1', { exact: true }).waitFor();
+  const b = await page.evaluate(() => {window.b=window.pinCurrent();return window.b.bindings[0].activationId;});
+  assert.notEqual(b,a);
+  assert.equal(await page.evaluate(() => window.activations), 2);
+  assert.deepEqual(await page.evaluate(async () => {const binding=window.b.bindings[0];return window.b.invoke(binding.name,{},binding.activationId);}), {kind:'completed',output:'activation 2'});
   await page.evaluate(() => {window.failedGeneration=window.custom.generations[0];window.failOwner(new Error('B render failed'));window.failOwner(new Error('Repeated failure'));});
   await page.getByText('Eligible 0', { exact: true }).waitFor();
   assert.deepEqual(await page.evaluate(() => window.disposals), [1]);
@@ -257,12 +270,17 @@ test('in-process only: actual hook retains A before a run exists and binds after
   await page.evaluate(() => {window.disable();window.disable();});
   await wait(() => page.evaluate(() => window.disposals.length === 2), 'B retirement');
   assert.deepEqual(await page.evaluate(() => window.disposals), [1,2]);
+  await page.evaluate(() => window.enable());
+  assert.equal(await page.evaluate(() => window.activations), 2, 'cleanup failure requires restart');
+  assert.equal(await page.getByText('Eligible 0', { exact: true }).count(), 1);
+  assert.equal(await page.evaluate(() => window.custom.namespaces.some(owner => owner.kind === 'failed' && /Restart the app/.test(owner.message))), true);
   assert.equal(await page.getByRole('textbox', { name: 'Persistent draft' }).evaluate((node,old)=>node===old,previous),true);
   assert.equal(await page.getByRole('textbox', { name: 'Persistent draft' }).inputValue(),'Keep tool draft'); assert.deepEqual(errors,[]);
 });
 
-for (const failure of ['presentation', 'malformed', 'duplicate']) for (const replace of [false, true]) {
-  test(`in-process only: rejected ${failure} is never eligible and late cleanup ${replace ? 'cannot overwrite replacement' : 'keeps sibling eligible'}`, { timeout: 45_000 }, async t => {
+for (const failure of ['presentation', 'malformed', 'duplicate']) for (const outcome of ['sibling-only', 'replacement-ready', 'cleanup-failed']) {
+  const label = { 'sibling-only': 'keeps sibling eligible', 'replacement-ready': 'completion admits the queued replacement', 'cleanup-failed': 'rejection blocks replacement until restart' }[outcome];
+  test(`in-process only: rejected ${failure} is never eligible and cleanup ${label}`, { timeout: 45_000 }, async t => {
     const bundle = await build({ stdin: { resolveDir: root, loader: 'jsx', contents: `
       import React from 'react'; import {createRoot} from 'react-dom/client'; import {flushSync} from 'react-dom';
       import {useDesktopCustomizations} from './apps/desktop/src/application/DesktopCustomizations.tsx';
@@ -276,7 +294,7 @@ for (const failure of ['presentation', 'malformed', 'duplicate']) for (const rep
         resolve({modules:'${failure}'==='presentation'?null:[],dispose(){window.disposals=(window.disposals||0)+1;
           return new Promise((resolve,reject)=>{window.resolveCleanup=resolve;window.rejectCleanup=()=>reject(new Error('Old cleanup rejected'));});}});
       };});`)}};
-      const replacement={manifest,${entry(`frontendTools.add(${tool});return {modules:[],dispose(){window.replacementDisposals=(window.replacementDisposals||0)+1;}};`)}};
+      const replacement={manifest,${entry(`window.replacementActivations=(window.replacementActivations||0)+1;frontendTools.add(${tool});return {modules:[],dispose(){window.replacementDisposals=(window.replacementDisposals||0)+1;}};`)}};
       const initial=[sibling,rejected]; window.eligibility=[];
       function App(){const [customizations,setCustomizations]=React.useState(initial);
         const custom=useDesktopCustomizations({customizations,enabled:true});window.custom=custom;
@@ -296,20 +314,30 @@ for (const failure of ['presentation', 'malformed', 'duplicate']) for (const rep
     await wait(() => page.evaluate(() => window.custom.namespaces.some(owner => owner.namespace === 'fixture' && owner.kind === 'failed') && window.disposals === 1), 'failed namespace during pending cleanup');
     assert.deepEqual(await page.evaluate(() => window.custom.generations.map(g => g.namespace)), ['sibling']);
     assert.equal(await page.evaluate(() => window.eligibility.some(snapshot => snapshot.some(g => g.namespace === 'fixture'))), false);
-    let replacementId;
-    if (replace) {
+    const siblingGeneration = await page.evaluate(() => window.custom.generations.find(g => g.namespace === 'sibling').activationId);
+    if (outcome !== 'sibling-only') {
       await page.evaluate(() => window.replace());
-      await wait(() => page.evaluate(() => window.custom.generations.length === 2), 'ready replacement');
-      replacementId = await page.evaluate(() => window.custom.generations.find(g => g.namespace === 'fixture').activationId);
-      await page.evaluate(() => window.rejectCleanup());
-    } else await page.evaluate(() => window.resolveCleanup());
-    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
-    assert.deepEqual(await page.evaluate(() => window.custom.generations.map(g => g.namespace)), replace ? ['sibling', 'fixture'] : ['sibling']);
-    if (replace) {
+      assert.deepEqual(await page.evaluate(() => window.custom.generations.map(g => g.namespace)), ['sibling']);
+      assert.equal(await page.evaluate(() => window.replacementActivations || 0), 0, 'replacement waits for pending cleanup');
+    }
+    await page.evaluate(reject => reject ? window.rejectCleanup() : window.resolveCleanup(), outcome === 'cleanup-failed');
+    if (outcome === 'replacement-ready') {
+      await wait(() => page.evaluate(() => window.custom.generations.length === 2), 'replacement after successful cleanup');
+      assert.deepEqual(await page.evaluate(() => window.custom.generations.map(g => g.namespace)), ['fixture', 'sibling']);
       assert.equal(await page.evaluate(() => window.custom.namespaces.find(owner => owner.namespace === 'fixture').kind), 'ready');
-      assert.equal(await page.evaluate(() => window.custom.generations.find(g => g.namespace === 'fixture').activationId), replacementId);
+      assert.equal(await page.evaluate(() => window.replacementActivations), 1);
       assert.equal(await page.evaluate(() => window.replacementDisposals || 0), 0);
-    } else assert.equal(await page.evaluate(() => window.eligibility.some(snapshot => snapshot.some(g => g.namespace === 'fixture'))), false);
+    } else {
+      await wait(() => page.evaluate(() => window.custom.namespaces.some(owner => owner.namespace === 'fixture' && owner.kind === 'failed')), 'failed owner remains visible');
+      assert.deepEqual(await page.evaluate(() => window.custom.generations.map(g => g.namespace)), ['sibling']);
+      assert.equal(await page.evaluate(() => window.eligibility.some(snapshot => snapshot.some(g => g.namespace === 'fixture'))), false);
+      if (outcome === 'cleanup-failed') {
+        await wait(() => page.evaluate(() => window.custom.namespaces.some(owner => owner.kind === 'failed' && /Restart the app/.test(owner.message))), 'sticky cleanup failure');
+        await page.evaluate(() => window.replace());
+        assert.equal(await page.evaluate(() => window.replacementActivations || 0), 0);
+      }
+    }
+    assert.equal(await page.evaluate(() => window.custom.generations.find(g => g.namespace === 'sibling').activationId), siblingGeneration, 'healthy sibling generation remains unchanged');
     assert.equal(await page.evaluate(() => window.disposals), 1);
     assert.equal(await page.getByRole('textbox', { name: 'Persistent draft' }).evaluate((node, old) => node === old, previous), true);
     assert.equal(await page.getByRole('textbox', { name: 'Persistent draft' }).inputValue(), 'Keep tool draft');

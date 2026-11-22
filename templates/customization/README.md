@@ -1,4 +1,6 @@
-# Build a local Plan review panel
+# Build a local Plan review workspace
+
+See the [customization guide](../../docs/extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview.
 
 Copy this directory into a local Git repository and commit it. The desktop module sends the shared review prompt to the selected conversation and shows the actual submission outcome. It leaves the composer draft untouched. Only committed source enters the build.
 
@@ -15,9 +17,9 @@ node apps/host/dist/main.js codex \
   --assets /absolute/custom-desktop
 ```
 
-The existing `pi` and `browser-dev` commands also accept `--assets`. Without it, startup uses the ordinary installed browser artifact. Open the host's browser address and select a conversation. Plan review and its nested Review guidance section appear beside the transcript, or below it in a narrow content area. Both share the content scrollbar. The host renders the declared Review the plan action and reports its result. Click **Review the plan** to submit the committed prompt. An accepted receipt means submitted, not completed. Uncertain outcomes use the existing conversation recovery controls.
+The existing `pi` and `browser-dev` commands also accept `--assets`. Without it, startup uses the ordinary installed browser artifact. Open the host's browser address and select a conversation. Open Extensions to find the Plan review module and its nested Review guidance section under Conversation tools. The template claims no global view slots. Its workspace and scoped transcript require a host provider under the `personal` namespace; the recorded browser-dev agent supports the module journey only. The host renders the declared Review the plan action and reports its result. Click **Review the plan** to submit the committed prompt. An accepted receipt means submitted, not completed. Uncertain outcomes use the existing conversation recovery controls.
 
-To remove the panel, open Settings, expand View options, and choose Restore default view. The current conversation and draft remain available. Reloading the artifact enables the panel again.
+To remove the panel, open View options and choose Restore default view. The current conversation and draft remain available. This choice is saved and survives reload. Re-enable executable UI customizations in Settings to restore the panel.
 
 Custom code has full browser privileges. This is not a sandbox. Only build code you trust.
 
@@ -46,7 +48,7 @@ When updating a local development build, keep the old app until the new package 
 
 The builder accepts committed JavaScript, TypeScript, JSX, and TSX, external graph references, selected monorepo packages, and locked npm dependencies supported by the [source preparation rules](../../docs/customization/sources.md#prepared-sources). Use `--subdirectory packages/widgets` to select a monorepo package. Root repositories accept the same local paths and Git transports as the source API. Dependencies install into disposable copies with lifecycle scripts disabled. Repository build scripts and Vite configuration never run.
 
-React, React DOM, SDK, contracts, protocol, theme, and desktop UI imports use the installed OpenPane packages, regardless of customization lock pins for those packages. Ordinary dependencies and workspace imports must resolve inside prepared repositories. Ambient machine dependencies and aliased copies of shared packages fail resolution. Vite handles contained CSS, JSON, and asset imports. Absolute imports, package import maps, Node builtins, computed loading, ambient references, and source JSX configuration remain unsupported. The OpenPane toolchain supplies compiler settings. Nested modules render as labeled sections. Declarative module actions render as labeled buttons with pending and submission feedback. IDs are local to siblings; the namespace and complete module path keep actions independent. Frontend tools are not implemented by this panel host.
+React, React DOM, SDK, contracts, protocol, theme, and desktop UI imports use the installed OpenPane packages, regardless of customization lock pins for those packages. Ordinary dependencies and workspace imports must resolve inside prepared repositories. Ambient machine dependencies and aliased copies of shared packages fail resolution. Vite handles contained CSS, JSON, and asset imports. Absolute imports, package import maps, Node builtins, computed loading, ambient references, and source JSX configuration remain unsupported. The OpenPane toolchain supplies compiler settings. Nested modules render as labeled sections. Declarative module actions render as labeled buttons with pending and submission feedback. IDs are local to siblings; the namespace and complete module path keep actions independent. Frontend tools use the existing generation and run-pin contracts; this starter registers none.
 
 Literal JavaScript URL assets require an exact dot-relative file inside prepared sources. Plain CSS URL assets and CSS imports also stay inside those sources. Computed asset patterns, ambiguous escaped paths, public-directory fallbacks, CSS modules, CSS `image-set`, and separate worker compilations are unsupported. Artifact asset names must use NFC and contained path segments without control characters or colons.
 
@@ -54,7 +56,7 @@ CSS assets require package ancestry without object-valued `browser` metadata aro
 
 Source rules reject unsupported module lookups in authored code and installed dependencies. Runtime string evaluation is governed by the host CSP. An unused global-detection fallback inside a dependency is allowed.
 
-The builder reserves a fresh output directory and generates the ordinary artifact manifest. Chromium serves retained verified bytes with the host's headers and activates every entry through the app's lifecycle. That lifecycle checks SDK compatibility and contribution validity. Qualification checks panel namespace order and readiness. Off-origin requests are blocked during qualification. It also checks that `index.html` starts under the native CSP. Native-session activation, component rendering, and conversation operations are not exercised by this gate. The builder verifies the inventory again before publication. Failed builds remove their output and private staging. An existing output is never replaced.
+The builder reserves a fresh output directory and generates the ordinary artifact manifest. Chromium serves retained verified bytes with the host's headers and activates every entry through the app's lifecycle. That lifecycle checks SDK compatibility and contribution validity. Qualification checks sorted panel namespaces and readiness. Off-origin requests are blocked during qualification. It also checks that `index.html` starts under the native CSP. Native-session activation, component rendering, and conversation operations are not exercised by this gate. The builder verifies the inventory again before publication. Failed builds remove their output and private staging. An existing output is never replaced.
 
 The hashed `customization-identity.json` asset records the ordered package graph, committed input and npm identities, manifests, and selected desktop modules. Each entry references its package and module; package records own the manifests. It excludes temporary paths and repository addresses. The ordinary artifact manifest retains the OpenPane source and lock provenance. The host verifies and retains the artifact bytes at startup.
 
@@ -78,7 +80,7 @@ An activation can add `overrides: { transcript: MyTranscript }` alongside its re
 `MyTranscript` receives `ConversationModuleProps`, including current conversation scope, activity, and captured commands.
 See the [SDK transcript example](../../docs/architecture/extension-sdk.md#contribute-conversation-views-and-actions).
 Only transcript presentation changes. The ordinary composer, approvals, Stop, and recovery remain available.
-The host retains the default transcript while selected activations or a lazy override load, and reports a conflict if multiple namespaces claim it.
+In automatic mode, the host retains the default transcript while selected activations or a lazy override load, and reports a conflict if multiple namespaces claim it. Settings also supports builtin or one explicit namespace; an unavailable explicit choice retains builtin presentation without selecting another claimant.
 A failed namespace is disposed once. Restore default view removes all presentation contributions and preserves the draft.
 
 ### Arrange transcript and modules
@@ -87,8 +89,10 @@ To replace only command and file presentation, return `overrides: { activity: My
 Its `ConversationActivityProps` adds readonly `updates` with `connected`, `reconnecting` or `paused` to the ordinary module context.
 Native messages, Markdown and sent images remain host-owned. A selected whole transcript takes precedence over this activity slot.
 
-The template returns `contentLayout: ReviewLayout`. Its `ConversationContentLayoutProps` contains only the host-created `transcript` and `modules` nodes.
+The template claims no global layout. To opt in, return `contentLayout: YourLayout`. Its `ConversationContentLayoutProps` contains only the host-created `transcript` and `modules` nodes.
 The transcript includes any selected transcript override. Render each node once with ordinary React and CSS.
 This desktop arrangement keeps permissions, approvals, the composer, Stop, and recovery under their existing host owners.
-Omit `contentLayout` to use the transcript-then-modules stack. A suspended layout temporarily shows native activity while custom transcript and module views, actions, and namespace diagnostics wait.
+Omit `contentLayout` to keep the native transcript and show modules under Conversation tools in Extensions. A suspended layout temporarily shows native activity while custom transcript and module views, actions, and namespace diagnostics wait.
 SDK compatibility is `0.13.0` and requires an exact match in both the manifest and loaded entry. Rebuild older extensions.
+
+The stylesheet scopes module rules under `[data-customization-namespace="personal"]` and workspace and transcript rules under `[data-extension-workspace="personal"]`. When you rename the manifest namespace, update both attribute selectors in `desktop/review.css`. Each copied extension then keeps its own styles. The `review-conversation` wrapper sets workspace sizing. Render the host-supplied conversation once inside it.

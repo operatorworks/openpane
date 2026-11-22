@@ -1,0 +1,37 @@
+{
+  "kind": "openpane-palette",
+  "version": 1,
+  "namespace": "personal",
+  "name": "review",
+  "label": "Quiet review",
+  "colors": {
+    "light": {
+      "canvas": "#f8f9fb",
+      "surface": "#ffffff",
+      "raised": "#f0f2f5",
+      "text": "#20242c",
+      "muted": "#596273",
+      "border": "#dce1e9",
+      "controlBorder": "#737e90",
+      "accent": "#236648",
+      "onAccent": "#ffffff",
+      "danger": "#b42338",
+      "onDanger": "#ffffff",
+      "focus": "#236648"
+    },
+    "dark": {
+      "canvas": "#15171c",
+      "surface": "#1d2027",
+      "raised": "#292e38",
+      "text": "#eef0f5",
+      "muted": "#adb6c6",
+      "border": "#3c4350",
+      "controlBorder": "#8793a8",
+      "accent": "#91d7b6",
+      "onAccent": "#17214b",
+      "danger": "#ffacb8",
+      "onDanger": "#47111b",
+      "focus": "#91d7b6"
+    }
+  }
+}

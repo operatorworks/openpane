@@ -45,7 +45,8 @@
     "host:browser-dev": "node apps/host/dist/main.js browser-dev",
     "ios:prepare": "bash apps/ios/native/prepare.sh",
     "ios:run": "bash apps/ios/native/run.sh",
-    "ios:verify": "bash apps/ios/native/verify.sh"
+    "ios:verify": "bash apps/ios/native/verify.sh",
+    "customization:dev": "node scripts/customization-dev.mjs"
   },
   "overrides": {
     "@birbcrew/client@0.1.0": {

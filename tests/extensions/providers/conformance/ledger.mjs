@@ -163,7 +163,8 @@ export const ledgerPresentation = {
 };
 
 /** The ledger extension through the public entry contract. `supports` says which of cancel and decide it offers. */
-export function ledgerExtension({ service, key, supports }) {
+export function ledgerExtension({ service, key, supports, namespace = 'ledger' }) {
+  const instance = { ...ledgerPresentation.instance, namespace };
   const entry = { kind: 'server', sdkVersion: EXTENSION_SDK_VERSION, activate(context) {
     context.providers.add('books', { apiVersion: backendProviderContractVersion, async connect(request) {
       const credential = request.credential, feeds = new Set();
@@ -266,7 +267,7 @@ export function ledgerExtension({ service, key, supports }) {
         },
         async close() { const active = [...feeds]; active.forEach(feed => feed.close()); await Promise.all(active.map(feed => feed.ended)); },
       } };
-    } }, ledgerPresentation);
+    } }, { ...ledgerPresentation, instance });
     return { dispose() {} };
   } };
   return { value: {

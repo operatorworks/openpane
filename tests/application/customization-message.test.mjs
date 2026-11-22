@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { customizationMessage } from '../../apps/desktop/dist/application/DesktopCustomizations.js';
+import { customizationMessage } from '../../apps/desktop/dist/application/customization-message.js';
 
 test('customization diagnostics preserve ordinary errors and the unknown-error fallback', () => {
   assert.equal(customizationMessage(new Error('Ordinary failure')), 'Ordinary failure');
