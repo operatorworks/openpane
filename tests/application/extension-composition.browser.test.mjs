@@ -4,7 +4,7 @@ import { palettes, starterPalette } from '@openpane/theme';
 import { ledgerExtension, ledgerService } from '../extensions/providers/conformance/ledger.mjs';
 import { fixture, extensionFixture, connected, customRuntime, wait, chats, draft, tools } from './browser-support.mjs';
 const settings = page => page.getByRole('button', { name: 'Settings', exact: true }).click();
-const entry = name => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+const entry = name => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() {
   window.counts ??= {}; window.counts['${name}'] = (window.counts['${name}'] ?? 0) + 1;
   return { modules: [], overrides: { transcript: () => <p>${name} transcript</p> }, dispose() { window.disposals ??= {}; window.disposals['${name}'] = (window.disposals['${name}'] ?? 0) + 1; } };
 } } })`;
@@ -12,7 +12,7 @@ const entry = name => `load: async () => ({ default: { kind: 'desktop', sdkVersi
 test('StrictMode replay keeps one activation; explicit owner persists and selective disable preserves its neighbor', async t => {
   const host = await fixture(t), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
-  const extra = `,{manifest: { namespace: 'other', trust: 'full', sdkVersion: '0.13.0', entries: [{kind:'desktop', module:'./other.js'}]}, ${entry('other')}}`;
+  const extra = `,{manifest: { namespace: 'other', trust: 'full', sdkVersion: '0.14.0', entries: [{kind:'desktop', module:'./other.js'}]}, ${entry('other')}}`;
   await customRuntime(page, host, entry('fixture'), false, extra, true);
   await wait(() => page.evaluate(() => window.strictReplay?.setups === 2 && window.strictReplay.cleanups === 1), 'real development StrictMode effect replay');
   await page.getByRole('alert').filter({ hasText: 'Transcript override conflict' }).waitFor();
@@ -37,7 +37,7 @@ test('StrictMode replay keeps one activation; explicit owner persists and select
 test('global UI disable keeps explicit activity choice dormant until reenable', async t => {
   const host = await fixture(t), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
-  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() {
     return { modules: [], overrides: { activity: () => <p>Saved explicit activity</p> }, dispose() {} };
   } } })`);
   await settings(page); await page.getByLabel('Activity owner', { exact: true }).selectOption({ label: 'fixture' }); await chats(page);
@@ -79,7 +79,7 @@ async function assertBuiltinScopes(locators, appearance = 'light') {
 test('selected canvas paints content while every host control and failed-namespace notice keeps builtin colors', { timeout: 60_000 }, async t => {
   const host = await fixture(t), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
-  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() {
     function Module() { const [broken, setBroken] = React.useState(false); if (broken) throw new Error('Protected palette diagnostic');
       return <button onClick={() => setBroken(true)}>Fail palette module</button>; }
     return { modules: [{ id: 'failure', label: 'Failure', component: Module }], dispose() {} };
@@ -142,7 +142,7 @@ test('unreadable workspace palette leaves navigation and uncertain creation reco
   const service = await ledgerService(t), extension = ledgerExtension({ service: service.origin, key: service.key, namespace: 'fixture', supports: { cancel: true, decide: true } });
   const host = await extensionFixture(t, { extensions: [extension.value] }), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
-  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() {
     function Workspace(props) { return <section aria-label="Palette workspace">
       <p>Authored workspace colors</p>{props.agents.map(agent => <button key={agent.id} onClick={() => props.create(agent.id)}>Start palette workspace</button>)}{props.conversation}</section>; }
     return { modules: [], workspace: { label: 'Palette workspace', component: Workspace }, dispose() {} };
@@ -170,7 +170,7 @@ test('failed appearance recovery stays visible in the protected workspace surfac
   const service = await ledgerService(t), extension = ledgerExtension({ service: service.origin, key: service.key, namespace: 'fixture', supports: { cancel: true, decide: true } });
   const host = await extensionFixture(t, { extensions: [extension.value] }), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
-  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() {
     return { modules: [], workspace: { label: 'Recovery workspace', component: () => <section aria-label="Recovery workspace">Workspace remains open</section> }, dispose() {} };
   } } })`);
   await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Extensions', exact: true }).click();

@@ -74,6 +74,20 @@ export async function chats(page) {
   await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Chats', exact: true }).click();
 }
 export async function connected(page) { await page.getByRole('status').filter({ hasText: 'Conversation connected' }).first().waitFor(); }
+export async function activeViewId(page) {
+  const conversationId = await page.locator('.scope-label').textContent();
+  return page.evaluate(async conversationId => {
+    const request = indexedDB.open('openpane-browser-views', 1);
+    const db = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    try {
+      const read = db.transaction('records').objectStore('records').getAll();
+      const rows = await new Promise((resolve, reject) => { read.onsuccess = () => resolve(read.result); read.onerror = () => reject(read.error); });
+      const binding = rows.find(row => row?.schemaVersion === 1 && row.kind === 'editing' && row.scope?.conversationId === conversationId);
+      if (!binding) throw new Error('The active conversation has no persisted editor binding');
+      return binding.viewId;
+    } finally { db.close(); }
+  }, conversationId);
+}
 export async function draft(page, text) {
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill(text);
   await wait(() => page.evaluate(async expected => {
@@ -95,13 +109,15 @@ export async function revealRecovery(page) {
 
 export async function customRuntime(page, host, selection, breakDefault = false, extra = '', strict = false) {
   const bundled = await build({ stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client';
-    import {BrowserApplication} from './apps/desktop/src/shell/BrowserApplication.tsx';
+    import {WindowApplication} from './apps/desktop/src/application/WindowApplication.tsx';
+    import {WindowRuntime} from './apps/desktop/src/application/window-runtime.ts';
     import './apps/desktop/src/shell/styles.css';
     function ReplayProbe() { React.useEffect(() => {
       window.strictReplay ??= { setups: 0, cleanups: 0 }; window.strictReplay.setups++;
       return () => { window.strictReplay.cleanups++; };
     }, []); return null; }
-    createRoot(document.getElementById('root')).render(${strict ? '<React.StrictMode><ReplayProbe /><BrowserApplication /></React.StrictMode>' : '<BrowserApplication />'});`, resolveDir: root, loader: 'jsx' },
+    const runtime = new WindowRuntime({role:'browser',capability:'inline'});
+    createRoot(document.getElementById('root')).render(${strict ? '<React.StrictMode><ReplayProbe /><WindowApplication runtime={runtime} /></React.StrictMode>' : '<WindowApplication runtime={runtime} />'});`, resolveDir: root, loader: 'jsx' },
     bundle: true, write: false, outfile: 'custom.js', jsx: 'automatic', define: { 'process.env.NODE_ENV': strict ? '"development"' : '"production"' },
     plugins: [{ name: 'custom-runtime-fixture', setup(plugin) {
       if (breakDefault) plugin.onLoad({ filter: /ConversationView\.tsx$/ }, async () => ({
@@ -109,7 +125,7 @@ export async function customRuntime(page, host, selection, breakDefault = false,
           (await readFile(join(root, 'apps/desktop/src/application/ConversationView.tsx'), 'utf8')).replace('export function ConversationView(', 'function HealthyConversationView(') +
           `\nexport function ConversationView(props) { if (window.failDefault) throw new Error('Default view failed'); return createElement(HealthyConversationView, props); }`, loader: 'tsx' }));
       plugin.onLoad({ filter: /customization-selection\.ts$/ }, () => ({ contents: `import * as React from 'react';
-        const manifest = { namespace: 'fixture', trust: 'full', sdkVersion: '0.13.0', entries: [{ kind: 'desktop', module: './desktop.js' }] };
+        const manifest = { namespace: 'fixture', trust: 'full', sdkVersion: '0.14.0', entries: [{ kind: 'desktop', module: './desktop.js' }] };
         export default [{ manifest, ${selection} }${extra}];`, loader: 'tsx' }));
     } }] });
   const css = bundled.outputFiles.find(file => file.path.endsWith('.css'));

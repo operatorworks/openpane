@@ -60,7 +60,8 @@ export function createFrontendSends(deps: {
     return authority = { session, lifetime: new AbortController() };
   }
   const failedViews = new Set<string>();
-  const entries = new Map<string, Entry>(), provisional = new Map<object, ScopeHold & { retained: RetainedFrontendTools }>();
+  const retiredViews = new Set<string>();
+  const entries = new Map<string, Entry>(), provisional = new Map<object, ScopeHold & { retained: RetainedFrontendTools; borrow: CaptureBorrow }>();
   const recent = new Map<string, CapturedSend & { ownerId: string }>();
   const keyFor = (viewId: string, command: OfferedCommand) => canonicalJson([viewId, command.scope, command.clientCommandId]);
   const matches = (reference: FrontendRecoveryReference) => authority.session !== null && reference.ownerId === authority.session.principalId && reference.command.scope.hostId === authority.session.hostId;
@@ -162,7 +163,7 @@ export function createFrontendSends(deps: {
         schedule(); return;
       }
       const transition = become(null); recent.clear(); clearTimeout(timer); syncRows();
-      for (const item of provisional.values()) item.retained.release();
+      for (const item of provisional.values()) { item.retained.release(); item.borrow.release(); }
       provisional.clear();
       await Promise.allSettled([...entries.values()].map(unavailable));
       if (closed || transition.lifetime.signal.aborted) return;
@@ -173,6 +174,7 @@ export function createFrontendSends(deps: {
       return {
         capture() {
           const current = authority, session = current.session;
+          if (retiredViews.has(viewId)) throw new Error('This editor is moving to another window.');
           if (failedViews.has(viewId)) throw new Error('Local storage failed. Reload before capturing tools.');
           if (closed || !session || session.hostId !== scope.hostId) throw new Error('Reconnect before capturing tools.');
           if (eligibility() !== 'ag-ui-capture-and-bind') return null;
@@ -188,7 +190,7 @@ export function createFrontendSends(deps: {
           try { borrow = capture.borrow(); } catch (error) { retained.release(); throw error; }
           let ownership: 'provisional' | 'transferred' | 'released' = 'provisional';
           const captureToken = {}, ownerId = session.principalId;
-          provisional.set(captureToken, { viewId, scope, retained });
+          provisional.set(captureToken, { viewId, scope, retained, borrow });
           try {
             if (retained.definitions.length !== retained.bindings.length) throw new Error('Captured definitions and bindings differ.');
             const tools = retained.definitions.map(definition => {
@@ -225,15 +227,20 @@ export function createFrontendSends(deps: {
     },
     pause(): void { clearTimeout(timer); authority.lifetime.abort(); },
     async release(key: string): Promise<void> { const entry = entries.get(key); if (entry) await unavailable(entry); },
+    async releaseView(viewId: string): Promise<void> {
+      retiredViews.add(viewId);
+      for (const [key, item] of provisional) if (item.viewId === viewId) { item.retained.release(); item.borrow.release(); provisional.delete(key); }
+      await Promise.all([...entries.values()].filter(entry => entry.viewId === viewId).map(unavailable));
+    },
     storageFailed(viewId: string): void {
       failedViews.add(viewId);
       for (const [key, entry] of entries) if (entry.viewId === viewId) { entries.delete(key); entry.retained.release(); entry.borrow.release(); remember(viewId, entry.reference); }
-      for (const [key, item] of provisional) if (item.viewId === viewId) { item.retained.release(); provisional.delete(key); }
+      for (const [key, item] of provisional) if (item.viewId === viewId) { item.retained.release(); item.borrow.release(); provisional.delete(key); }
       syncRows(); schedule();
     },
     async dispose(): Promise<void> {
       closed = true; become(null); recent.clear(); clearTimeout(timer); syncRows();
-      for (const item of provisional.values()) item.retained.release();
+      for (const item of provisional.values()) { item.retained.release(); item.borrow.release(); }
       provisional.clear();
       await Promise.allSettled([...entries.values()].map(unavailable));
     },

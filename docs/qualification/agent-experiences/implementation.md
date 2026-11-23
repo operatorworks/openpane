@@ -100,9 +100,52 @@ reproduction; they are not counted as passes. The shutdown test now observes the
 durable acceptance file directly because macOS directory notifications can arrive
 after recorded playback has completed.
 
+## Unit C implementation
+
+The production browser entry selects a window role before creating a controller.
+The native broker persists allocations and child requests privately, checks the
+exact document and incarnation, and creates one editor per scope. Main relays
+appearance state to children. Each child receives its own delivery envelope.
+Placement and visual outcomes have independent receipts.
+
+Each conversation has a dedicated IndexedDB view. Conversation locks precede
+view locks. Scoped migration preserves other conversations and moves draft,
+image and outbox records atomically. A persisted writer generation rejects late
+callbacks. Draft carry between conversations copies only captured unsent text
+and clears it with a revision check after the destination confirms it. Pending
+creation, failed windows and child requests retain their recorded identities
+for explicit recovery. Closed-view tool recovery inspects saved journals without
+connecting a conversation or sending commands, and skips live view owners.
+
+SDK compatibility is 0.14.0. Workspace open/create returns inline, detached,
+pending or refused outcomes. The service wire remains 16.
+
+Actual production native checks opened main and two children, preserved distinct
+drafts, reused an existing window, closed one child without closing its siblings,
+and restored a closed chat inline with its original draft. Native checks found
+and fixed a main-thread dispatch deadlock and event listeners that accepted
+other windows' events. Their private evidence is in
+`/tmp/openpane-native-production-qualification-20261122/`. That package predates
+later receipt and recovery changes, so final native qualification remains open.
+The latest native model tests pass 48/48. Browser storage tests pass nine cases,
+including interrupted migration, stale writers, draft carry and failed-window
+inline recovery. `npm run verify` passes 4,006 tests with five existing skips and zero failures
+(4,011 total). The complete log is `/tmp/openpane-c-full-verify-six.log`.
+The native broker tests and formatting also pass. The timeout regression in
+the installed-builder test now shortens only the deadline under test, so a
+healthy startup probe keeps its normal deadline during the execution test.
+
+The configured SSH destination is `punk1290@100.69.236.34`. Node 24.22.3 and pup
+2.0.1 are available there. With `DD_SITE=us3.datadoghq.com` and
+`DD_TOKEN_STORAGE=file`, authentication and an actual fixed-range metrics query
+passed. Its response has `resp_version: 1` and epoch-millisecond pointlist times.
+Private raw evidence stays on that host under
+`~/.cache/openpane-qualification/pup-shape-20261122/`.
+
 ## Remaining acceptance
 
-Units C–E, production native controller integration, bundled/SSH distribution,
-real scoped card publication/restyling, the optional example, native screenshots
-and edit video, full integration gates, and both review-gauntlet passes remain
-incomplete. Transport and parser fixtures cannot stand in for those checks.
+Units D and E, final native approval and eight-window delivery checks,
+bundled and SSH distribution, scoped card publication and restyling, the
+optional example, screenshots and edit video, full integration gates, and both
+review-gauntlet passes remain incomplete. Transport and parser fixtures cannot
+stand in for those checks.

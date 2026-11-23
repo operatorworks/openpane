@@ -78,6 +78,8 @@ export interface ConversationStore<P> {
   getSnapshot(): ClientView<P>;
   subscribe(listener: () => void): () => void;
   setDraft(text: string): Promise<void>;
+  captureDraft(): Promise<{ readonly text: string; readonly revision: number }>;
+  replaceDraft(expected: { readonly text: string; readonly revision: number }, text: string): Promise<boolean>;
   /** Upload failures are reported through the view's image status, not by rejecting. */
   selectImage(file: { readonly name: string; readonly bytes: Uint8Array }): Promise<void>;
   retryImage(): Promise<void>;

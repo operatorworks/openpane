@@ -8,8 +8,8 @@ for (const slot of ['layout', 'transcript']) test(`StrictMode ${slot} activation
     import { CustomizationContent } from './apps/desktop/src/application/CustomizationContent.tsx';
     import { CustomizationTranscript, useDesktopCustomizations } from './apps/desktop/src/application/DesktopCustomizations.tsx';
     window.activations = 0; window.loads = 0; window.disposals = []; window.mounts = []; window.finish = {}; window.finishCleanup = {};
-    const customizations = [{ manifest: { namespace: 'strict', sdkVersion: '0.13.0', entries: [{ kind: 'desktop', module: './desktop.js' }] },
-      load: async () => { window.loads++; return { default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+    const customizations = [{ manifest: { namespace: 'strict', sdkVersion: '0.14.0', entries: [{ kind: 'desktop', module: './desktop.js' }] },
+      load: async () => { window.loads++; return { default: { kind: 'desktop', sdkVersion: '0.14.0', activate() {
         const id = ++window.activations; let disposed = false;
         function Layout() { React.useLayoutEffect(() => { window.mounts.push({ id, disposed }); }, []); return <p>Owner {id}</p>; }
         return new Promise(resolve => { window.finish[id] = malformed => resolve({ modules: [],

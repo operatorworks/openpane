@@ -9,7 +9,7 @@ export interface CaptureBorrow { failed(error: unknown): void; release(): void }
 export interface CaptureStore { borrow(): CaptureBorrow }
 export interface StoreBorrow extends ViewBorrow, CaptureBorrow { readonly store: Store }
 interface Slot { readonly store: Store; agentId: string | null; borrows: number; closing: Promise<void> | null }
-interface Lease { readonly storage: OwnedViewStorage; readonly stores: Map<string, Slot>; borrows: number; failureInterest: number; closing: Promise<void> | null }
+interface Lease { readonly closed: Promise<void>; readonly didClose: () => void; readonly didFail: (error: unknown) => void; readonly storage: OwnedViewStorage; readonly stores: Map<string, Slot>; borrows: number; failureInterest: number; closing: Promise<void> | null }
 export function createViewLeasePool(deps: {
   createStore(storage: OwnedViewStorage, scope: ConversationScope, agentId: () => string | null, capture: CaptureStore): Store;
   failed(storage: OwnedViewStorage | null, error: unknown): void;
@@ -28,7 +28,8 @@ export function createViewLeasePool(deps: {
     if (lease.closing || lease.stores.size || (!disposal && lease.borrows)) return;
     lease.closing = track(Promise.resolve().then(() => lease.storage.close()).then(() => {
       if (leases.get(lease.storage.viewId) === lease) leases.delete(lease.storage.viewId);
-    }).catch(error => { deps.failed(null, error); throw error; }));
+      lease.didClose();
+    }).catch(error => { lease.didFail(error); deps.failed(null, error); throw error; }));
   }
   function closeStore(lease: Lease, key: string, slot: Slot): void {
     if (slot.closing) return;
@@ -81,14 +82,26 @@ export function createViewLeasePool(deps: {
   }
   return {
     adopt(storage: OwnedViewStorage): ViewBorrow {
-      const lease: Lease = { storage, stores: new Map(), borrows: 0, failureInterest: 0, closing: null };
+      let didClose = () => {}, didFail = (_error: unknown) => {};
+      const closed = new Promise<void>((resolve, reject) => { didClose = resolve; didFail = reject; });
+      void closed.catch(() => {});
+      const lease: Lease = { closed, didClose, didFail, storage, stores: new Map(), borrows: 0, failureInterest: 0, closing: null };
       leases.set(storage.viewId, lease);
       if (disposal) { closeView(lease); throw new Error('This application has closed.'); }
       return viewBorrow(lease, true);
     },
-    reserve(viewId: string): ViewBorrow | null {
+    async drainStores(viewId: string): Promise<void> {
       const lease = leases.get(viewId);
-      return lease ? viewBorrow(lease, true) : null;
+      if (!lease) return;
+      const slots = [...lease.stores.values()];
+      if (slots.some(slot => !slot.closing)) throw new Error('A real frontend callback still owns this editor. Try the transfer again after it finishes.');
+      await Promise.all(slots.map(slot => slot.closing));
+    },
+    closed: (viewId: string): Promise<void> => leases.get(viewId)?.closed ?? Promise.resolve(),
+    holds: (viewId: string) => { const lease = leases.get(viewId); return Boolean(lease && !lease.closing); },
+    reserve(viewId: string, interested = true): ViewBorrow | null {
+      const lease = leases.get(viewId);
+      return lease && !lease.closing ? viewBorrow(lease, interested) : null;
     },
     retainRecovery: (view: ViewBorrow): ViewBorrow => {
       const lease = leases.get(view.storage.viewId);

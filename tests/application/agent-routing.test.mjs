@@ -238,18 +238,21 @@ test('authorized agent API and browser route two recorded agents and retain unav
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const db = request.result, transaction = db.transaction('records', 'readwrite');
-      transaction.objectStore('records').put({ version: 1, route: { hostId, conversationId: 'a' },
-        pendingCreation: { hostId, conversationId: 'legacy-absent' } }, ['view', sessionStorage.getItem('openpane.viewId'), hostId]);
+      transaction.objectStore('records').put({ version: 1, route: null,
+        pendingCreation: { hostId, conversationId: 'legacy-absent' } }, ['view', 'legacy-agent-routing', hostId]);
       transaction.oncomplete = () => { db.close(); resolve(); };
     };
   }), access.hostId);
   await page.reload();
+  await page.getByRole('button', { name: 'Reopen saved view legacy-agent-routing', exact: true }).click();
   await page.getByRole('button', { name: 'Recover creation', exact: true }).click();
   await page.getByText(/Choose an agent explicitly/).waitFor();
   assert.equal(host.installation({ ...scopeA, conversationId: 'legacy-absent' }), null);
   await page.getByRole('combobox', { name: 'Agent for pending creation', exact: true }).selectOption(sonnet.id);
   await page.getByRole('button', { name: 'Recover creation', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.scope-label')?.textContent === 'legacy-absent');
+  await page.waitForFunction(() => document.querySelector('.scope-label')?.textContent === 'legacy-absent').catch(async error => {
+    throw new Error(`Recovery notices: ${JSON.stringify(await page.getByRole('alert').allTextContents())}`, { cause: error });
+  });
   assert.deepEqual(host.installation({ ...scopeA, conversationId: 'legacy-absent' }), b);
   await open('a');
   dropCreate = true;

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { repository, buildCustom } from '../customization/build/support.mjs';
 import { root, fixture, connected, tools, chats, draft, revealRecovery, customRuntime, wait } from './browser-support.mjs';
 
-const entry = body => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { ${body} } } })`;
+const entry = body => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() { ${body} } } })`;
 const override = `function Transcript(context) {
   const [broken, setBroken] = React.useState(false);
   window.contexts ??= []; if (!window.contexts.some(previous => previous.conversation.conversationId === context.conversation.conversationId)) window.contexts.push(context);
@@ -224,8 +224,8 @@ test('overridden live conversation retains approval, Stop and uncertain recovery
     const active = { viewId: 'one', scope, store, agent: { imageInput: { kind: 'unsupported', reason: 'This model cannot read images.' }, commands: ['send', 'approve', 'cancel'], availability: { kind: 'ready' } } };
     function Broken() { throw new Error('Live failure'); }
     function Transcript() { const [broken, setBroken] = React.useState(false); return broken ? <Broken /> : <button onClick={() => setBroken(true)}>Fail live transcript</button>; }
-    const customizations = [{ manifest: { namespace: 'live', sdkVersion: '0.13.0', entries: [{kind: 'desktop', module: './desktop.js'}] },
-      load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { window.activations++; return { modules: [], overrides: { transcript: Transcript }, dispose() { window.disposals++; } }; } } }) }];
+    const customizations = [{ manifest: { namespace: 'live', sdkVersion: '0.14.0', entries: [{kind: 'desktop', module: './desktop.js'}] },
+      load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() { window.activations++; return { modules: [], overrides: { transcript: Transcript }, dispose() { window.disposals++; } }; } } }) }];
     function App() { const [enabled, setEnabled] = React.useState(true); window.disable = () => flushSync(() => setEnabled(false)); window.enable = () => flushSync(() => setEnabled(true));
       const custom = useDesktopCustomizations({ customizations, enabled });
       return <ConversationView active={active} actions={actions} enabled storageFailure="" agent="codex" transcript={custom.transcript} />; }

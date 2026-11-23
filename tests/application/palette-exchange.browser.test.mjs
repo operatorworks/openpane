@@ -115,7 +115,7 @@ test('valid preferences larger than the palette limit export and import in a fre
 test('reserved mode names remain selectable as explicit extension namespaces after reload', async t => {
   const host = await fixture(t), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
-  const entry = namespace => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+  const entry = namespace => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() {
     return { modules: [], overrides: { transcript() { return <p>${namespace} claimant transcript</p>; } }, dispose() {} };
   } } })`;
   await customRuntime(page, host, entry('fixture'), false,

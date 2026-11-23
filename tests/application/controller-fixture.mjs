@@ -4,7 +4,7 @@ import { createApplicationController } from '../../apps/desktop/dist/application
 export const scope = { hostId: 'host', conversationId: 'conversation' };
 export const empty = () => ({ version: 2, route: null, pendingCreation: null });
 export const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
-export function fixture() {
+export function fixture(options = {}) {
   const images = new Map(), loads = [], selected = [], captured = new Map(), views = new Map(), drafts = new Map(), leases = [], created = [], submitted = [], cursors = [], feeds = [];
   let nextId = 0, hostId = 'host', feedCloses = 0, metadataCalls = 0;
   const filters = [], calls = [];
@@ -62,7 +62,7 @@ export function fixture() {
       watch(request, receive) { const end = deferred(); const feed = { scope: selected, receive, ended: end.promise, finish: end.resolve, close() { feedCloses++; } }; feeds.push(feed); return feed; } }; },
   };
   let connectionOptions;
-  const app = createApplicationController({ createConnection: options => { connectionOptions = options; return connection; },
+  const app = createApplicationController({ ...options, createConnection: options => { connectionOptions = options; return connection; },
     ownedViewStorage: { open: async failure => { await behavior.acquire(); return lease('original-view', failure); }, reopen: async (id, failure) => { await behavior.reopen(id); return lease(id, failure); } }, createId: () => behavior.uuids ? `00000000-0000-4000-8000-${String(++nextId).padStart(12, '0')}` : `id-${++nextId}` });
   return { app, views, drafts, loads, selected, captured, descriptor, leases, created, submitted, cursors, feeds, behavior,
     host: value => { hostId = value; }, connectionLost: error => connectionOptions.onConnectionLost(error), feedCloses: () => feedCloses, metadataCalls: () => metadataCalls, filters, calls };

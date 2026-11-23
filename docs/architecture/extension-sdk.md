@@ -32,11 +32,11 @@ Its context supplies `providers.add(id, provider, presentation)`, a generic meth
 `providers.addAgui` uses the same registration and authority with a model whose request is the actual `RunAgentInput`.
 The backend must send that exact input and confirm its preallocated `runId`.
 Allocate a fresh run ID for each independent offered send. Exact retries keep the saved input and original run ID.
-SDK 0.5.0 introduced this required activation-context method. Extensions built before SDK 0.13.0 must rebuild; exact-version hosts refuse them before activation.
+SDK 0.5.0 introduced this required activation-context method. Extensions built before SDK 0.14.0 must rebuild; exact-version hosts refuse them before activation.
 A provider-only entry requires no React import or UI bootstrap.
 The [provider contract](provider-contracts.md) stays independent of UI activation.
 The server-only `credentials.use({ credential, service }, action)` resolves a host-issued handle for an authorized callback.
-SDK compatibility is `0.13.0`. Both the manifest and loaded entry must match this version exactly.
+SDK compatibility is `0.14.0`. Both the manifest and loaded entry must match this version exactly.
 SDK 0.6.0 adds the optional `contentLayout` contribution and requires rebuilding older extensions.
 SDK 0.9.0 adds optional provider text outputs through `ConnectedProvider.outputs`. Hosts enumerate complete scoped descriptors and read verified UTF-8 bytes through `LocalHost.conversationOutputs` and `LocalHost.readOutput`. Existing providers may omit the capability. This in-process addition keeps backend contract 1, wire 10, core DB 7 and transcript 4.
 SDK 0.10.0 adds the optional `ProviderPresentation.closure(state)` hook. It reads a provider-confirmed end of the conversation from saved state without I/O and returns `{ cause }` or `null`. Hosts report such a conversation as `concluded`, start no observation for it and refuse its sends. Existing presentations may omit the hook. The new observation status requires wire 12; backend contract 1, core DB 7 and transcript 4 are unchanged.
@@ -248,7 +248,7 @@ Each installed package supplies its canonical manifest at `package.json.openpane
 		"extension": {
 			"namespace": "crew",
 			"trust": "full",
-			"sdkVersion": "0.13.0",
+			"sdkVersion": "0.14.0",
 			"entries": [{ "kind": "server", "module": "./dist/server.mjs" }]
 		}
 	}
@@ -390,10 +390,12 @@ SDK 0.13.0 adds the optional `workspace` contribution: `{ label, component, tran
 The desktop rail shows Chats, Extensions and Settings. The Extensions view lists every namespace in the desktop selection and in `ServiceMetadata.extensions`, sorted by namespace, with a state of `Ready`, `Not configured`, `Unavailable`, `No view`, `Failed`, `Disabled` or `Loading` (while the desktop entry activates, or while the host has not yet reported its extensions, for example during startup or while it is unreachable). Selecting a row with a workspace renders its component inside an element with `data-extension-workspace="<namespace>"`; scope every stylesheet selector under that attribute. That element also contains the host-rendered `conversation` node, so the attribute alone does not keep a rule off the host composer, approvals or agent picker: scope element rules such as `button` or `h2` to your own containers, for example `[data-extension-workspace="crew"] :is(.crew-header, .crew-member-form) button`. The host conversation keeps the host styles; only theme tokens set by an enclosing `ThemeScope` reach it.
 
 `WorkspaceViewProps` gives the component its namespace, installation status, this namespace's agents (with `installationId` and `providerAgentId`), its conversations (catalog order, paged with `more()`, except that a conversation created in this session is listed first until the list is next read from its first page, for example by `refresh()`; when the selected conversation's agent has a `providerAgentId`, the selected conversation is always among them, after the loaded pages when it is not on one yet; otherwise it is among them only if a loaded page lists it), the selected conversation and a host-rendered `conversation` node.
-`open(scope)` and `create(agentId)` reject only a conversation or agent outside the namespace. Otherwise they resolve when the attempt ends, including an attempt that did not open or create anything: the application was busy, a pending creation needs recovery, the agent is unavailable or the host refused. `selected` stays unchanged, so react to a change of `selected`, not to the resolved promise. The host shows a refusal, a pending creation or an unavailable agent in the workspace status strip. An attempt made while the application is busy with another operation is ignored without a notice. `call(installationId, operation, input)` calls the extension's own server operations and never rejects: a transport failure resolves as `{ kind: 'failed', cause: 'unavailable' }`. `refresh()` re-reads metadata and the conversation list.
+SDK 0.14.0 changes `open(scope)` and `create(agentId)` to return `ConversationOpenResult`. These methods reject only a conversation or agent outside the namespace. An `inline` result identifies the scope opened in this document. A `detached` result identifies the scope and native window label. A `pending` result contains a reason and the reserved scope when known. A `refused` result contains the reason the attempt could not proceed. A busy application returns `refused` without allocating a conversation.
+
+`selected` describes only the inline editor. A detached result leaves the workspace list visible. Use the result to finish a pending interaction, and ignore a late result after the user navigates elsewhere. Pending creation and storage failures remain visible in the host status strip. `call(installationId, operation, input)` calls the extension's own server operations and never rejects: a transport failure resolves as `{ kind: 'failed', cause: 'unavailable' }`. `refresh()` re-reads metadata and the conversation list.
 The host-rendered conversation keeps the composer, approvals, Stop, recovery and permissions. Inside a workspace it uses the workspace `transcript` when one is supplied, no `contentLayout` and no modules, and its agent control lists only the namespace's agents.
 
-The application has one active conversation (decision D4). Opening a conversation in a workspace changes that same active conversation, so switching to Chats shows it selected. At most one conversation view is mounted at a time, and the draft is kept in the persisted draft store across views.
+Each document has at most one active conversation. With inline chat policy, opening a workspace conversation selects it in Chats too. A supported desktop launcher can instead open or focus one native window per conversation. Each child stays assigned to its scope. New chat and continuation actions request a separate target through main. Drafts use a dedicated saved view per scope, with conversation and view locks in the shared browser partition. An already owned scope reports its owner instead of creating another editor.
 A workspace render failure retires its namespace once and returns the Extensions list with the row `Failed`. Restore default view disables workspaces with the other presentation contributions.
 
 ## Arrange conversation content

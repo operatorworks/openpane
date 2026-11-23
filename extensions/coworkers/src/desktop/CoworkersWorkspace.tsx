@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ConversationScope } from '@openpane/contracts';
 import type { WorkspaceAgent, WorkspaceViewProps } from '@openpane/sdk/react';
 import { useTheme } from '@openpane/theme/react';
@@ -51,13 +51,15 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   const filter = filtered.installationId === installationId ? filtered.coworkerId : null;
   const setFilter = (coworkerId: string | null) => setFiltered({ installationId, coworkerId });
   const [narrowPane, setNarrowPane] = useState<'list' | 'conversation'>('list');
-  // The narrow layout moves to the conversation only once `selected` changes: open and create resolve without one on failure.
+  // Only a selection or inline result for the pending action may move the narrow pane.
   // Navigating elsewhere drops the wait, so a later unrelated selection does not move the pane.
   const [awaiting, setAwaiting] = useState<{ readonly before: string | null } | null>(null);
   const [notice, setNotice] = useState('');
+  const waiting = useRef<object | null>(null);
+  function stopAwaiting() { waiting.current = null; setAwaiting(null); }
   const selectedKey = props.selected ? `${props.selected.hostId}/${props.selected.conversationId}` : null;
   useEffect(() => {
-    if (awaiting && selectedKey !== null && selectedKey !== awaiting.before) { setAwaiting(null); setNarrowPane('conversation'); }
+    if (awaiting && selectedKey !== null && selectedKey !== awaiting.before) { stopAwaiting(); setNarrowPane('conversation'); }
   }, [awaiting, selectedKey]);
   const key = coworkers.map(item => item.providerAgentId).join(',');
   useEffect(() => {
@@ -103,10 +105,17 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   const detail = shown ? details.get(shown.providerAgentId) : undefined;
   const chats = entries.filter(entry => !filter || entry.provider.providerAgentId === filter);
   /** Opens or creates a chat. A rejection is shown here; any other failure is in the host status strip. */
-  async function attempt(action: () => Promise<void>) {
+  async function attempt(action: () => ReturnType<WorkspaceViewProps['open']>) {
+    const attempt = {}; waiting.current = attempt;
     setNotice(''); setAwaiting({ before: selectedKey });
-    try { await action(); }
-    catch { setAwaiting(null); setNotice('That chat could not be opened. Refresh the list and try again.'); }
+    try {
+      const result = await action();
+      if (waiting.current !== attempt) return;
+      stopAwaiting();
+      if (result.kind === 'inline') setNarrowPane('conversation');
+      else { setNarrowPane('list'); setNotice(result.kind === 'detached' ? 'Chat opened in its own window.' : result.reason); }
+    }
+    catch { if (waiting.current !== attempt) return; stopAwaiting(); setNotice('That chat could not be opened. Refresh the list and try again.'); }
   }
   function openChat(scope: ConversationScope) {
     if (selectedKey === `${scope.hostId}/${scope.conversationId}`) { setNarrowPane('conversation'); return; }
@@ -126,8 +135,8 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   return <ThemeScope className="coworkers-workspace" colors={PALETTE[theme.appearance]} data-pane={narrowPane}>
     <nav className="coworkers-app-bar" aria-label="Coworkers app bar">
       <div role="group" aria-label="Coworkers sections" className="coworkers-sections">
-        <button type="button" aria-pressed={tab === 'chat'} onClick={() => { setAwaiting(null); setTab('chat'); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>Chat</button>
-        <button type="button" aria-pressed={tab === 'coworkers'} onClick={() => { setAwaiting(null); setTab('coworkers'); }}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c0-3.3 2.7-5 6-5s6 1.7 6 5M14 19c0-2 1.5-3.5 4-3.5s3 1 3 3.5"/></svg>Coworkers</button>
+        <button type="button" aria-pressed={tab === 'chat'} onClick={() => { stopAwaiting(); setTab('chat'); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>Chat</button>
+        <button type="button" aria-pressed={tab === 'coworkers'} onClick={() => { stopAwaiting(); setTab('coworkers'); }}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c0-3.3 2.7-5 6-5s6 1.7 6 5M14 19c0-2 1.5-3.5 4-3.5s3 1 3 3.5"/></svg>Coworkers</button>
       </div>
     </nav>
     {tab === 'coworkers' ? <section className="coworkers-directory" aria-label="Coworker directory">
@@ -164,7 +173,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
         </header>
         {notice && <p role="alert" className="coworkers-notice">{notice}</p>}
         {listError && <p role="status" className="coworkers-notice">{listError} <button type="button" onClick={() => setListAttempt(attempt => attempt + 1)}>Retry</button></p>}
-        {filter && <button type="button" className="coworkers-filter" onClick={() => { setAwaiting(null); setFilter(null); }}>Showing {byId.get(filter)?.label ?? filter} · Show all</button>}
+        {filter && <button type="button" className="coworkers-filter" onClick={() => { stopAwaiting(); setFilter(null); }}>Showing {byId.get(filter)?.label ?? filter} · Show all</button>}
         {chats.length === 0 && <p className="coworkers-empty">{props.conversations.hasMore
           ? 'No matching chats on the loaded pages. Load more chats to keep looking.'
           : 'No chats yet. Open the Coworkers tab and choose Chat.'}</p>}
@@ -186,7 +195,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
       <section className="coworkers-main" aria-label="Coworker conversation">
         {shown ? <>
           <header className="coworkers-header">
-            <button type="button" className="coworkers-back" onClick={() => { setAwaiting(null); setNarrowPane('list'); }}>Chats</button>
+            <button type="button" className="coworkers-back" onClick={() => { stopAwaiting(); setNarrowPane('list'); }}>Chats</button>
             <span className="coworkers-avatar" aria-hidden="true">{initials(shown.label)}</span>
             <div className="coworkers-header-text"><h2>{shown.label}</h2>{detail && <span className="coworkers-role">{detail.role}</span>}</div>
             <div className="coworkers-pills" role="group" aria-label="Conversation views">

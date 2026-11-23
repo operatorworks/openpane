@@ -97,9 +97,12 @@ export function CrewWorkspace(props: WorkspaceViewProps) {
   const palette = SIDEBAR[theme.appearance];
   const sidebarId = `crew-members-${installation?.installationId ?? 'none'}`;
   /** open and create reject only outside this namespace; any other failure is in the host status strip. */
-  function attempt(action: () => Promise<void>) {
+  function attempt(action: () => ReturnType<WorkspaceViewProps['open']>) {
     setNotice('');
-    void action().catch(() => setNotice('That conversation could not be opened. Refresh and try again.'));
+    void action().then(result => {
+      if (result.kind === 'detached') setNotice('Conversation opened in its own window.');
+      else if (result.kind !== 'inline') setNotice(result.reason);
+    }).catch(() => setNotice('That conversation could not be opened. Refresh and try again.'));
   }
 
   if (!installation) {

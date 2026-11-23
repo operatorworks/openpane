@@ -1,12 +1,12 @@
-import { VisualContext, type VisualSelection } from './experience-state.js';
+import { UiActionsContext, VisualContext, type VisualSelection } from './experience-state.js';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { ThemeScope } from '@openpane/ui-primitives/desktop';
 import type { UiClientSnapshot } from '@openpane/contracts';
-import { UiConnection } from './ui-connection.js';
+import { UiConnection, type UiTransport } from './ui-connection.js';
 import './experience.css';
 
-const connectionSubscribers = new WeakMap<UiConnection, number>();
+const connectionSubscribers = new WeakMap<UiTransport, number>();
 function visibleFrame(): Promise<void> { return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); }
 function essentialControls(root: HTMLElement): void {
   const controls = root.querySelectorAll<HTMLElement>('[data-openpane-essential]');
@@ -41,8 +41,8 @@ async function stage(state: UiClientSnapshot, signal: AbortSignal): Promise<HTML
   });
   return link;
 }
-export function ExperienceScope({ children }: { readonly children: ReactNode }) {
-  const [connection] = useState(() => new UiConnection());
+export function ExperienceScope({ children, connection: supplied }: { readonly children: ReactNode; readonly connection?: UiTransport }) {
+  const [connection] = useState(() => supplied ?? new UiConnection());
   const transport = useSyncExternalStore(connection.subscribe, connection.getSnapshot, connection.getSnapshot);
   const installedStylesheet = useRef<HTMLLinkElement | null>(null);
   const [visual, setVisual] = useState<VisualSelection | null>(null);
@@ -92,7 +92,7 @@ export function ExperienceScope({ children }: { readonly children: ReactNode }) 
   const applied = transport.localBuiltin ? null : visual;
   return <div className="experience-frame">
     <div className="experience-content" data-openpane-experience={applied?.digest} data-openpane-navigation={applied?.manifest.presentation.navigation}>
-      <VisualContext value={applied}>{children}</VisualContext>
+      <UiActionsContext value={{ restore: () => connection.restore() }}><VisualContext value={applied}>{children}</VisualContext></UiActionsContext>
     </div>
     {(applied || transport.localBuiltin || notice || transport.diagnostic) && <ThemeScope className="experience-recovery" aria-label="Appearance recovery">
       <button type="button" onClick={() => void connection.restore()}>Restore OpenPane appearance</button>

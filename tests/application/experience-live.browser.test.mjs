@@ -60,3 +60,32 @@ test('failed CSS load retains the last painted frame and refresh reuses immutabl
   await requestUi(socket, refresh); assert.equal((await completed(socket, refresh.requestId)).outcome, 'all-rendered');
   assert.equal(await page.locator('.experience-content').getAttribute('data-openpane-experience'), failed.bundle.digest);
 });
+
+test('offline builtin recovery survives reload and never overwrites a newer selection without another explicit restore', { timeout: 45000 }, async t => {
+  const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  await draft(page, 'Offline recovery keeps this draft');
+  const context = await requestUi(socket, { op: 'context' }), id = () => `${context.requestEpoch}:${randomUUID()}`;
+  const first = { op: 'apply', requestId: id(), expectedRevision: 0, bundle: experience('#3355aa') };
+  await requestUi(socket, first); assert.equal((await completed(socket, first.requestId)).outcome, 'all-rendered');
+  let paused = true;
+  await page.route('**/api/ui/v1', route => paused ? route.abort('connectionfailed') : route.continue());
+  await page.getByRole('button', { name: 'Restore OpenPane appearance', exact: true }).click();
+  await wait(() => page.locator('.experience-content').evaluate(node => node.getAttribute('data-openpane-experience') === null), 'local builtin during UI outage');
+  await wait(() => page.evaluate(() => JSON.parse(localStorage.getItem('openpane.ui-recovery.v1') ?? 'null')?.kind === 'reserved'), 'reserved recovery persistence');
+  const original = await page.evaluate(() => JSON.parse(localStorage.getItem('openpane.ui-recovery.v1')));
+  await page.reload(); await connected(page);
+  assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Offline recovery keeps this draft');
+  assert.equal(await page.locator('.experience-content').getAttribute('data-openpane-experience'), null);
+  const newer = { op: 'apply', requestId: id(), expectedRevision: 1, bundle: experience('#aa5533') }; await requestUi(socket, newer);
+  paused = false;
+  await wait(() => page.evaluate(() => JSON.parse(localStorage.getItem('openpane.ui-recovery.v1') ?? 'null')?.kind === 'conflicted'), 'stale recovery refusal');
+  const refused = await page.evaluate(() => JSON.parse(localStorage.getItem('openpane.ui-recovery.v1')));
+  assert.deepEqual(refused.request, original.request);
+  assert.equal((await requestUi(socket, { op: 'context' })).selection.selected.digest, newer.bundle.digest);
+  assert.equal(await page.locator('.experience-content').getAttribute('data-openpane-experience'), null);
+  await page.getByRole('button', { name: 'Restore OpenPane appearance', exact: true }).click();
+  await wait(async () => (await requestUi(socket, { op: 'context' })).selection.selected.kind === 'builtin', 'explicit current-generation recovery');
+  assert.equal((await requestUi(socket, { op: 'context' })).revision, 3);
+  assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Offline recovery keeps this draft');
+});

@@ -93,3 +93,69 @@ test('metadata capacity reserves late failure bytes and never prevents builtin r
   finally { db.close(); }
   assert.equal((await f.store.execute({ op: 'restore', requestId: `recovery:1:${randomUUID()}`, expectedRecoveryGeneration: 1, expectedRevision: 1 })).receipt.digest, null);
 });
+
+test('one main relay registers children, preserves fixed paint cohorts and filters receipt envelopes', async t => {
+  const f = await fixture(t), main = f.window(); await f.state(main);
+  const child = name => ({ ...main, role: 'chat', label: name, documentIncarnation: randomUUID(), viewId: name, scope: { hostId: 'host', conversationId: name } });
+  const one = child('one'), hidden = child('hidden');
+  const relay = (children, departed = []) => f.store.execute({ op: 'relay', main, children, departed });
+  const present = (context, sequence, visible = true) => ({ context, presenceSequence: sequence, visible });
+  await relay([present(one, 1), present(hidden, 1, false)]);
+  const selected = await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: bundle('relay') });
+  assert.equal(selected.receipt.participants.length, 3);
+  const late = child('late'), delivered = await relay([present(one, 2), present(hidden, 2, false), present(late, 1)]);
+  assert.deepEqual(delivered.children.map(child => child.envelope?.requestId ?? null), [selected.receipt.requestId, selected.receipt.requestId, null]);
+  await assert.rejects(f.store.execute({ op: 'ack', session: hidden.documentIncarnation, envelope: envelope(selected.receipt), result: { kind: 'rendered' } }), /visible/);
+  await relay([present(one, 3), present(late, 2)], [hidden.documentIncarnation]);
+  const status = await f.store.execute({ op: 'status', requestId: selected.receipt.requestId });
+  assert.equal(status.receipt.participants.find(participant => participant.slot.context.label === 'hidden').visual.kind, 'departed');
+  await assert.rejects(relay([present(one, 3)]), /Stale/);
+  await assert.rejects(f.store.execute({ op: 'relay', main: { ...main, documentIncarnation: randomUUID() }, children: [], departed: [] }), /Unregistered/);
+});
+
+test('a native transition stays pending after main paints and resolves once to the reserved child incarnation', async t => {
+  const f = await fixture(t), main = f.window();
+  await f.store.execute({ op: 'state', context: main, visible: true, presenceSequence: 1, after: null, waitMs: 0, nativePlacement: true });
+  const base = bundle('separate'), separate = createExperienceBundle({ ...base.manifest, presentation: { ...base.manifest.presentation, chats: 'separate' } }, null, []);
+  const { receipt } = await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: separate });
+  assert.equal(receipt.participants.length, 2);
+  const transition = receipt.participants.find(item => item.slot.kind === 'transition').slot;
+  const env = envelope(receipt), paint = context => f.store.execute({ op: 'paint', session: context.documentIncarnation, ...Object.fromEntries(Object.entries(env).filter(([key]) => key !== 'requestId')) });
+  await paint(main);
+  assert.equal((await f.store.execute({ op: 'ack', session: main.documentIncarnation, envelope: env, result: { kind: 'rendered' } })).outcome, 'pending');
+  const target = { scope: { hostId: 'host', conversationId: 'assigned' }, viewId: 'dedicated', label: 'assigned-child', nativeTransitionId: 'native-transition', bindingRevision: 3 };
+  const reserve = { op: 'placement-reserve', session: main.documentIncarnation, envelope: env, transitionId: transition.transitionId, target };
+  await f.store.execute(reserve); await f.store.execute(reserve);
+  await assert.rejects(f.store.execute({ ...reserve, target: { ...target, viewId: 'replacement' } }), /already fixed/);
+  const child = { ...main, role: 'chat', scope: target.scope, viewId: target.viewId, label: target.label, documentIncarnation: randomUUID() };
+  const ready = (context, sequence, revision = 3, visible = false) => f.store.execute({ op: 'relay', main, children: [{ context, visible, presenceSequence: sequence,
+    placement: { nativeTransitionId: target.nativeTransitionId, bindingRevision: revision } }], departed: [] });
+  await assert.rejects(ready(child, 1, 4), /fixed placement target/);
+  const delivered = await ready(child, 1);
+  assert.equal(delivered.children[0].envelope.requestId, receipt.requestId);
+  let status = await f.store.execute({ op: 'status', requestId: receipt.requestId });
+  const resolved = status.receipt.participants.find(item => item.slot.kind === 'transition');
+  assert.equal(resolved.placement.kind, 'ready'); assert.equal(resolved.slot.resolved.documentIncarnation, child.documentIncarnation); assert.equal(status.outcome, 'pending');
+  await assert.rejects(paint(child), /visible/);
+  await ready(child, 2, 3, true); await paint(child);
+  assert.equal((await f.store.execute({ op: 'ack', session: child.documentIncarnation, envelope: env, result: { kind: 'rendered' } })).outcome, 'all-rendered');
+  const reloaded = { ...child, documentIncarnation: randomUUID() };
+  const late = await ready(reloaded, 1, 3, true); assert.equal(late.children[0].envelope, null);
+  await assert.rejects(f.store.execute({ op: 'ack', session: reloaded.documentIncarnation, envelope: env, result: { kind: 'rendered' } }), /participant/);
+});
+
+test('an empty native catalog must paint before confirming unchanged placement; restart terminates unfinished transitions', async t => {
+  const f = await fixture(t), main = f.window();
+  const present = () => f.store.execute({ op: 'state', context: main, visible: true, presenceSequence: 1, after: null, waitMs: 0, nativePlacement: true });
+  await present(); const base = bundle('catalog'), separate = createExperienceBundle({ ...base.manifest, presentation: { ...base.manifest.presentation, chats: 'separate' } }, null, []);
+  const { receipt } = await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: separate }), env = envelope(receipt);
+  const slot = receipt.participants.find(item => item.slot.kind === 'transition').slot;
+  const idle = { op: 'placement-idle', session: main.documentIncarnation, envelope: env, transitionId: slot.transitionId };
+  await assert.rejects(f.store.execute(idle), /source to paint/);
+  await f.store.execute({ op: 'paint', session: main.documentIncarnation, deliveryGeneration: env.deliveryGeneration, selectionRevision: env.selectionRevision, digest: env.digest });
+  await f.store.execute(idle);
+  assert.equal((await f.store.execute({ op: 'ack', session: main.documentIncarnation, envelope: env, result: { kind: 'rendered' } })).outcome, 'all-rendered');
+  const next = await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: 1 });
+  f.restart(); const stopped = await f.store.execute({ op: 'status', requestId: next.receipt.requestId });
+  assert.equal(stopped.receipt.participants.find(item => item.slot.kind === 'transition').placement.kind, 'failed'); assert.notEqual(stopped.outcome, 'all-rendered'); assert.notEqual(stopped.outcome, 'pending');
+});

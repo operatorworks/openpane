@@ -30,7 +30,7 @@ for (const [field, change, message] of [
 for (const namespace of ['a', 'example-123', 'a'.repeat(32), '', 'A', '-bad', 'bad_name', 'a'.repeat(33), 'white space', 'é', '__proto__']) {
   test(`palette and SDK agree on namespace ${JSON.stringify(namespace)}`, () => {
     const valid = parse => { try { parse(); return true; } catch { return false; } };
-    const sdk = valid(() => parseExtensionManifest({ namespace, trust: 'full', sdkVersion: '0.13.0', entries: [{ kind: 'desktop', module: './index.js' }] }));
+    const sdk = valid(() => parseExtensionManifest({ namespace, trust: 'full', sdkVersion: '0.14.0', entries: [{ kind: 'desktop', module: './index.js' }] }));
     assert.equal(valid(() => parsePaletteDocument({ ...starterPalette(), namespace })), sdk);
     assert.equal(valid(() => parsePaletteDocument({ ...starterPalette(), name: namespace })), sdk);
   });

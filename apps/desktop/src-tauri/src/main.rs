@@ -1,6 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::Manager;
+mod chat_window_records;
+mod chat_window_storage;
+mod chat_windows;
 mod keychain;
 mod native;
 mod provider_setup;
@@ -121,7 +124,11 @@ fn main() {
         .as_ref()
         .map(|configuration| configuration.setup_url().clone());
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![native_access, provider_setup])
+        .invoke_handler(tauri::generate_handler![
+            native_access,
+            provider_setup,
+            chat_windows::desktop_window
+        ])
         .setup(move |app| {
             app.manage(NativeState {
                 owner: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -131,9 +138,26 @@ fn main() {
             app.manage(provider_setup::SetupState(setup.map(|configuration| {
                 std::sync::Arc::new(std::sync::Mutex::new(configuration))
             })));
+            let live_relay = cfg!(target_os = "macos")
+                && std::process::Command::new("/usr/bin/sw_vers")
+                    .arg("-productVersion")
+                    .output()
+                    .ok()
+                    .filter(|result| result.status.success())
+                    .and_then(|result| String::from_utf8(result.stdout).ok())
+                    .and_then(|version| version.trim().split('.').next()?.parse::<u32>().ok())
+                    .is_some_and(|major| major >= 14);
+            app.manage(chat_windows::ChatWindows::new(
+                host_url.clone(),
+                &app.path().app_data_dir()?,
+                live_relay,
+            ));
+            if let Some(target) = &host_url {
+                chat_windows::add_capability(app.handle(), "main", target)?;
+            }
             let browser_url = host_url.clone();
             let setup_app = app.handle().clone();
-            let window =
+            let mut window_builder =
                 tauri::WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?
                     .on_navigation(move |url| {
                         if setup_url.as_ref() == Some(url) {
@@ -145,8 +169,17 @@ fn main() {
                         }
                         bundled(url) || browser_url.as_ref() == Some(url)
                     })
-                    .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
-                    .build()?;
+                    .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny);
+            if live_relay && host_url.is_some() {
+                window_builder = window_builder.background_throttling(
+                    tauri::utils::config::BackgroundThrottlingPolicy::Disabled,
+                );
+            }
+            let window = window_builder.build()?;
+            if host_url.is_some() {
+                chat_windows::attach_close(app.handle(), &window);
+                chat_windows::install_menu(app.handle())?;
+            }
             let background = |theme| match theme {
                 tauri::Theme::Dark => tauri::window::Color(33, 33, 33, 255),
                 _ => tauri::window::Color(247, 247, 248, 255),

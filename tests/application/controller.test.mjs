@@ -1601,3 +1601,16 @@ test('a refreshMetadata reply superseded by a reconnect publishes nothing, and a
   await f.app.refreshMetadata();
   assert.equal(f.app.getSnapshot().host.kind, 'incompatible', 'an incompatible host blocks commands instead of staying ready');
 });
+
+for (const kind of ['refused', 'pending', 'detached']) test(`a ${kind} placement stays explicit without mounting or creating a hidden inline chat`, async t => {
+  const f = fixture({ placement: { async acquire(request) {
+    return kind === 'refused' ? { kind, reason: 'Window could not open' }
+      : kind === 'pending' ? { kind, scope: request.scope, reason: 'Window is opening' }
+        : { kind, scope: request.scope, label: 'chat-window' };
+  } } });
+  t.after(() => f.app.dispose()); await f.app.start();
+  const result = await f.app.create();
+  assert.equal(result.kind, kind); assert.equal(f.app.getSnapshot().lastPlacement, result);
+  assert.equal(f.app.getSnapshot().active, null); assert.deepEqual(f.created, []);
+  if (kind === 'refused') assert.equal(f.app.getSnapshot().error, 'Window could not open');
+});

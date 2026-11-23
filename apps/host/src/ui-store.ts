@@ -1,11 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import type { ApplyReceipt, ExperienceBundle, UiAppearance, UiSelection, WindowContext } from '@openpane/contracts';
-import { canonicalJson, experienceSchema, parseUiAppearance, parseUiSelection, parseWindowContext } from '@openpane/contracts';
+import type { ApplyReceipt, NativePlacementTarget, UiClientSnapshot, ExperienceBundle, UiAppearance, UiSelection, WindowContext } from '@openpane/contracts';
+import { canonicalJson, experienceSchema, parseUiAppearance, parseUiSelection, parseApplyReceipt } from '@openpane/contracts';
 import { count, identifier, record } from '@openpane/contracts/decode';
 import { EXPERIENCE_PARTS, parseExperienceBundle, sha256 } from './experience-bundle.js';
-import { parseDeliveryEnvelope, UiRefusal } from './ui-protocol.js';
+import { UiRefusal } from './ui-protocol.js';
 import type { UiRequest } from './ui-protocol.js';
 
 const MAX_BUNDLES = 16, MAX_BUNDLE_BYTES = 32 * 1024 * 1024, MAX_RECEIPTS = 4096, MAX_METADATA_BYTES = 32 * 1024 * 1024;
@@ -15,28 +15,14 @@ interface StoreState {
   readonly selection: UiSelection; readonly healthy: UiAppearance;
   readonly recovery: { readonly requestId: string; readonly requestDigest: string; readonly result: ApplyReceipt } | null;
 }
-interface Session { readonly context: WindowContext; readonly visible: boolean; readonly sequence: number; readonly seen: number; readonly digest: string | null; readonly stagedDigest: string | null; readonly initialized: boolean }
+interface Session { readonly context: WindowContext; readonly visible: boolean; readonly sequence: number; readonly seen: number; readonly digest: string | null; readonly stagedDigest: string | null; readonly initialized: boolean; readonly nativePlacement: boolean; readonly paintedGeneration: number | null }
 function text(value: unknown): string { if (typeof value !== 'string') throw new Error('Corrupt UI store text'); return value; }
-function parseReceipt(value: unknown): ApplyReceipt {
-  const input = record(value, ['requestId', 'deliveryGeneration', 'selectionRevision', 'digest', 'requestDigest', 'participants']);
-  const envelope = parseDeliveryEnvelope({ requestId: input.requestId, deliveryGeneration: input.deliveryGeneration, selectionRevision: input.selectionRevision, digest: input.digest });
-  if (!Array.isArray(input.participants) || input.participants.length > 32) throw new Error('Corrupt UI receipt cohort');
-  const participants = input.participants.map((value: unknown) => {
-    const participant = record(value, ['slot', 'visual', 'placement']);
-    const slot = record(participant.slot, ['kind', 'context']);
-    if (slot.kind !== 'document') throw new Error('Unsupported UI transition');
-    const context = parseWindowContext(slot.context);
-    const visual = record(participant.visual);
-    let result: ApplyReceipt['participants'][number]['visual'];
-    if (visual.kind === 'pending' || visual.kind === 'failed') { record(visual, ['kind', 'reason']); result = { kind: visual.kind, reason: identifier(visual.reason, 500) }; }
-    else if (visual.kind === 'rendered' || visual.kind === 'departed' || visual.kind === 'superseded') { record(visual, ['kind']); result = { kind: visual.kind }; }
-    else throw new Error('Corrupt UI visual outcome');
-    const placement = record(participant.placement, ['kind']);
-    if (placement.kind !== 'unchanged') throw new Error('Unsupported UI placement');
-    return { slot: { kind: 'document', context } as const, visual: result, placement: { kind: 'unchanged' } as const };
-  });
-  return { ...envelope, requestDigest: identifier(input.requestDigest, 64), participants };
+const parseReceipt = parseApplyReceipt;
+function departedParticipant(participant: ApplyReceipt['participants'][number]): ApplyReceipt['participants'][number] {
+  return { ...participant, visual: { kind: 'departed' }, placement: participant.placement.kind === 'pending'
+    ? { kind: 'failed', transitionId: participant.placement.transitionId, reason: 'The placement session departed before confirmation' } : participant.placement };
 }
+const receiptEnvelope = (receipt: ApplyReceipt) => ({ requestId: receipt.requestId, deliveryGeneration: receipt.deliveryGeneration, selectionRevision: receipt.selectionRevision, digest: receipt.digest });
 function parseState(value: unknown): StoreState {
   const input = record(value, ['version', 'profileId', 'epoch', 'recoveryGeneration', 'selection', 'healthy', 'recovery']);
   if (input.version !== 1) throw new Error('Unsupported UI database version');
@@ -49,13 +35,14 @@ function initial(): StoreState {
   return { version: 1, profileId: randomUUID(), epoch: 1, recoveryGeneration: 1, selection: { revision: 0, deliveryGeneration: 0, selected: { kind: 'builtin' }, previousHealthy: { kind: 'builtin' } }, healthy: { kind: 'builtin' }, recovery: null };
 }
 function next(value: number): number { if (value >= Number.MAX_SAFE_INTEGER) throw new UiRefusal('capacity', 'UI generation exhausted'); return value + 1; }
+const participantSession = (slot: ApplyReceipt['participants'][number]['slot']) => slot.kind === 'document' ? slot.context.documentIncarnation : slot.resolved?.documentIncarnation ?? null;
 const digestOf = (selection: UiAppearance): string | null => selection.kind === 'experience' ? selection.digest : null;
 export function receiptStatus(receipt: ApplyReceipt): string {
   if (!receipt.participants.length) return 'selected-with-no-clients';
   const outcomes = receipt.participants.map(participant => participant.visual.kind);
-  if (outcomes.every(kind => kind === 'rendered')) return 'all-rendered';
   if (outcomes.includes('superseded')) return 'superseded';
-  if (outcomes.includes('pending')) return 'pending';
+  if (outcomes.includes('pending') || receipt.participants.some(participant => participant.placement.kind === 'pending')) return 'pending';
+  if (outcomes.every(kind => kind === 'rendered') && receipt.participants.every(participant => participant.placement.kind !== 'failed')) return 'all-rendered';
   if (outcomes.every(kind => kind === 'failed')) return 'failed';
   return 'partial';
 }
@@ -83,11 +70,11 @@ export class UiStore {
       this.transaction(() => {
         for (const row of this.db.prepare('SELECT id,result FROM ui_receipts').all()) {
           const receipt = parseReceipt(JSON.parse(text(row.result)));
-          this.writeReceipt({ ...receipt, participants: receipt.participants.map(participant => participant.visual.kind === 'pending' ? { ...participant, visual: { kind: 'departed' } } : participant) });
+          this.writeReceipt({ ...receipt, participants: receipt.participants.map(participant => participant.visual.kind === 'pending' ? departedParticipant(participant) : participant) });
         }
         if (this.state.recovery) {
           const result = this.state.recovery.result;
-          this.state = { ...this.state, recovery: { ...this.state.recovery, result: { ...result, participants: result.participants.map(participant => participant.visual.kind === 'pending' ? { ...participant, visual: { kind: 'departed' } } : participant) } } };
+          this.state = { ...this.state, recovery: { ...this.state.recovery, result: { ...result, participants: result.participants.map(participant => participant.visual.kind === 'pending' ? departedParticipant(participant) : participant) } } };
         }
       });
     } catch (error) { this.db.close(); throw error; }
@@ -103,13 +90,13 @@ export class UiStore {
   }
   private transaction<T>(run: () => T): T {
     if (this.closed) throw new UiRefusal('unavailable', 'UI store is closed');
-    const before = this.state;
+    const before = this.state, sessions = new Map(this.sessions);
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const result = run();
       this.db.prepare('INSERT OR REPLACE INTO ui_state(id,value) VALUES (1,?)').run(canonicalJson(this.state));
       this.db.exec('COMMIT'); return result;
-    } catch (error) { this.db.exec('ROLLBACK'); this.state = before; throw error; }
+    } catch (error) { this.db.exec('ROLLBACK'); this.state = before; this.sessions.clear(); for (const [id, session] of sessions) this.sessions.set(id, session); throw error; }
   }
   private notify(): void { this.change = next(this.change); for (const listener of this.listeners) listener(); }
   context(): object {
@@ -144,8 +131,8 @@ export class UiStore {
   }
   private depart(session: string): void {
     for (const receipt of this.receipts()) {
-      const participants = receipt.participants.map(participant => participant.slot.kind === 'document' && participant.slot.context.documentIncarnation === session && participant.visual.kind === 'pending'
-        ? { ...participant, visual: { kind: 'departed' } as const } : participant);
+      const participants = receipt.participants.map(participant => (participantSession(participant.slot) === session || participant.slot.kind === 'transition' && participant.slot.resolved === null && participant.slot.source.documentIncarnation === session) && participant.visual.kind === 'pending'
+        ? departedParticipant(participant) : participant);
       this.writeReceipt({ ...receipt, participants });
     }
   }
@@ -154,7 +141,7 @@ export class UiStore {
     if (this.state.recovery?.result.deliveryGeneration === this.state.selection.deliveryGeneration) values.push(this.state.recovery.result);
     return values;
   }
-  private receiptBytes(receipt: ApplyReceipt): number { return Buffer.byteLength(canonicalJson(receipt)) + receipt.participants.length * 4096; }
+  private receiptBytes(receipt: ApplyReceipt): number { return Buffer.byteLength(canonicalJson(receipt)) + receipt.participants.reduce((bytes, participant) => bytes + (participant.slot.kind === 'transition' ? 16384 : 4096), 0); }
   private capacity(reservedBytes = 0): void {
     const row = this.db.prepare('SELECT count(*) AS count, coalesce(sum(bytes),0) AS bytes FROM (SELECT reserved_bytes AS bytes FROM ui_receipts UNION ALL SELECT length(CAST(result AS BLOB)) AS bytes FROM ui_operations)').get();
     if (!row || count(row.count) >= MAX_RECEIPTS || count(row.bytes) + reservedBytes > MAX_METADATA_BYTES) throw new UiRefusal('capacity', 'UI receipt capacity reached; run maintenance compact');
@@ -183,8 +170,19 @@ export class UiStore {
     const selected: UiAppearance = request.op === 'apply' ? { kind: 'experience', digest: request.bundle.digest } : request.op === 'restore' ? { kind: 'builtin' } : this.state.selection.selected;
     const selection: UiSelection = { revision: request.op === 'refresh' ? this.state.selection.revision : next(this.state.selection.revision), deliveryGeneration: next(this.state.selection.deliveryGeneration), selected, previousHealthy: this.state.healthy };
     for (const old of this.receipts()) this.writeReceipt({ ...old, participants: old.participants.map(participant => participant.visual.kind === 'pending' ? { ...participant, visual: { kind: 'superseded' } } : participant) });
-    const receipt: ApplyReceipt = { requestId: request.requestId, requestDigest, deliveryGeneration: selection.deliveryGeneration, selectionRevision: selection.revision, digest: digestOf(selected),
-      participants: [...this.sessions.values()].map(session => ({ slot: { kind: 'document', context: session.context }, visual: { kind: 'pending', reason: session.visible ? 'Awaiting a painted frame' : 'Window is hidden' }, placement: { kind: 'unchanged' } })) };
+    const previousManifest = this.state.selection.selected.kind === 'experience' ? this.bundle(this.state.selection.selected.digest).manifest : null;
+    const nextManifest = selected.kind === 'experience' ? this.bundle(selected.digest).manifest : null;
+    const geometryChanged = nextManifest !== null && canonicalJson(nextManifest.presentation.chatWindow) !== canonicalJson(previousManifest?.presentation.chatWindow ?? null);
+    const participants: ApplyReceipt['participants'][number][] = [...this.sessions.values()].map(session => ({ slot: { kind: 'document', context: session.context }, visual: { kind: 'pending', reason: session.visible ? 'Awaiting a painted frame' : 'Window is hidden' }, placement: geometryChanged && session.context.role === 'chat' ? { kind: 'deferred-for-existing-windows' } : { kind: 'unchanged' } }));
+    const manifest = selected.kind === 'experience' ? this.bundle(selected.digest).manifest : null;
+    if (manifest?.presentation.chats === 'separate') for (const session of this.sessions.values()) {
+      if (session.context.role !== 'main' || !session.nativePlacement) continue;
+      const transitionId = randomUUID();
+      participants.push({ slot: { kind: 'transition', transitionId, source: session.context, target: null, resolved: null },
+        visual: { kind: 'pending', reason: 'Waiting for the placement target to paint' }, placement: { kind: 'pending', transitionId, reason: 'Main has not confirmed chat placement' } });
+    }
+    if (participants.length > 32) throw new UiRefusal('capacity', 'Windows and pending native transitions exceed the 32-slot cohort limit');
+    const receipt: ApplyReceipt = { requestId: request.requestId, requestDigest, deliveryGeneration: selection.deliveryGeneration, selectionRevision: selection.revision, digest: digestOf(selected), participants };
     if (request.op !== 'restore') this.capacity(this.receiptBytes(receipt));
     this.state = { ...this.state, selection };
     if (request.op === 'restore') this.state = { ...this.state, recoveryGeneration: next(this.state.recoveryGeneration), recovery: { requestId: request.requestId, requestDigest, result: receipt } };
@@ -204,19 +202,71 @@ export class UiStore {
     if (previous && (canonicalJson(previous.context) !== canonicalJson(context) || request.presenceSequence <= previous.sequence)) throw new UiRefusal('conflict', 'Stale or conflicting window presence');
     for (const [id, session] of this.sessions) if (id !== context.documentIncarnation && session.context.brokerInstance === context.brokerInstance && session.context.label === context.label) { this.depart(id); this.sessions.delete(id); }
     if (!previous && this.sessions.size >= 64) throw new UiRefusal('capacity', 'Too many UI sessions; close windows');
-    this.sessions.set(context.documentIncarnation, { context, visible: request.visible, seen: Date.now(), sequence: request.presenceSequence, digest: previous?.digest ?? null, stagedDigest: previous?.stagedDigest ?? null, initialized: previous?.initialized ?? false });
+    this.sessions.set(context.documentIncarnation, { context, visible: request.visible, seen: Date.now(), sequence: request.presenceSequence, digest: previous?.digest ?? null, stagedDigest: previous?.stagedDigest ?? null, initialized: previous?.initialized ?? false, nativePlacement: request.nativePlacement === true, paintedGeneration: previous?.paintedGeneration ?? null });
   }
-  private snapshot(session: string): object {
+  private snapshot(session: string): UiClientSnapshot {
     const selected = this.state.selection.selected;
     const current = this.sessions.get(session);
     if (current) this.sessions.set(session, { ...current, initialized: true, digest: current.initialized ? current.digest : digestOf(selected), stagedDigest: digestOf(selected) });
-    const pending = this.receipts().find(receipt => receipt.deliveryGeneration === this.state.selection.deliveryGeneration && receipt.participants.some(participant => participant.slot.kind === 'document' && participant.slot.context.documentIncarnation === session && participant.visual.kind === 'pending'));
+    const pending = this.receipts().find(receipt => receipt.deliveryGeneration === this.state.selection.deliveryGeneration && receipt.participants.some(participant => (participantSession(participant.slot) === session || participant.slot.kind === 'transition' && participant.slot.resolved === null && participant.slot.source.documentIncarnation === session) && participant.visual.kind === 'pending'));
     return { version: 1, change: this.change, selection: this.state.selection, bundle: selected.kind === 'builtin' ? null : { manifest: this.bundle(selected.digest).manifest, digest: selected.digest },
-      envelope: pending ? { requestId: pending.requestId, deliveryGeneration: pending.deliveryGeneration, selectionRevision: pending.selectionRevision, digest: pending.digest } : null, fault: this.recoveryReason };
+      envelope: pending ? { requestId: pending.requestId, deliveryGeneration: pending.deliveryGeneration, selectionRevision: pending.selectionRevision, digest: pending.digest } : null, fault: this.recoveryReason,
+      transitions: this.receipts().flatMap(receipt => receipt.participants.flatMap(participant => participant.slot.kind === 'transition' && participant.slot.source.documentIncarnation === session && participant.placement.kind === 'pending'
+        ? [{ envelope: { requestId: receipt.requestId, deliveryGeneration: receipt.deliveryGeneration, selectionRevision: receipt.selectionRevision, digest: receipt.digest }, slot: participant.slot }] : [])) };
+  }
+  private placement(request: Extract<UiRequest, { op: 'placement-reserve' | 'placement-idle' | 'placement-failed' }>): object {
+    const session = this.sessions.get(request.session), receipt = this.readReceipt(request.envelope.requestId);
+    if (!session || session.context.role !== 'main' || !session.nativePlacement || !receipt || canonicalJson(request.envelope) !== canonicalJson(receiptEnvelope(receipt)) || receipt.deliveryGeneration !== this.state.selection.deliveryGeneration) throw new UiRefusal('conflict', 'Unknown native placement attempt');
+    let found = false;
+    const participants = receipt.participants.map(participant => {
+      const slot = participant.slot;
+      if (slot.kind !== 'transition' || slot.transitionId !== request.transitionId) return participant;
+      found = true;
+      if (canonicalJson(slot.source) !== canonicalJson(session.context)) throw new UiRefusal('conflict', 'Placement belongs to another source document');
+      if (request.op === 'placement-reserve') {
+        if (request.target.scope.hostId !== this.hostId) throw new UiRefusal('conflict', 'Foreign placement scope');
+        if (slot.target) {
+          if (canonicalJson(slot.target) !== canonicalJson(request.target)) throw new UiRefusal('conflict', 'Placement target is already fixed');
+          return participant;
+        }
+        if (participant.placement.kind !== 'pending') throw new UiRefusal('conflict', 'Placement already concluded');
+        return { ...participant, slot: { ...slot, target: request.target } };
+      }
+      if (request.op === 'placement-idle') {
+        if (slot.target || slot.resolved || !session.visible || session.paintedGeneration !== receipt.deliveryGeneration) throw new UiRefusal('conflict', 'Catalog placement requires the source to paint and have no reserved target');
+        if (participant.placement.kind === 'unchanged') return participant;
+        if (participant.placement.kind !== 'pending') throw new UiRefusal('conflict', 'Placement already concluded');
+        return { ...participant, visual: { kind: 'rendered' } as const, placement: { kind: 'unchanged' } as const };
+      }
+      if (participant.placement.kind === 'failed' && participant.placement.reason === request.reason) return participant;
+      if (participant.placement.kind !== 'pending') throw new UiRefusal('conflict', 'Placement already concluded');
+      return { ...participant, visual: { kind: 'failed', reason: request.reason } as const,
+        placement: { kind: 'failed', transitionId: slot.transitionId, reason: request.reason } as const };
+    });
+    if (!found) throw new UiRefusal('not-found', 'Unknown transition slot');
+    this.writeReceipt({ ...receipt, participants }); return this.status(receipt.requestId);
+  }
+  private childReady(context: WindowContext, target: Pick<NativePlacementTarget, 'nativeTransitionId' | 'bindingRevision'>): void {
+    if (context.role !== 'chat') throw new UiRefusal('conflict', 'Only a registered child can resolve placement');
+    for (const receipt of this.receipts()) {
+      let changed = false;
+      const participants = receipt.participants.map(participant => {
+        const slot = participant.slot;
+        if (slot.kind !== 'transition' || !slot.target || participant.placement.kind !== 'pending' || slot.target.nativeTransitionId !== target.nativeTransitionId) return participant;
+        if (slot.source.brokerInstance !== context.brokerInstance || slot.target.scope.hostId !== context.scope.hostId || slot.target.scope.conversationId !== context.scope.conversationId || slot.target.label !== context.label || slot.target.viewId !== context.viewId || slot.target.bindingRevision !== target.bindingRevision) throw new UiRefusal('conflict', 'Ready child does not match the fixed placement target');
+        if (slot.resolved && canonicalJson(slot.resolved) !== canonicalJson(context)) throw new UiRefusal('conflict', 'Transition already resolved to another incarnation');
+        changed = true;
+        return { ...participant, slot: { ...slot, resolved: context }, placement: { kind: 'ready', transitionId: slot.transitionId, bindingRevision: target.bindingRevision } as const };
+      });
+      if (changed) this.writeReceipt({ ...receipt, participants });
+    }
   }
   async execute(request: UiRequest): Promise<unknown> {
     switch (request.op) {
       case 'context': return this.context();
+      case 'placement-reserve': case 'placement-idle': case 'placement-failed': {
+        const result = this.transaction(() => this.placement(request)); this.notify(); return result;
+      }
       case 'targets': return this.targets(request.after);
       case 'schema': return { manifest: experienceSchema, parts: EXPERIENCE_PARTS };
       case 'apply': case 'refresh': case 'restore': {
@@ -247,6 +297,22 @@ export class UiStore {
         this.db.prepare('INSERT INTO ui_operations VALUES (?,?,?)').run(request.requestId, digest, canonicalJson(result));
         return result;
       });
+      case 'relay': return this.transaction(() => {
+        this.expire();
+        const main = this.sessions.get(request.main.documentIncarnation);
+        if (!main || canonicalJson(main.context) !== canonicalJson(request.main) || main.context.role !== 'main') throw new UiRefusal('conflict', 'Unregistered native main relay');
+        for (const id of request.departed) {
+          const child = this.sessions.get(id);
+          if (!child) continue;
+          if (child.context.role !== 'chat' || child.context.brokerInstance !== request.main.brokerInstance) throw new UiRefusal('conflict', 'Foreign relay departure');
+          this.depart(id); this.sessions.delete(id);
+        }
+        for (const child of request.children) {
+          this.present({ op: 'state', ...child, after: null, waitMs: 0 });
+          if (child.placement) this.childReady(child.context, child.placement);
+        }
+        return { children: request.children.map(child => ({ incarnation: child.context.documentIncarnation, envelope: this.snapshot(child.context.documentIncarnation).envelope })) };
+      });
       case 'state': {
         this.transaction(() => { this.expire(); this.present(request); });
         if (request.after === this.change && request.waitMs) await new Promise<void>(resolve => {
@@ -258,7 +324,7 @@ export class UiStore {
       case 'paint': return this.transaction(() => {
         const session = this.sessions.get(request.session), selection = this.state.selection;
         if (!session || !session.visible || Date.now() - session.seen > PRESENCE_MS || request.deliveryGeneration !== selection.deliveryGeneration || request.selectionRevision !== selection.revision || request.digest !== digestOf(selection.selected)) throw new UiRefusal('conflict', 'Paint does not match the current visible selection');
-        this.sessions.set(request.session, { ...session, initialized: true, digest: request.digest, stagedDigest: null });
+        this.sessions.set(request.session, { ...session, initialized: true, digest: request.digest, stagedDigest: null, paintedGeneration: request.deliveryGeneration });
         this.state = { ...this.state, healthy: selection.selected };
         return { observed: true };
       });
@@ -269,7 +335,7 @@ export class UiStore {
           if (receipt.deliveryGeneration !== this.state.selection.deliveryGeneration) throw new UiRefusal('conflict', 'Rendering attempt superseded');
           let found = false;
           const participants = receipt.participants.map(participant => {
-            if (participant.slot.kind !== 'document' || participant.slot.context.documentIncarnation !== request.session) return participant;
+            if (participantSession(participant.slot) !== request.session) return participant;
             found = true;
             if (participant.visual.kind === 'pending') return { ...participant, visual: request.result };
             if (canonicalJson(participant.visual) !== canonicalJson(request.result)) throw new UiRefusal('conflict', 'Rendering result already committed');

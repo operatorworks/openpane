@@ -187,7 +187,7 @@ test('preview source policy rejects ambient imports and escaping links without r
   const running = await preview(t, directory, host);
   const entry = join(running.source, 'desktop/index.tsx');
   await writeFile(entry, `import { value } from 'contained-dependency';
-    export default { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+    export default { kind: 'desktop', sdkVersion: '0.14.0', activate() {
       return { modules: [{ id: 'dependency', label: 'Contained dependency', component() { return 'Contained dependency ' + value; } }], dispose() {} };
     } };`);
   const page = await previewPage(host, running);
@@ -203,7 +203,7 @@ test('preview source policy rejects ambient imports and escaping links without r
   await sourceDiagnostic(running);
   await writeFile(entry, 'export default { broken source');
   await sourceDiagnostic(running);
-  await writeFile(entry, "export default { kind: 'desktop', sdkVersion: '0.13.0', activate() { return { modules: [{ id: 'fixed', label: 'Fixed source', component() { return 'Corrected working source'; } }], dispose() {} }; } };");
+  await writeFile(entry, "export default { kind: 'desktop', sdkVersion: '0.14.0', activate() { return { modules: [{ id: 'fixed', label: 'Fixed source', component() { return 'Corrected working source'; } }], dispose() {} }; } };");
   await page.reload(); await connected(page); await tools(page);
   await page.getByText('Corrected working source', { exact: true }).waitFor();
 });
@@ -274,7 +274,7 @@ test('an unopened lazy module stays with its document snapshot until explicit re
     const Lazy = lazy(() => import('./lazy.tsx'));
     function Module() { const [open, setOpen] = useState(false); return <><button className="preview-lazy-button" onClick={() => setOpen(true)}>Open lazy content</button>
       {open && <Suspense fallback={<p>Loading lazy module</p>}><Lazy /></Suspense>}</>; }
-    export default { kind: 'desktop', sdkVersion: '0.13.0', async activate() {
+    export default { kind: 'desktop', sdkVersion: '0.14.0', async activate() {
       window.previewActivations = (window.previewActivations || 0) + 1;
       const { generation } = await createFrontendToolGeneration({ namespace: 'personal', generation: 'preview-pin', platform: 'desktop',
         activate({ frontendTools }) { frontendTools.add({ definition: { name: 'hold', description: 'Hold work during preview edits' },
@@ -349,7 +349,7 @@ for (const kind of ['CSS URL', 'literal asset URL']) test(`working ${kind} canno
   const running = await preview(t, directory, { origin: `http://127.0.0.1:${await unusedPort()}` });
   const entry = join(running.source, 'desktop/index.tsx'), css = join(running.source, 'desktop/review.css');
   if (kind === 'CSS URL') await writeFile(css, '.test { background-image: url("./escape.json"); }');
-  else await writeFile(entry, 'export const asset = new URL("./escape.json", import.meta.url); export default { kind: "desktop", sdkVersion: "0.13.0", activate() { return { modules: [], dispose() {} }; } };');
+  else await writeFile(entry, 'export const asset = new URL("./escape.json", import.meta.url); export default { kind: "desktop", sdkVersion: "0.14.0", activate() { return { modules: [], dispose() {} }; } };');
   await sourceDiagnostic(running);
 });
 
@@ -439,7 +439,7 @@ test('reloading refuses a selected entry replaced with an outside symlink', { ti
   const entry = join(running.source, 'desktop/index.tsx'), original = await readFile(entry, 'utf8');
   const outside = await mkdtemp(join(tmpdir(), 'openpane-preview-entry-swap-'));
   t.after(() => rm(outside, { recursive: true, force: true }));
-  await writeFile(join(outside, 'entry.js'), `export default { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+  await writeFile(join(outside, 'entry.js'), `export default { kind: 'desktop', sdkVersion: '0.14.0', activate() {
     return { modules: [{ id: 'escaped', label: 'Escaped entry', component() { return 'Outside entry executed'; } }], dispose() {} };
   } };`);
   assert.equal((await fetch(running.url)).status, 200);
@@ -487,7 +487,7 @@ test('contained HTML data assets load without exposing another document bootstra
   const host = await fixture(t), directory = await source(t);
   await writeFile(join(directory, 'desktop/help.html'), '<p>Contained HTML help marker</p>');
   await writeFile(join(directory, 'desktop/index.tsx'), `import help from './help.html?url';
-    export default { kind: 'desktop', sdkVersion: '0.13.0', async activate() {
+    export default { kind: 'desktop', sdkVersion: '0.14.0', async activate() {
       const response = await fetch(help); const text = await response.text();
       window.previewHelp = { status: response.status, type: response.headers.get('content-type'), text };
       return { modules: [{ id: 'help', label: 'HTML help', component() { return text; } }], dispose() {} };

@@ -3,6 +3,7 @@ import type { ConversationScope } from './index.js';
 import type { MetricsCardV1, METRICS_EVENT_NAME } from './metrics-card.js';
 import { count, hex, identifier, record } from './decode.js';
 import { parseScope } from './durable.js';
+import { parsePlacementTransition } from './ui-receipt.js';
 
 export type UiAppearance = { readonly kind: 'builtin' } | { readonly kind: 'experience'; readonly digest: string };
 export interface UiSelection {
@@ -27,9 +28,17 @@ export type WindowContext = {
   | { readonly role: 'main'; readonly viewId: string }
   | { readonly role: 'chat'; readonly scope: ConversationScope; readonly viewId: string }
 );
+export interface NativePlacementTarget {
+  readonly scope: ConversationScope;
+  readonly viewId: string;
+  readonly label: string;
+  readonly nativeTransitionId: string;
+  readonly bindingRevision: number;
+}
 export type CohortSlot =
   | { readonly kind: 'document'; readonly context: WindowContext }
-  | { readonly kind: 'transition'; readonly transitionId: string; readonly sourceDocumentIncarnation: string };
+  | { readonly kind: 'transition'; readonly transitionId: string; readonly source: Extract<WindowContext, { readonly role: 'main' }>;
+      readonly target: NativePlacementTarget | null; readonly resolved: Extract<WindowContext, { readonly role: 'chat' }> | null };
 export type VisualOutcome =
   | { readonly kind: 'pending'; readonly reason: string }
   | { readonly kind: 'rendered' }
@@ -46,15 +55,6 @@ export interface ApplyReceipt extends DeliveryEnvelope {
   readonly requestDigest: string;
   readonly participants: readonly { readonly slot: CohortSlot; readonly visual: VisualOutcome; readonly placement: PlacementOutcome }[];
 }
-export type EditorBinding = {
-  readonly scope: ConversationScope;
-  readonly viewId: string;
-  readonly revision: number;
-  readonly writerGeneration: number;
-} & (
-  | { readonly kind: 'editing' }
-  | { readonly kind: 'handoff-reserved'; readonly transitionId: string; readonly targetLabel: string }
-);
 export interface DisplayPublication {
   readonly scope: ConversationScope;
   readonly publicationId: string;
@@ -118,6 +118,10 @@ export interface UiContextV1 {
   readonly capabilities: readonly string[];
   readonly fault: string | null;
 }
+export interface PlacementTransition {
+  readonly envelope: DeliveryEnvelope;
+  readonly slot: Extract<CohortSlot, { readonly kind: 'transition' }>;
+}
 export interface UiClientSnapshot {
   readonly version: 1;
   readonly change: number;
@@ -125,6 +129,7 @@ export interface UiClientSnapshot {
   readonly bundle: { readonly manifest: import('./experience.js').ExperienceV1; readonly digest: string } | null;
   readonly envelope: DeliveryEnvelope | null;
   readonly fault: string | null;
+  readonly transitions: readonly PlacementTransition[];
 }
 export function parseDelivery(value: unknown): DeliveryEnvelope {
   const input = record(value, ['requestId', 'deliveryGeneration', 'selectionRevision', 'digest']);
@@ -139,7 +144,7 @@ export function parseUiContext(value: unknown): UiContextV1 {
 }
 
 export function parseUiClientSnapshot(value: unknown): UiClientSnapshot {
-  const input = record(value, ['version', 'change', 'selection', 'bundle', 'envelope', 'fault']);
+  const input = record(value, ['version', 'change', 'selection', 'bundle', 'envelope', 'fault', 'transitions']);
   if (input.version !== 1 || (input.fault !== null && typeof input.fault !== 'string')) throw new Error('Unsupported UI snapshot');
   const selection = parseUiSelection(input.selection);
   const rawBundle = input.bundle === null ? null : record(input.bundle, ['manifest', 'digest']);
@@ -147,5 +152,8 @@ export function parseUiClientSnapshot(value: unknown): UiClientSnapshot {
   if (selection.selected.kind === 'builtin' ? bundle !== null : bundle?.digest !== selection.selected.digest) throw new Error('UI bundle/selection mismatch');
   const envelope = input.envelope === null ? null : parseDelivery(input.envelope);
   if (envelope && (envelope.deliveryGeneration !== selection.deliveryGeneration || envelope.selectionRevision !== selection.revision || envelope.digest !== (bundle?.digest ?? null))) throw new Error('UI delivery/selection mismatch');
-  return { version: 1, change: count(input.change), selection, bundle, envelope, fault: input.fault };
+  if (!Array.isArray(input.transitions) || input.transitions.length > 32) throw new Error('Invalid placement transition list');
+  const transitions = input.transitions.map(parsePlacementTransition);
+  if (transitions.some(item => item.envelope.deliveryGeneration !== selection.deliveryGeneration || item.envelope.selectionRevision !== selection.revision || item.envelope.digest !== (bundle?.digest ?? null))) throw new Error('Placement transition generation mismatch');
+  return { version: 1, change: count(input.change), selection, bundle, envelope, fault: input.fault, transitions };
 }

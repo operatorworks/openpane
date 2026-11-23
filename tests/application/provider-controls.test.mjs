@@ -147,7 +147,7 @@ test('wrong decision, choice, scoped run and command scope refuse before backend
   assert.equal(remote.requests.filter(value => value.path === '/submit').length, 1);
 });
 
-test('browser labels submit exact IDs once, reservations disable both views after host reopen, and Stop targets the observed run', { timeout: 40_000 }, async t => {
+test('independent browser contexts submit exact IDs once, share host reservations after reopen, and Stop targets the observed run', { timeout: 40_000 }, async t => {
   const remote = await providerService(t), a = remote.extension({ controls: true }), f = await fixture(t, [a]);
   const decisionGate = Promise.withResolvers(), cancelGate = Promise.withResolvers();
   remote.command(async operation => {
@@ -174,7 +174,7 @@ test('browser labels submit exact IDs once, reservations disable both views afte
   await page.getByText('Allow this provider action?', { exact: true }).waitFor();
   const choices = page.getByRole('button', { name: 'Allow once', exact: true });
   assert.equal(await choices.count(), 2);
-  const other = await context.newPage(); other.setDefaultTimeout(5000); await other.goto(`${f.running.origin}/browser.html`);
+  const otherContext = await browser.newContext(), other = await otherContext.newPage(); other.setDefaultTimeout(5000); await other.goto(`${f.running.origin}/browser.html`);
   await other.getByRole('button', { name: `A real provider reply · Open conversation ${id}`, exact: true }).click();
   await other.getByText('Allow this provider action?', { exact: true }).waitFor();
   await choices.nth(1).evaluate(button => { button.click(); button.click(); });

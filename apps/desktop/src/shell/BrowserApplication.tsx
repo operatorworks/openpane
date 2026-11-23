@@ -1,4 +1,4 @@
-import { useExperience } from '../application/experience-state.js';
+import { useExperience, useUiActions } from '../application/experience-state.js';
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { DesktopShell } from './Shell.js';
@@ -72,12 +72,17 @@ function reveal(update: () => void, after: () => void): void {
   }
 }
 
-export function BrowserApplication({ children, artifact, controller: supplied, connection = { kind: 'browser' }, suspended = false }: {
+export function BrowserApplication({ children, artifact, controller: supplied, connection = { kind: 'browser' }, suspended = false, catalogOnly = false, fixedChat = false, managedLifecycle = false, windowRecovery = null, placementNotice = null }: {
   readonly children?: ReactNode; readonly artifact?: ReactNode; readonly controller?: ApplicationController;
   readonly connection?: ConnectionPresentation;
   readonly suspended?: boolean;
+  readonly catalogOnly?: boolean;
+  readonly fixedChat?: boolean;
+  readonly managedLifecycle?: boolean;
+  readonly windowRecovery?: ReactNode;
+  readonly placementNotice?: string | null;
 }) {
-  const { controller, snapshot: app } = useApplication(supplied);
+  const { controller, snapshot: app } = useApplication(supplied, managedLifecycle);
   // The new-conversation composer's text, and whether it is opening a conversation. While it opens, the new-conversation
   // screen stays up; the conversation replaces it in one step once its first message is on its way.
   const [launchText, setLaunchText] = useState('');
@@ -104,6 +109,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const selectedPalette = preferences.palette;
   const paletteResource = selectedPalette.kind === 'imported' ? personalization.saved?.palettes.find(item => item.digest === selectedPalette.digest && item.kind === 'ready') : undefined;
   const experience = useExperience();
+  const uiActions = useUiActions();
   const contentPalette = experience ? { light: { ...palettes.light, ...experience.manifest.theme.light.colors }, dark: { ...palettes.dark, ...experience.manifest.theme.dark.colors } } : paletteResource?.kind === 'ready' ? paletteResource.document.colors : palettes;
   const custom = useDesktopCustomizations({ customizations: customization, sink: controller.frontendGenerations, enabled: customizationsOn,
     disabledNamespaces: preferences.ui.disabledNamespaces, slots: preferences.ui.slots, loading: personalization.readiness === 'loading' });
@@ -172,7 +178,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   // One element, placed in one slot: the Chats view, or the open workspace of the active conversation's namespace.
   const slots = conversationSlots({ row: workspaceOpen ? workspaceRow : null, active: app.active, metadata, custom, modules, agents: choices });
   const customizationNotices = custom.namespaces.some(owner => owner.kind === 'loading' || owner.kind === 'failed');
-  const activeConversation = app.active && activeActions
+  const activeConversation = !catalogOnly && app.active && activeActions
     ? <ConversationView
         key={`${app.active.viewId}/${app.active.scope.hostId}/${app.active.scope.conversationId}`}
         contentPalette={contentPalette} transcript={slots.transcript} activity={custom.activity} contentLayout={slots.contentLayout} modules={slots.modules} permissionState={app.permissionState} observation={app.observation} continuation={app.continuation} actions={activeActions} active={app.active} enabled={enabled} storageFailure={app.storageFailure} agent={agent} customizationNotices={customizationNotices}
@@ -189,7 +195,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   // The footer carries the conversation's disclosure wherever its composer is on screen.
   const composerVisible = Boolean(activeConversation) && ((selectedView === 'chats' && !slots.workspace) || (workspaceOpen && Boolean(slots.workspace)));
   const canStart = enabled && app.saved.pendingCreation === null && !opening;
-  const conversation = !slots.workspace && activeConversation && !opening
+  const conversation = catalogOnly ? <section className="chat-catalog-empty" aria-label="Chats in separate windows"><h1>Chats open in their own windows</h1><p>Choose a chat from the catalog or start a new chat with an available agent.</p>{placementNotice && <p role="status">{placementNotice}</p>}</section> : !slots.workspace && activeConversation && !opening
     ? activeConversation
     : <NewConversation text={launchText} onText={setLaunchText} placeholder={presentation.placeholder} opening={opening}
         note={app.host.kind === 'ready' && !selected ? 'No agents are available to start a conversation.'
@@ -200,6 +206,8 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const hostAlerts = <>
     {app.storageFailure && <div className="application-alert" role="alert"><strong>Local storage unavailable. Commands are blocked.</strong><p>{app.storageFailure}</p><p>Existing records have not been discarded. Restore browser storage access, then reload.</p></div>}
     {app.error && <p className="application-alert" role="alert">{app.error}</p>}
+    {!placementNotice && app.lastPlacement?.kind === 'pending' && <p role="status">{app.lastPlacement.reason}</p>}
+    {placementNotice && <p role="status">{placementNotice}</p>}
     {app.host.kind === 'incompatible' && <div className="application-alert" role="alert"><strong>This host is incompatible. Commands are blocked.</strong>
       {app.host.issues.map(issue => <p key={issue.dimension}>{issue.reason} {issue.action}</p>)}
     </div>}
@@ -216,12 +224,13 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     {personalization.recovery.view === 'session' && <p role="alert">Default view restored for this session.</p>}</>;
   const extensionsView = <div className="extensions-view" inert={suspended}>
     {workspaceOpen
-      ? <ExtensionWorkspace contentPalette={contentPalette} row={workspaceRow} metadata={metadata} workspaces={app.workspaces} active={app.active} controller={controller}
+      ? <ExtensionWorkspace contentPalette={contentPalette} row={workspaceRow} metadata={metadata} workspaces={app.workspaces} active={catalogOnly ? null : app.active} controller={controller}
           conversation={workspaceConversation} status={<>{personalizationNotice}{hostAlerts}{creationRecovery}</>} onBack={() => setSelectedExtension(null)} />
       : <ExtensionsList rows={rows} enabled={!suspended} onOpen={setSelectedExtension}
           tools={toolsEligible ? <ThemeScope palette={contentPalette} className="content-theme">{moduleList('tools')}</ThemeScope> : null} conversation={toolsTarget} />}
   </div>;
   const controls = <div className="application-controls">
+    {windowRecovery}
     {!workspaceOpen && personalizationNotice}
     <h2 className="sidebar-title">{selectedView === 'chats' ? 'Chats' : selectedView === 'extensions' ? 'Extensions' : 'Settings'}</h2>
     {app.capturedSends.length > 0 && <section aria-label="Captured tools"><h3>Captured tools</h3>
@@ -237,7 +246,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     {selectedView === 'extensions' && !workspaceOpen && creationRecovery}
     <div className="chat-navigation" hidden={selectedView !== 'chats'}>
       <div className="action-row">
-        <button disabled={!enabled || opening || app.saved.pendingCreation !== null || selected?.availability.kind !== 'ready'} onClick={() => void (app.active ? controller.create(selected?.id) : startConversation(selected?.id, false))}>{selected && 'runtime' in selected && selected.runtime.engine === 'openpane-recorded' ? 'New recorded conversation' : 'New conversation'}</button>
+        <button disabled={!enabled || opening || app.saved.pendingCreation !== null || selected?.availability.kind !== 'ready'} onClick={() => void (catalogOnly || app.active ? controller.create(selected?.id) : startConversation(selected?.id, false))}>{selected && 'runtime' in selected && selected.runtime.engine === 'openpane-recorded' ? 'New recorded conversation' : 'New conversation'}</button>
       </div>
       {creationRecovery}
       <ConversationSearch controller={controller} connectionKey={searchConnection} enabled={enabled} active={app.active?.scope ?? null}>
@@ -300,7 +309,15 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     </button>
   </nav>;
   if (personalization.readiness === 'loading') return <ThemeScope><p role="status">Loading local preferences…</p></ThemeScope>;
-  return <DesktopShell experience={experience?.manifest} contentPalette={experience ? contentPalette : undefined} appearance={experience ? experience.manifest.theme.mode === 'system' ? undefined : experience.manifest.theme.mode : preferences.appearance === 'system' ? undefined : preferences.appearance} onRestoreAppearance={() => void personalizationSession.resetAppearance()} navigation={rail} activeView={selectedView} protectedContent={controls} defaultView={views} settingsView={settings}
+  if (fixedChat) return <ThemeScope palette={contentPalette} className="application-chat-window" data-openpane-part="main">
+    <header className="application-chat-header" data-openpane-part="page-header"><h1>{app.active?.agent.label ?? 'Opening chat'}</h1>
+      <button type="button" data-openpane-essential="new-chat" disabled={!enabled || !app.active} onClick={() => void controller.create(app.active?.agent.id)}>New chat</button>
+    </header>
+    {personalizationNotice}{hostAlerts}{creationRecovery}{windowRecovery}
+    {activeConversation ?? <section aria-label="Chat ownership"><p role="status">Waiting for this window's assigned editor.</p><button data-openpane-essential="retry-editor" type="button" onClick={() => window.location.reload()}>Retry assigned editor</button></section>}
+    <footer>{app.active ? <ConversationStatus active={app.active} /> : 'No editor ready'}</footer>
+  </ThemeScope>;
+  return <DesktopShell experience={experience?.manifest} contentPalette={experience ? contentPalette : undefined} appearance={experience ? experience.manifest.theme.mode === 'system' ? undefined : experience.manifest.theme.mode : preferences.appearance === 'system' ? undefined : preferences.appearance} onRestoreAppearance={() => { if (experience && uiActions) void uiActions.restore(); else void personalizationSession.resetAppearance(); }} navigation={rail} activeView={selectedView} protectedContent={controls} defaultView={views} settingsView={settings}
     extensionsView={extensionsView} workspaceOpen={workspaceOpen} restoreMode={children === undefined ? 'managed' : 'remount'}
     onRestore={() => { void personalizationSession.restoreDefaultView(); setSelectedView('chats'); }}
     status={app.active ? <ConversationStatus active={app.active} /> : 'No conversation open'}

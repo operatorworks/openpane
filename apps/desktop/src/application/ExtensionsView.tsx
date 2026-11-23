@@ -164,11 +164,11 @@ export function ExtensionWorkspace({ contentPalette = palettes, row, metadata, w
     conversation: selected ? conversation : null,
     async open(scope: ConversationScope) {
       if (!entries.some(entry => sameScope(entry.scope, scope)) && !(selected && sameScope(selected, scope))) throw new Error('This conversation is not in this extension.');
-      await controller.open(scope);
+      return controller.open(scope);
     },
     async create(agentId: string) {
       if (!agents.some(agent => agent.id === agentId)) throw new Error('This agent is not part of this extension.');
-      await controller.create(agentId);
+      return controller.create(agentId);
     },
     async call(installationId: string, operation: string, input: Json): Promise<ExtensionCallValue> {
       const request = { namespace, installationId, operation, input };

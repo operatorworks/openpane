@@ -1,6 +1,6 @@
 import { ServiceError } from '@openpane/contracts/service';
 import { sameScope } from '@openpane/contracts';
-import type { ConversationScope } from '@openpane/contracts';
+import type { ConversationOpenResult, ConversationScope } from '@openpane/contracts';
 import { conversationPreview, transcriptProjection } from '@openpane/contracts/conversation';
 import type { Transcript } from '@openpane/contracts/conversation';
 import type { ContinuationAction, ContinuationView, ConversationCatalogEntry, ServiceConnection } from '@openpane/contracts/service';
@@ -42,7 +42,8 @@ interface ContinuationPort<Owner extends ContinuationOwner> {
   busy(): boolean;
   publish(update: Partial<Pick<ApplicationSnapshot, 'continuation' | 'catalog' | 'workspaces'>>): void;
   current<T>(owner: Owner, operation: Promise<T>): Promise<T>;
-  install(owner: Owner, scope: ConversationScope, arrived?: ConversationContinuation['arrived']): Promise<void>;
+  recoverDraft(owner: Owner, scope: ConversationScope): Promise<StoreBorrow | null>;
+  install(owner: Owner, scope: ConversationScope, arrived?: ConversationContinuation['arrived']): Promise<ConversationOpenResult>;
   save(owner: Owner, next: SavedView): Promise<void>;
   requireSaved(owner: Owner): { readonly saved: SavedView };
   requireTarget(owner: Owner, target: OpenConversation): void;
@@ -159,15 +160,16 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     const lease = owner.view?.borrow, next = port.active();
     if (port.owner() !== owner || !lease || !next || sameScope(next.scope, earlier)) return;
     // The earlier store closed when the open chat replaced it, after its queued saves landed, so this loads the last text typed there.
-    const held = await owner.pool.recovery(lease, earlier);
+    const held = await port.recoverDraft(owner, earlier);
+    if (!held) return;
     try {
-      const text = held.store.getSnapshot().draft;
+      const captured = await held.store.captureDraft(), text = captured.text;
       if (!text || port.owner() !== owner || port.active()?.store !== next.store) return;
       const typed = next.store.getSnapshot().draft;
       const merged = !typed || typed.includes(text) ? (typed || text) : `${text}${typed}`;
       if (merged !== typed) await next.store.setDraft(merged);
       const visible = next.store.getSnapshot().draft;
-      if (port.owner() === owner && port.active()?.store === next.store && visible.includes(text)) await held.store.setDraft('');
+      if (port.owner() === owner && port.active()?.store === next.store && visible.includes(text)) await held.store.replaceDraft(captured, '');
     } finally { held.release(); }
   }
   /** Provider from a loaded catalog or workspace row, or `undefined` when that scope is not loaded. An explicit `null` stays `null`. */
@@ -185,7 +187,12 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     publishContinuation(record);
     try {
       const newest = await newestSegment(owner, successor);
-      await port.install(owner, newest, 'continue');
+      const opened = await port.install(owner, newest, 'continue');
+      if (opened.kind !== 'inline') {
+        record.action = null; record.stopped = opened.kind !== 'refused';
+        record.error = opened.kind === 'detached' ? 'Continuation opened in its own window.' : opened.reason;
+        publishContinuation(record); return;
+      }
       await moveDraft(owner, from.scope);
       await port.save(owner, { ...port.requireSaved(owner).saved, route: newest });
       const agent = from.agent;

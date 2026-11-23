@@ -259,6 +259,11 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
         publish();
       });
     },
+    captureDraft: () => enqueue(async () => ({ text: local.draft, revision: local.draftRevision })),
+    replaceDraft: (expected, text) => enqueue(async () => {
+      if (local.draft !== expected.text || local.draftRevision !== expected.revision) return false;
+      await persist(revised({ draft: text })); publish(); return true;
+    }),
     async selectImage(file) {
       await ready;
       const bytes = file.bytes.slice();

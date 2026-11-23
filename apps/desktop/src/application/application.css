@@ -318,3 +318,14 @@
 .palette-preview { padding: 1rem; border: 1px solid var(--aui-color-border); background: var(--aui-color-canvas); color: var(--aui-color-text); }
 
 .builtin-colors > * { background: var(--aui-color-canvas); color: var(--aui-color-text); }
+
+.application-chat-window { display: flex; flex-direction: column; min-height: 100dvh; background: var(--aui-color-surface); color: var(--aui-color-text); }
+.application-chat-window > .conversation-panel { flex: 1; min-height: 0; }
+.application-chat-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; gap: 12px; }
+.application-chat-header h1 { font-size: 1rem; margin: 0; }
+.application-chat-window > footer { padding: 8px 18px; }
+.chat-catalog-empty { margin: auto; max-width: 38rem; padding: 32px; }
+.window-recovery { flex: none; max-height: 12rem; overflow: auto; margin: .5rem 1rem; font-size: .85rem; }
+.window-recovery summary { cursor: pointer; }
+.window-recovery section { padding: .5rem 0; border-bottom: 1px solid var(--aui-color-border); }
+.window-recovery button { font: inherit; margin: .25rem .5rem .25rem 0; }
