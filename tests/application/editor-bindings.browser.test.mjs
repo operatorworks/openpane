@@ -390,15 +390,16 @@ test('a committed destination carry retries a missed source notification without
       await sourceStore.transferDraft(carry.expected, '', { kind: 'release', source: sourceScope, requestId: command.requestId });
     } };
     const first = await runtime.syncDraftCarries().then(() => 'not-failed', error => error.message);
-    const savedBefore = targetStore.getSnapshot().draft;
+    const savedBefore = targetStore.getSnapshot().draft, sourceBeforeRetry = sourceStore.getSnapshot().draft;
+    const committedBeforeRetry = (await carries.sourceCarries(sourceScope)).find(row => row.requestId === '1:lost-notification')?.kind;
     await runtime.syncDraftCarries(); await runtime.syncDraftCarries();
     const sourceText = sourceStore.getSnapshot().draft, targetText = targetStore.getSnapshot().draft;
     await sourceStore.setDraft('Another carry');
     await carries.offerDraftCarry({ source: sourceScope, sourceViewId: source.viewId, requestId: '1:next', writerGeneration: source.editorBinding().writerGeneration, expected: await sourceStore.captureDraft() });
     await Promise.all([sourceStore.dispose(), targetStore.dispose()]); await Promise.all([source.close(),target.close()]);
-    return { first,savedBefore,sourceText,targetText,notifications };
+    return { first,savedBefore,sourceBeforeRetry,committedBeforeRetry,sourceText,targetText,notifications };
   });
-  assert.deepEqual(result, { first:'Source notification lost',savedBefore:'Carried once\n\nExisting',sourceText:'',targetText:'Carried once\n\nExisting',notifications:2 });
+  assert.deepEqual(result, { first:'not-failed',savedBefore:'Carried once\n\nExisting',sourceBeforeRetry:'Carried once',committedBeforeRetry:'applied',sourceText:'',targetText:'Carried once\n\nExisting',notifications:2 });
 });
 
 
@@ -600,7 +601,7 @@ for (const occupied of [false, true]) test(`opening a successor in a native chil
     const owner = { storage: source, holds: () => true, async quiesce() { throw new Error('Unexpected handoff'); }, async release() { throw new Error('Unexpected handoff'); } };
     const placement = await coordinator.acquire(request, owner); await coordinator.acquire(request, owner);
     const before = await carries.targetCarries(targetScope);
-    Object.assign(runtime, { controller: { getSnapshot: () => ({ active: { scope: targetScope, viewId: target.viewId, store: targetStore } }) }, port: { async request() {} } });
+    Object.assign(runtime, { controller: { getSnapshot: () => ({ active: { scope: targetScope, viewId: target.viewId, store: targetStore } }) }, port: { async request() { throw new Error('Native notification temporarily unavailable'); } } });
     await runtime.syncDraftCarries(); await runtime.syncDraftCarries();
     Object.assign(runtime, { controller: { getSnapshot: () => ({ active: { scope: sourceScope, viewId: source.viewId, store: sourceStore } }) } });
     await runtime.syncDraftCarries();

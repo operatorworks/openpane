@@ -323,17 +323,28 @@ export class UiStore {
         if (child.context.role !== 'chat' || child.context.brokerInstance !== request.main.brokerInstance) throw new UiRefusal('conflict', 'Foreign relay departure');
         this.depart(id); this.sessions.delete(id);
       }
-      for (const child of request.children) { this.present({ op: 'state', ...child, after: null, waitMs: 0 }); if (child.placement) this.childReady(child.context, child.placement); }
       return request.children.map(child => {
-        const reply: { incarnation: string; envelope: DeliveryEnvelope | null; display: DisplayDelivery | null } = { incarnation: child.context.documentIncarnation, envelope: this.snapshot(child.context.documentIncarnation).envelope, display: null };
-        return { child, reply };
+        let admitted = true;
+        try { this.present({ op: 'state', ...child, after: null, waitMs: 0 }); }
+        catch (error) {
+          if (!(error instanceof UiRefusal && error.code === 'capacity')) throw error;
+          admitted = false;
+        }
+        if (admitted && child.placement) this.childReady(child.context, child.placement);
+        const reply: { incarnation: string; envelope: DeliveryEnvelope | null; display: DisplayDelivery | null } = {
+          incarnation: child.context.documentIncarnation,
+          envelope: admitted ? this.snapshot(child.context.documentIncarnation).envelope : null,
+          display: !admitted && child.display ? { kind: 'unavailable', scope: child.display.scope, subscriptionId: child.display.subscriptionId,
+            from: child.display.cursor, reason: 'This window could not join UI delivery because the host presence limit was reached. Close unused windows or restart the host.' } : null,
+        };
+        return { child, reply, admitted };
       });
     });
     for (const id of this.relayPositions.keys()) if (!this.sessions.has(id)) this.relayPositions.delete(id);
     const position = pairs.length ? (this.relayPositions.get(request.main.documentIncarnation) ?? 0) % pairs.length : 0;
     const response = { children: pairs.map(pair => pair.reply) }; let remaining = DISPLAY_PAGE_LIMITS.items;
     for (const pair of [...pairs.slice(position), ...pairs.slice(0, position)]) {
-      if (!pair.child.visible || !pair.child.display) continue;
+      if (!pair.admitted || !pair.child.visible || !pair.child.display) continue;
       const available = DISPLAY_PAGE_LIMITS.bytes - Buffer.byteLength(canonicalJson({ ok: true, value: response })) - 64;
       if (remaining < 1 || available < 256) break;
       const delivery = this.displayDelivery(pair.child.display, { items: remaining, bytes: available });
@@ -433,6 +444,7 @@ export class UiStore {
             return participant;
           });
           if (!found || !session.visible) throw new UiRefusal('conflict', 'Window is not a visible participant');
+          if (request.result.kind === 'rendered' && session.paintedGeneration !== receipt.deliveryGeneration) throw new UiRefusal('conflict', 'Rendered acknowledgement requires this document’s matching paint');
           const updated = { ...receipt, participants }; this.writeReceipt(updated);
           this.sessions.set(request.session, { ...session, digest: request.result.kind === 'rendered' ? receipt.digest : session.digest, stagedDigest: null });
           return this.status(receipt.requestId);

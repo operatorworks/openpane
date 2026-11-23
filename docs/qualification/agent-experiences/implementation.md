@@ -278,3 +278,33 @@ Normal Quit closed main and two children, and a restart recovered the second
 child's exact saved draft. Native Quit Without Saving exited successfully. The
 separate-window appearance receipt was all-rendered; this check submitted no
 recorded commands. The temporary app and host were closed afterward.
+
+### Draft ordering and native recovery, November 23
+
+Image selection and removal enter the store queue in invocation order, including
+when Send is called in the same turn. Continuation copies capture and compare the
+destination revision after pending edits drain. A committed native draft copy
+retries its source notification without blocking the destination's readiness.
+Main-origin copies use a wake-only notification without allocating a child intent.
+Newer native recovery sequences queue their own save behind an in-flight save.
+Rendered acknowledgements require that document's matching paint report. A child
+refused at presence capacity leaves admitted relay participants usable.
+
+The production Mac application followed a controlled continuation between two
+temporary recorded conversations. Its real native broker opened the successor
+with the exact saved source draft and a connected composer. This fixture supplies
+continuation responses; it does not qualify a provider's continuation behavior.
+Two overlapping native Restore requests completed with builtin selected at UI
+revision three and recovery generation three. The first request was deliberately
+held while the second was issued; both saves are recorded in the local proxy log.
+No message was sent. The app and temporary host exited normally.
+
+The fourth correctness panel stopped after its required failed-seat retry. Sol
+rejected a packet above its 1,048,576-character input limit. Grok reported that its
+weekly subscription allowance was exhausted and would reset in three days. No
+substitute provider was used. Correctness rereview of the revised branch and the
+fresh maintainability pass remain required before either gauntlet push checkpoint.
+
+After these changes, `npm run verify` passed with Node 24.22.3 and npm 11.19.1:
+4,154 tests, 4,149 passed, no failures, and five existing skips. Rust formatting
+and all 63 native tests passed. The production Mac bundle built at 15.24 MiB.

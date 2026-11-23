@@ -19,6 +19,7 @@ async function fixture(t) {
     state(context, visible = true, presenceSequence = 1) { return store.execute({ op: 'state', context, visible, presenceSequence, after: null, waitMs: 0 }); } };
 }
 const envelope = receipt => Object.fromEntries(['requestId', 'deliveryGeneration', 'selectionRevision', 'digest'].map(key => [key, receipt[key]]));
+const paint = (store, window, receipt) => store.execute({ op: 'paint', session: window.documentIncarnation, deliveryGeneration: receipt.deliveryGeneration, selectionRevision: receipt.selectionRevision, digest: receipt.digest });
 test('selection and idempotency commit together; stale or conflicting writes preserve the current selection', async t => {
   const f = await fixture(t);
   assert.equal(f.store.context().selection.selected.kind, 'builtin');
@@ -38,12 +39,13 @@ test('paint and placement are independent; refresh captures fixed incarnations a
   const { receipt } = await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: bundle('paint') });
   assert.equal(receipt.participants.length, 2);
   const ack = { op: 'ack', session: one.documentIncarnation, envelope: envelope(receipt), result: { kind: 'rendered' } };
+  await paint(f.store, one, receipt);
   assert.equal((await f.store.execute(ack)).outcome, 'pending');
   assert.deepEqual(await f.store.execute(ack), await f.store.execute(ack));
   await assert.rejects(f.store.execute({ ...ack, session: hidden.documentIncarnation }), /visible/);
   const unrelated = f.window('late'); await f.state(unrelated);
   await assert.rejects(f.store.execute({ ...ack, session: unrelated.documentIncarnation }), /participant/);
-  await f.state(hidden, true, 2);
+  await f.state(hidden, true, 2); await paint(f.store, hidden, receipt);
   assert.equal((await f.store.execute({ ...ack, session: hidden.documentIncarnation })).outcome, 'all-rendered');
   const next = await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: 1 });
   assert.equal(next.receipt.selectionRevision, 1); assert.equal(next.receipt.deliveryGeneration, receipt.deliveryGeneration + 1);
@@ -228,7 +230,7 @@ test('a valid returning heartbeat preserves its own pending receipt after a dela
   const selected = await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: 0 });
   const now = Date.now; Date.now = () => now() + 16000;
   try {
-    await f.state(main, true, 2);
+    await f.state(main, true, 2); await paint(f.store, main, selected.receipt);
     assert.equal((await f.store.execute({ op: 'ack', session: main.documentIncarnation, envelope: envelope(selected.receipt), result: { kind: 'rendered' } })).outcome, 'all-rendered');
   } finally { Date.now = now; }
 });
@@ -275,7 +277,7 @@ test('a mismatched child placement hint leaves sibling delivery and presence int
   const two={...main,role:'chat',scope:target.scope,viewId:'two',label:'two',documentIncarnation:randomUUID()};
   const relay=sequence=>f.store.execute({op:'relay',main,children:[{context:one,visible:true,presenceSequence:sequence+1},{context:two,visible:true,presenceSequence:sequence,placement:{nativeTransitionId:'transition',bindingRevision:4}}],departed:[]});
   await relay(1);const now=Date.now;Date.now=()=>now()+16000;
-  try{const reply=await relay(2);assert.equal(reply.children.find(row=>row.incarnation===one.documentIncarnation).envelope.requestId,env.requestId);const status=await f.store.execute({op:'ack',session:one.documentIncarnation,envelope:env,result:{kind:'rendered'}});assert.equal(status.receipt.participants.find(row=>row.slot.kind==='transition').placement.kind,'pending');}finally{Date.now=now;}
+  try{const reply=await relay(2);assert.equal(reply.children.find(row=>row.incarnation===one.documentIncarnation).envelope.requestId,env.requestId);await paint(f.store,one,selected.receipt);const status=await f.store.execute({op:'ack',session:one.documentIncarnation,envelope:env,result:{kind:'rendered'}});assert.equal(status.receipt.participants.find(row=>row.slot.kind==='transition').placement.kind,'pending');}finally{Date.now=now;}
 });
 
 test('compaction requires explicit abandonment of pending waits and replays its exact latest CAS result after restart', async t => {
@@ -303,4 +305,29 @@ test('compaction preserves reserved recovery replay and explicit abandonment nev
   const retained = await f.store.execute(request);
   assert.equal(retained.outcome, 'partial'); assert.equal(retained.receipt.participants[0].visual.kind, 'departed');
   f.restart(); assert.deepEqual(await f.store.execute(request), retained);
+});
+
+test('a rendered acknowledgement cannot confirm a delivery before that document reports its matching paint', async t => {
+  const f = await fixture(t), main = f.window(); await f.state(main);
+  const applied = await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: bundle('paint-required') });
+  const ack = { op: 'ack', session: main.documentIncarnation, envelope: envelope(applied.receipt), result: { kind: 'rendered' } };
+  await assert.rejects(f.store.execute(ack), /paint/i); assert.equal((await f.store.execute({ op: 'status', requestId: applied.receipt.requestId })).outcome, 'pending');
+  await f.store.execute({ op: 'paint', session: main.documentIncarnation, deliveryGeneration: applied.receipt.deliveryGeneration, selectionRevision: applied.receipt.selectionRevision, digest: applied.receipt.digest });
+  assert.equal((await f.store.execute(ack)).outcome, 'all-rendered');
+});
+
+test('a child refused at presence capacity does not block already admitted relay participants', async t => {
+  const f = await fixture(t), main = f.window(); await f.state(main);
+  const child = name => ({ ...main, role: 'chat', label: name, documentIncarnation: randomUUID(), viewId: name, scope: { hostId: 'host', conversationId: name } });
+  const existing = child('existing'), extra = child('extra');
+  const present = (context, presenceSequence) => ({ context, presenceSequence, visible: true });
+  await f.store.execute({ op: 'relay', main, children: [present(existing, 1)], departed: [] });
+  const { receipt } = await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: bundle('admission-capacity') });
+  for (let index = 0; index < 62; index++) await f.state(f.window(`other-${index}`));
+  const delivered = await f.store.execute({ op: 'relay', main, children: [present(existing, 2), present(extra, 1)], departed: [] });
+  assert.deepEqual(delivered.children.map(row => row.envelope?.requestId ?? null), [receipt.requestId, null]);
+  await paint(f.store, main, receipt); await paint(f.store, existing, receipt);
+  for (const context of [main, existing]) await f.store.execute({ op: 'ack', session: context.documentIncarnation, envelope: envelope(receipt), result: { kind: 'rendered' } });
+  assert.equal((await f.store.execute({ op: 'status', requestId: receipt.requestId })).outcome, 'all-rendered');
+  await assert.rejects(f.store.execute({ op: 'relay', main, children: [present(existing, 2)], departed: [] }), /Stale/);
 });

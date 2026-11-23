@@ -188,6 +188,41 @@ pub struct Profile {
     pub intents: BTreeMap<String, Intent>,
 }
 impl Profile {
+    pub fn validate_carry_notification(
+        &self,
+        source: &Scope,
+        request_id: &str,
+        caller: Option<&Scope>,
+    ) -> Result<(), &'static str> {
+        source.validate()?;
+        identifier(request_id, 200)?;
+        if caller.is_some_and(|target| target.host_id != source.host_id || target == source) {
+            return Err("foreign-carry-intent");
+        }
+        if let Some(intent) = self.intents.get(&Self::intent_key(source, request_id)) {
+            let target = intent.target.as_ref().ok_or("unassigned-intent")?;
+            let carries = match &intent.action {
+                Action::Open { carry, .. } | Action::Create { carry, .. } => *carry,
+            };
+            if !carries || caller.is_some_and(|scope| scope != &target.scope) {
+                return Err("foreign-carry-intent");
+            }
+            return Ok(());
+        }
+        // Main carries live in IndexedDB; this notification only wakes its fenced writer.
+        if request_id
+            .split_once(":main-")
+            .is_some_and(|(epoch, transition)| {
+                !transition.is_empty()
+                    && epoch
+                        .parse::<u64>()
+                        .is_ok_and(|epoch| epoch > 0 && epoch <= 9_007_199_254_740_991)
+            })
+        {
+            return Ok(());
+        }
+        Err("unknown-carry-request")
+    }
     pub fn validate(&self) -> Result<(), &'static str> {
         identifier(&self.origin, 2048)?;
         if self.intent_epoch == 0 || self.intent_epoch > 9_007_199_254_740_991 {
@@ -481,6 +516,39 @@ mod tests {
             binding_revision: None,
             writer_generation: None,
         }
+    }
+    #[test]
+    fn main_carry_notifications_do_not_require_a_child_intent_and_do_not_allocate_one() {
+        let p = profile();
+        let source = scope("source");
+        let target = scope("target");
+        assert!(p
+            .validate_carry_notification(&source, "1:main-transition", Some(&target))
+            .is_ok());
+        assert!(p
+            .validate_carry_notification(&source, "1:main-transition", None)
+            .is_ok());
+        assert!(p.intents.is_empty());
+        assert!(p.windows.is_empty());
+        assert!(p
+            .validate_carry_notification(&source, "1:main-transition", Some(&source))
+            .is_err());
+        assert!(p
+            .validate_carry_notification(&source, "1:unknown", Some(&target))
+            .is_err());
+        assert!(p
+            .validate_carry_notification(&source, "0:main-transition", Some(&target))
+            .is_err());
+        assert!(p
+            .validate_carry_notification(&source, "1:main-", Some(&target))
+            .is_err());
+        let foreign = Scope {
+            host_id: "other".into(),
+            conversation_id: "target".into(),
+        };
+        assert!(p
+            .validate_carry_notification(&source, "1:main-transition", Some(&foreign))
+            .is_err());
     }
     #[test]
     fn interrupted_inline_recovery_replays_its_original_binding_transition() {

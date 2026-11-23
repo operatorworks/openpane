@@ -462,3 +462,17 @@ test('opening a predecessor leaves its unsent text in place when the newest comp
   follow = true; const placement = await f.app.open(scope); assert.equal(placement.kind, 'inline');
   assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft, 'notebook'); assert.equal(f.drafts.get('original-view/host/conversation').draft, 'note'); assert.equal(f.app.getSnapshot().savedDraftRecovery.kind, 'continued'); assert.equal(f.app.getSnapshot().savedDraftRecovery.text, 'note'); assert.deepEqual(f.submitted, []);
 });
+
+test('opening a predecessor drains a successor edit before deciding whether its composer is empty', async t => {
+  const successor = segment('editing-successor'), f = fixture(); t.after(() => f.app.dispose());
+  f.views.set('original-view/host', { ...empty(), route: successor });
+  f.drafts.set('original-view/host/conversation', { version: 3, scope, draft: 'Earlier unsent text', draftRevision: 1, outbox: [], frontendSends: [], image: null });
+  f.behavior.continuation = async input => input.scope.conversationId === scope.conversationId ? { ...none, successor: { kind: 'confirmed', scope: successor } } : none;
+  await f.app.start(); const active = f.app.getSnapshot().active;
+  let release, entered; const gate = new Promise(resolve => { release = resolve; }), saving = new Promise(resolve => { entered = resolve; }); let held = false;
+  f.behavior.write = async () => { if (!held) { held = true; entered(); await gate; } };
+  const edit = active.store.setDraft('Newer successor edit'); await saving;
+  const opening = f.app.open(scope); await turn(); release(); await Promise.all([edit, opening]);
+  assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft, 'Newer successor edit');
+  assert.equal(f.app.getSnapshot().savedDraftRecovery.text, 'Earlier unsent text'); assert.equal(f.drafts.get('original-view/host/conversation').draft, 'Earlier unsent text');
+});

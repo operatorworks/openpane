@@ -167,14 +167,19 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     try {
       const captured = await held.store.captureDraft(), text = captured.text;
       if (!text || port.owner() !== owner || port.active()?.store !== next.store) return;
-      const typed = next.store.getSnapshot().draft;
       const recoverText = async () => {
         const saved = await held.store.captureDraft();
-        if (port.owner() === owner && saved.text) port.publish({ savedDraftRecovery: { kind: 'continued', viewId: held.storage.viewId, scope: earlier, text: saved.text } });
+        if (port.owner() === owner && port.active()?.store === next.store && saved.text) port.publish({ savedDraftRecovery: { kind: 'continued', viewId: held.storage.viewId, scope: earlier, text: saved.text } });
       };
-      if (onlyWhenEmpty && typed && !copiedDraftPresent(text, typed)) { await recoverText(); return; }
-      const merged = copiedDraftPresent(text, typed) ? typed : carriedDraftText(text, typed);
-      if (merged !== typed) await next.store.setDraft(merged);
+      let copied = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const destination = await next.store.captureDraft();
+        if (port.owner() !== owner || port.active()?.store !== next.store) return;
+        if (onlyWhenEmpty && destination.text && !copiedDraftPresent(text, destination.text)) { await recoverText(); return; }
+        const merged = copiedDraftPresent(text, destination.text) ? destination.text : carriedDraftText(text, destination.text);
+        if (merged === destination.text || await next.store.replaceDraft(destination, merged)) { copied = true; break; }
+      }
+      if (!copied) { await recoverText(); return; }
       if (port.owner() === owner && port.active()?.store === next.store) {
         const released = await held.store.transferDraft(captured, '', { kind: 'release-copy', target: next.scope, targetViewId: next.viewId });
         if (released !== 'committed') await recoverText();

@@ -52,7 +52,7 @@ export class WindowCoordinator implements PlacementPort {
       let context = record(await this.port.request({ kind: 'intent-context' }), ['epoch', 'pendingCarryRequests']), epoch = count(context.epoch);
       if (!epoch) throw new Error('Invalid native request epoch');
       const protectedRequests = () => {
-        if (!Array.isArray(context.pendingCarryRequests) || context.pendingCarryRequests.length > 512) throw new Error('Invalid native carry inventory');
+        if (!Array.isArray(context.pendingCarryRequests) || context.pendingCarryRequests.length > 1024) throw new Error('Invalid native carry inventory');
         return context.pendingCarryRequests.map(value => identifier(value, 200));
       };
       if (action.carry && await pruneDraftCarryHistory(epoch, protectedRequests()) >= 1000) {

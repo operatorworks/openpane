@@ -277,7 +277,7 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
       local = next; publish(); return matches ? 'committed' : 'changed';
     }),
     async selectImage(file) {
-      await ready;
+      if (closed) await ready;
       const bytes = file.bytes.slice();
       if (!bytes.byteLength) throw new Error('This image file is empty.');
       if (bytes.byteLength > IMAGE_MAX_BYTES) throw new Error('Choose an image of at most 4 MB.');
@@ -313,7 +313,7 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
       return upload(image, bytes);
     },
     async removeImage() {
-      await ready;
+      if (closed) await ready;
       await enqueue(async () => {
         if (!local.image) return;
         await persist(revised({ image: null }));

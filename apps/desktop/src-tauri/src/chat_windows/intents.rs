@@ -72,22 +72,16 @@ impl ChatWindows {
                 request_id,
             } => {
                 let document = self.document(broker, label, &incarnation)?;
-                let intent = broker
+                self.require_host(broker, &source_scope)?;
+                broker
                     .storage
                     .profile(&self.origin)?
-                    .intents
-                    .get(&crate::chat_window_records::Profile::intent_key(
+                    .validate_carry_notification(
                         &source_scope,
                         &request_id,
-                    ))
-                    .ok_or("unknown-intent")?;
-                let target = intent.target.as_ref().ok_or("unassigned-intent")?;
-                let carries = match &intent.action {
-                    Action::Open { carry, .. } | Action::Create { carry, .. } => *carry,
-                };
-                if !carries || label != "main" && document.scope.as_ref() != Some(&target.scope) {
-                    return Err("foreign-carry-intent");
-                }
+                        document.scope.as_ref(),
+                    )?;
+                let _ = app.emit_to("main", "openpane-ui-wakeup", ());
                 if let Some((source_label, _)) = broker
                     .documents
                     .iter()

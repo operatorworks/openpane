@@ -130,3 +130,22 @@ test('a second explicit native restore arriving during the first save is process
   sequence = 2; const secondWake = runtime.recoveryWake(); release(); await Promise.all([firstWake, secondWake]);
   assert.deepEqual(calls, [1, 2]); assert.equal(pending, false);
 });
+
+test('a wake that first sees a newer native sequence queues behind a manual restore already saving', async t => {
+  const { WindowRuntime, MainUiConnection } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  const { UiConnection } = await import('../../apps/desktop/dist/application/ui-connection.js');
+  const original = UiConnection.prototype.restore; let sequence = 0, pending = false, release; const gate = new Promise(resolve => { release = resolve; }), calls = [];
+  UiConnection.prototype.restore = async function() { calls.push(this.recoverySequence); if (calls.length === 1) await gate; await this.recovered(); };
+  t.after(() => { release(); UiConnection.prototype.restore = original; });
+  const port = { context: { liveRelay: true, role: 'main' }, async request(command) {
+    if (command.kind === 'restore-builtin') { pending = true; return { sequence: ++sequence }; }
+    if (command.kind === 'read-recovery') return { pending, sequence };
+    if (command.kind === 'confirm-recovery') { if (sequence === command.sequence) pending = false; return {}; }
+    throw new Error(command.kind);
+  } };
+  const ui = new MainUiConnection(port), manual = ui.restore(); await wait(() => calls.length === 1);
+  sequence++; pending = true;
+  const runtime = Object.create(WindowRuntime.prototype); Object.assign(runtime, { context: port.context, port, ui, nativeRecoverySeen: null, nativeRecoveryTask: null, snapshot: {}, listeners: new Set() });
+  const waking = runtime.recoveryWake(); await new Promise(resolve => setImmediate(resolve)); release(); await Promise.all([manual, waking]);
+  assert.deepEqual(calls, [1, 2]); assert.equal(pending, false);
+});

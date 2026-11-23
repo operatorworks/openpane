@@ -25,7 +25,8 @@ export type WindowRecovery =
 export interface WindowRuntimeSnapshot { readonly recovery: WindowRecovery; readonly catalogOnly: boolean; readonly capabilityNotice: string | null; readonly placementNotice: string | null }
 const namespace = (agent: AgentDescriptor): string | null => 'kind' in agent ? agent.namespace : null;
 export class MainUiConnection extends UiConnection {
-  private restoration: Promise<void> | null = null;
+  private restoration: { readonly sequence: number; readonly promise: Promise<void> } | null = null;
+  private recoveryAttempt = 0;
   private recoverySequence: number | null = null;
   constructor(private readonly port: DesktopWindowPort) {
     super(new NativeMainUiRelay(port), async context => parseWindowContext(await port.request({ kind: 'bind-ui', hostId: context.hostId, profileId: context.profileId })), port.context.liveRelay);
@@ -39,7 +40,13 @@ export class MainUiConnection extends UiConnection {
     await this.restoreNative(count(reply.sequence));
   }
   restoreNative(sequence: number): Promise<void> {
-    return this.restoration ??= (async () => { this.recoverySequence = sequence; await super.restore(); })().finally(() => { this.restoration = null; });
+    const active = this.restoration;
+    if (sequence <= this.recoveryAttempt || active && sequence <= active.sequence) return active?.promise ?? Promise.resolve();
+    const task = (active?.promise.catch(() => {}) ?? Promise.resolve()).then(async () => {
+      this.recoverySequence = sequence; await super.restore(); this.recoveryAttempt = sequence;
+    }).finally(() => { if (this.restoration?.sequence === sequence) this.restoration = null; });
+    this.restoration = { sequence, promise: task };
+    return task;
   }
   protected override async recovered(): Promise<void> {
     if (this.recoverySequence !== null) await this.port.request({ kind: 'confirm-recovery', sequence: this.recoverySequence });
@@ -432,7 +439,7 @@ export class WindowRuntime {
     if (!active) return;
     for (const carry of await targetCarries(active.scope)) {
       if (!carry.target) continue;
-      if (carry.kind === 'applied') { await this.port?.request({ kind: 'carry-applied', sourceScope: carry.source, requestId: carry.requestId }); continue; }
+      if (carry.kind === 'applied') { await this.port?.request({ kind: 'carry-applied', sourceScope: carry.source, requestId: carry.requestId }).catch(() => {}); continue; }
       if (carry.kind !== 'offered') continue;
       let outcome: 'committed' | 'changed' | 'cancelled' = 'changed';
       for (let attempt = 0; attempt < 3 && outcome === 'changed'; attempt++) {
@@ -443,7 +450,7 @@ export class WindowRuntime {
       }
       if (outcome === 'cancelled') continue;
       if (outcome !== 'committed') throw new Error('The destination draft is changing. Its carried text remains pending in the source.');
-      await this.port?.request({ kind: 'carry-applied', sourceScope: carry.source, requestId: carry.requestId });
+      await this.port?.request({ kind: 'carry-applied', sourceScope: carry.source, requestId: carry.requestId }).catch(() => {});
     }
     for (const carry of await sourceCarries(active.scope)) {
       if (carry.kind !== 'applied' || carry.sourceViewId !== active.viewId) continue;

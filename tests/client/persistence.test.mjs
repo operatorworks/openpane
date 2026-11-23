@@ -577,3 +577,16 @@ test('Remove after image selection starts wins even while its durable save and u
   assert.equal(store.getSnapshot().image, null); await store.send('Text after removal');
   assert.deepEqual(port.submitted[0].body, { kind: 'send', text: 'Text after removal' }); await store.dispose();
 });
+
+test('Remove followed by Send in the same turn excludes the removed attachment', async () => {
+  const { store, port } = fixture({ images: uploads() }); await store.selectImage({ name: 'removed.png', bytes: png(1) }); await store.setDraft('Caption');
+  await Promise.all([store.removeImage(), store.send()]); assert.deepEqual(port.submitted[0].body, { kind: 'send', text: 'Caption' }); await store.dispose();
+});
+
+test('selecting a replacement image followed by Send in the same turn observes the new upload', async () => {
+  const images = uploads({ auto: false }), { store, port } = fixture({ images }); await store.setDraft('Caption');
+  const first = store.selectImage({ name: 'first.png', bytes: png(1) }); await new Promise(resolve => setImmediate(resolve)); images.calls[0].reply.resolve(images.calls[0].attachment); await first;
+  const replacement = store.selectImage({ name: 'replacement.png', bytes: png(2) }), sending = store.send();
+  try { await assert.rejects(sending, /Wait for the image to finish uploading/); assert.equal(port.submitted.length, 0); }
+  finally { await new Promise(resolve => setImmediate(resolve)); images.calls[1].reply.resolve(images.calls[1].attachment); await replacement; await store.dispose(); }
+});
