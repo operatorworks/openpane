@@ -11,12 +11,13 @@ export function useDisplayCards(scope: ConversationScope) {
   const publications = view.kind === 'none' ? null : view.publications;
   useLayoutEffect(() => {
     previous.current = null; unseen.current.clear(); announced.current = 0; setNewCount(0); setAnnouncement('');
-    const scroll = root.current?.closest('.conversation-content');
+    const cards = root.current, scroll = cards?.closest('.conversation-content');
     if (!(scroll instanceof HTMLElement)) return;
     const track = () => { if (!scroll.getClientRects().length || !scroll.clientHeight) return; bottom.current = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 48; if (bottom.current) { unseen.current.clear(); setNewCount(0); } };
     track(); scroll.addEventListener('scroll', track, { passive: true });
     const resize = new ResizeObserver(track); resize.observe(scroll);
-    return () => { scroll.removeEventListener('scroll', track); resize.disconnect(); };
+    if (cards) { resize.observe(cards); cards.addEventListener('toggle', track, true); }
+    return () => { scroll.removeEventListener('scroll', track); cards?.removeEventListener('toggle', track, true); resize.disconnect(); };
   }, [scope.hostId, scope.conversationId]);
   useLayoutEffect(() => {
     if (!publications || view.kind === 'loading') return;

@@ -210,11 +210,15 @@ export class UiStore {
     this.expire();
     const cohortLimit = request.op === 'restore' ? 64 : 32;
     if (this.sessions.size > cohortLimit) throw new UiRefusal('capacity', `${this.sessions.size} compatible windows; close windows to at most ${cohortLimit} before applying`);
-    if (request.op === 'apply' && !this.db.prepare('SELECT digest FROM ui_bundles WHERE digest=?').get(request.bundle.digest)) {
+    const existing = request.op === 'apply' ? this.db.prepare('SELECT bytes FROM ui_bundles WHERE digest=?').get(request.bundle.digest) : undefined;
+    let readable = false;
+    if (request.op === 'apply' && existing) { try { this.bundle(request.bundle.digest); readable = true; } catch {} }
+    if (request.op === 'apply' && !readable) {
       const value = canonicalJson(request.bundle), bytes = Buffer.byteLength(value);
       const usage = this.db.prepare('SELECT count(*) AS count, coalesce(sum(bytes),0) AS bytes FROM ui_bundles').get();
-      if (!usage || count(usage.count) >= MAX_BUNDLES || count(usage.bytes) + bytes > MAX_BUNDLE_BYTES) throw new UiRefusal('capacity', 'Experience capacity reached; prune unreferenced bundles');
-      this.db.prepare('INSERT INTO ui_bundles VALUES (?,?,?,?)').run(request.bundle.digest, value, bytes, Date.now());
+      if (!usage || count(usage.count) + (existing ? 0 : 1) > MAX_BUNDLES || count(usage.bytes) - (existing ? count(existing.bytes) : 0) + bytes > MAX_BUNDLE_BYTES) throw new UiRefusal('capacity', 'Experience capacity reached; prune unreferenced bundles');
+      this.db.prepare('INSERT INTO ui_bundles VALUES (?,?,?,?) ON CONFLICT(digest) DO UPDATE SET value=excluded.value,bytes=excluded.bytes').run(request.bundle.digest, value, bytes, Date.now());
+      this.manifests.set(request.bundle.digest, request.bundle.manifest);
     }
     const selected: UiAppearance = request.op === 'apply' ? { kind: 'experience', digest: request.bundle.digest } : request.op === 'restore' ? { kind: 'builtin' } : this.state.selection.selected;
     const selection: UiSelection = { revision: request.op === 'refresh' ? this.state.selection.revision : next(this.state.selection.revision), deliveryGeneration: next(this.state.selection.deliveryGeneration), selected, previousHealthy: this.state.healthy };
@@ -311,13 +315,14 @@ export class UiStore {
     if (context.role !== 'chat') throw new UiRefusal('conflict', 'Only a registered child can resolve placement');
     for (const receipt of this.receipts()) {
       let changed = false;
+      const rendered = receipt.participants.some(participant => participant.slot.kind === 'document' && canonicalJson(participant.slot.context) === canonicalJson(context) && participant.visual.kind === 'rendered');
       const participants = receipt.participants.map(participant => {
         const slot = participant.slot;
         if (slot.kind !== 'transition' || !slot.target || participant.placement.kind !== 'pending' || slot.target.nativeTransitionId !== target.nativeTransitionId) return participant;
         if (slot.source.brokerInstance !== context.brokerInstance || slot.target.scope.hostId !== context.scope.hostId || slot.target.scope.conversationId !== context.scope.conversationId || slot.target.label !== context.label || slot.target.viewId !== context.viewId || slot.target.bindingRevision !== target.bindingRevision) return participant;
         if (slot.resolved && canonicalJson(slot.resolved) !== canonicalJson(context)) return participant;
         changed = true;
-        return { ...participant, slot: { ...slot, resolved: context }, placement: { kind: 'ready', transitionId: slot.transitionId, bindingRevision: target.bindingRevision } as const };
+        return { ...participant, visual: rendered ? { kind: 'rendered' } as const : participant.visual, slot: { ...slot, resolved: context }, placement: { kind: 'ready', transitionId: slot.transitionId, bindingRevision: target.bindingRevision } as const };
       });
       if (changed) this.writeReceipt({ ...receipt, participants });
     }
@@ -435,7 +440,18 @@ export class UiStore {
       });
       case 'relay': return this.relay(request);
       case 'state': {
-        this.transaction(() => { this.expire(new Set([request.context.documentIncarnation])); this.present(request); });
+        this.transaction(() => {
+          const live = new Set([request.context.documentIncarnation]);
+          if (request.liveChildren?.length && (request.context.role !== 'main' || !request.nativePlacement)) throw new UiRefusal('conflict', 'Only native main can report its child inventory');
+          const children = (request.liveChildren ?? []).flatMap(id => {
+            const child = this.sessions.get(id);
+            if (!child) return [];
+            if (child.context.role !== 'chat' || child.context.brokerInstance !== request.context.brokerInstance || child.context.profileId !== request.context.profileId || child.context.hostId !== request.context.hostId) throw new UiRefusal('conflict', 'Foreign native child inventory');
+            live.add(id); return [[id, child] as const];
+          });
+          this.expire(live); this.present(request);
+          for (const [id, child] of children) this.sessions.set(id, { ...child, seen: Date.now() });
+        });
         if (request.after === this.change && request.waitMs) await new Promise<void>(resolve => {
           const finish = () => { clearTimeout(timer); this.listeners.delete(finish); resolve(); };
           const timer = setTimeout(finish, request.waitMs); this.listeners.add(finish);

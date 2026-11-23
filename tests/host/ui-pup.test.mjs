@@ -6,7 +6,7 @@ import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { normalizePup, resolvePupRange } from '../../apps/host/build/tsc/ui-pup.js';
-import { pupVersion, runPup } from '../../apps/host/build/tsc/ui-pup-process.js';
+import { pupSite, pupVersion, runPup } from '../../apps/host/build/tsc/ui-pup-process.js';
 
 const source = JSON.parse(await readFile(new URL('./fixtures/metrics/pup-v1.json', import.meta.url), 'utf8'));
 const range = { fromSeconds: 1795374001, toSeconds: 1795374061 };
@@ -49,6 +49,21 @@ async function executable(t, program) {
   await writeFile(path, `#!${process.execPath}\n${program}\n`, { mode: 0o700 });
   t.after(() => rm(directory, { recursive: true, force: true })); return { directory, path };
 }
+async function processId(path) {
+  const value = Number(await readFile(path, 'utf8'));
+  assert.ok(Number.isSafeInteger(value) && value > 0, 'fixture readiness contains a positive process ID');
+  return value;
+}
+async function isRunning(pid) {
+  try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return false; throw error; }
+  if (process.platform === 'linux') {
+    try {
+      const stat = await readFile(`/proc/${pid}/stat`, 'utf8');
+      return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0] !== 'Z';
+    } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+  }
+  return true;
+}
 test('pup output is usable only after successful close, and failures never return authentication text', async t => {
   const good = await executable(t, `process.stdout.write(${JSON.stringify(JSON.stringify(source))});`);
   const completed = await runPup(good.path, [], { signal: new AbortController().signal });
@@ -71,11 +86,11 @@ test('pup timeout, cancellation, missing executable and malformed UTF-8 stay bou
   assert.deepEqual(await runPup(invalid.path, [], { signal: new AbortController().signal }), { kind: 'failed', reason: 'invalid-response' });
 });
 test('cancelling a running pup drains a child that ignores the first termination signal', { timeout: 15000 }, async t => {
-  const f = await executable(t, "import('node:fs').then(fs => { process.on('SIGTERM', () => {}); fs.writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000); });");
+  const f = await executable(t, "import('node:fs').then(fs => { process.on('SIGTERM', () => {}); fs.writeFileSync(process.argv[2]+'.tmp', String(process.pid)); fs.renameSync(process.argv[2]+'.tmp',process.argv[2]); setInterval(() => {}, 1000); });");
   const ready = join(f.directory, 'ready'), controller = new AbortController(), running = runPup(f.path, [ready], { signal: controller.signal, timeoutMs: 12000 });
   const until = Date.now() + 8000;
   while (!await access(ready).then(() => true, () => false)) { if (Date.now() > until) throw new Error('Pup fixture did not start'); await new Promise(resolve => setTimeout(resolve, 20)); }
-  const pid = Number(await readFile(ready, 'utf8')); controller.abort();
+  const pid = await processId(ready); controller.abort();
   assert.deepEqual(await running, { kind: 'failed', reason: 'cancelled' });
   assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
 });
@@ -104,7 +119,7 @@ test('a raw response must match its fixed reservation query and range, allowing 
 });
 
 test('the independent pup guardian drains a SIGTERM-resistant child after its CLI owner is killed', { timeout: 15000 }, async t => {
-  const f = await executable(t, "const fs=require('node:fs'); process.on('SIGTERM',()=>{}); fs.writeFileSync(process.argv[2],String(process.pid)); setInterval(()=>{},1000);");
+  const f = await executable(t, "const fs=require('node:fs'); process.on('SIGTERM',()=>{}); fs.writeFileSync(process.argv[2]+'.tmp',String(process.pid));fs.renameSync(process.argv[2]+'.tmp',process.argv[2]); setInterval(()=>{},1000);");
   const ready = join(f.directory, 'guardian-ready');
   const module = process.env.OPENPANE_PUP_REPRO_MODULE ?? new URL('../../apps/host/build/tsc/ui-pup-process.js', import.meta.url).href;
   const owner = spawn(process.execPath, ['--input-type=module', '-e', `import {runPup} from ${JSON.stringify(module)}; await runPup(${JSON.stringify(f.path)},[${JSON.stringify(ready)}],{signal:new AbortController().signal,timeoutMs:10000});`], { stdio: 'ignore' });
@@ -112,10 +127,10 @@ test('the independent pup guardian drains a SIGTERM-resistant child after its CL
   t.after(() => { if (owner.exitCode === null && owner.signalCode === null) owner.kill('SIGKILL'); if (pid) try { process.kill(-pid, 'SIGKILL'); } catch {} });
   const until = Date.now() + 5000;
   while (!await access(ready).then(() => true, () => false)) { if (Date.now() > until) throw new Error('Supervised pup did not start'); await new Promise(resolve => setTimeout(resolve, 20)); }
-  pid = Number(await readFile(ready, 'utf8'));
+  pid = await processId(ready);
   const exit = once(owner, 'exit'); owner.kill('SIGKILL'); await exit;
   const drained = Date.now() + 3500;
-  while (Date.now() < drained) { try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; throw error; } await new Promise(resolve => setTimeout(resolve, 20)); }
+  while (Date.now() < drained) { if (!await isRunning(pid)) return; await new Promise(resolve => setTimeout(resolve, 20)); }
   assert.fail('Pup survived the death of its publishing CLI');
 });
 test('an expired execution grant cannot start a late pup process', async t => {
@@ -139,12 +154,64 @@ for (const exitCode of [0, 7]) test(`ordinary pup exit ${exitCode} drains a help
   const ready = join(f.directory, 'helper'); let pid;
   t.after(() => { if (pid) try { process.kill(pid, 'SIGKILL'); } catch {} });
   const result = await runPup(f.path, [ready], { signal: new AbortController().signal });
-  pid = Number(await readFile(ready, 'utf8'));
+  pid = await processId(ready);
   assert.equal(result.kind, exitCode === 0 ? 'completed' : 'failed');
   const deadline = Date.now() + 1000;
   while (Date.now() < deadline) {
-    try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; throw error; }
+    if (!await isRunning(pid)) return;
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   assert.fail('Pup helper survived a completed query attempt');
+});
+
+for (const exitCode of [0, 7]) test(`ordinary pup exit ${exitCode} drains a helper that inherited stdout`, { timeout: 5000 }, async t => {
+  const f = await executable(t, `const {spawn}=require('node:child_process'); const fs=require('node:fs');
+    const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:['ignore',1,2]});
+    fs.writeFileSync(process.argv[2],String(child.pid)); process.stdout.write('complete result'); process.exit(${exitCode});`);
+  const ready = join(f.directory, 'inherited-helper'); let pid;
+  t.after(() => { if (pid) try { process.kill(pid, 'SIGKILL'); } catch {} });
+  const result = await runPup(f.path, [ready], { signal: new AbortController().signal, timeoutMs: 1000 });
+  pid = await processId(ready);
+  assert.deepEqual(result, exitCode === 0 ? { kind: 'completed', stdout: 'complete result' } : { kind: 'failed', reason: 'pup-failed' });
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (!await isRunning(pid)) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.fail('Pup helper survived a completed query attempt');
+});
+
+test('pup qualification, site discovery and queries omit unrelated provider credentials', async t => {
+  const overrides = { OPENPANE_EXTENSION_CREW_TOKEN: 'PRIVATE_PROVIDER_MARKER', ANTHROPIC_API_KEY: 'PRIVATE_PROVIDER_MARKER', DD_SITE: '', DD_API_KEY: 'DATADOG_MARKER' };
+  for (const [key,value] of Object.entries(overrides)) {
+    const previous = process.env[key]; process.env[key] = value;
+    t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
+  }
+  const f = await executable(t, `const fs=require('node:fs');
+    fs.appendFileSync(${JSON.stringify('ENV_LOG_PLACEHOLDER')},JSON.stringify({args:process.argv.slice(2),crew:process.env.OPENPANE_EXTENSION_CREW_TOKEN,anthropic:process.env.ANTHROPIC_API_KEY,dd:process.env.DD_API_KEY})+'\\n');
+    if(process.argv.includes('--version')) console.log('pup 2.0.1');
+    else if(process.argv.includes('auth')) console.log(JSON.stringify({site:'us3.datadoghq.com'}));
+    else console.log('{}');`);
+  const log = join(f.directory, 'environment');
+  await writeFile(f.path, (await readFile(f.path,'utf8')).replace('ENV_LOG_PLACEHOLDER',log));
+  const signal = new AbortController().signal;
+  assert.equal(await pupVersion(f.path, signal), '2.0.1');
+  assert.equal(await pupSite(f.path, signal), 'us3.datadoghq.com');
+  assert.equal((await runPup(f.path, ['metrics','query'], {signal,env:{...process.env}})).kind, 'completed');
+  const entries = (await readFile(log,'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(entries.length,3);
+  for (const entry of entries) { assert.equal(entry.crew,undefined);assert.equal(entry.anthropic,undefined);assert.equal(entry.dd,'DATADOG_MARKER'); }
+});
+
+test('pup points follow the qualified provider interval grid', () => {
+  const raw = structuredClone(source);
+  raw.series[0].interval = 7; raw.series[0].end = raw.series[0].pointlist.at(-1)[0];
+  assert.throws(() => normalize(raw), /timestamp/);
+});
+
+test('grouped labels beyond the contract bound refuse instead of truncating series identity', () => {
+  const raw = structuredClone(source);
+  raw.series[0].display_name = 'a'.repeat(150); raw.series[0].scope = 'host:' + 'b'.repeat(100);
+  assert.throws(() => normalize(raw), /text|label|200/i);
+  assert.deepEqual(raw.series[0].pointlist, source.series[0].pointlist);
 });

@@ -4,7 +4,9 @@ import type { ConversationOpenResult, ConversationScope, EditorBinding, Experien
 import { sameScope } from '@openpane/contracts';
 import { count, identifier, record } from '@openpane/contracts/decode';
 import { BrowserViewStorage } from './browser-storage.js';
+import { handoffRevision } from './editor-bindings.js';
 import type { PlacementAcquisition, PlacementPort } from './placement-port.js';
+import { PlacementSuperseded } from './placement-port.js';
 import { DesktopWindowPort, parseNativeReservation, parseNativePlacementIntent, childPlacementResult, parseNativeWindowLookup } from './window-context.js';
 import type { NativeReservation, NativePlacementIntent, NativeWindowLookup } from './window-context.js';
 
@@ -14,14 +16,21 @@ const DEFAULT_WINDOW: ExperienceV2['presentation']['chatWindow'] = { width: 640,
 
 /** Native intents allocate conversations; IndexedDB bindings decide where their drafts live. */
 export class WindowCoordinator implements PlacementPort {
+  private readonly placementGuards = new Map<string, () => boolean>();
+  async withPlacementGuard<T>(scope: ConversationScope, current: () => boolean, operation: () => Promise<T>): Promise<T> {
+    const key = JSON.stringify(scope);
+    if (this.placementGuards.has(key)) throw new Error('This chat is already being placed.');
+    this.placementGuards.set(key, current);
+    try { return await operation(); } finally { this.placementGuards.delete(key); }
+  }
   private readonly forced = new Map<string, 'inline' | 'separate'>();
   async placeExplicitly<T>(scope: ConversationScope, mode: 'inline' | 'separate', operation: () => Promise<T>): Promise<T> {
     const key = JSON.stringify(scope); if (this.forced.has(key)) throw new Error('A recovery of this chat is already in progress.');
     this.forced.set(key, mode); try { return await operation(); } finally { this.forced.delete(key); }
   }
   private presentation: Pick<ExperienceV2['presentation'], 'chats' | 'chatWindow'> = { chats: 'inline', chatWindow: DEFAULT_WINDOW };
-  private track: (reservation: NativeReservation, binding: EditorBinding) => Promise<void> = async () => {};
-  trackPlacement(handler: (reservation: NativeReservation, binding: EditorBinding) => Promise<void>): void { this.track = handler; }
+  private track: (reservation: NativeReservation, binding: Pick<EditorBinding, 'revision'>) => Promise<void> = async () => {};
+  trackPlacement(handler: (reservation: NativeReservation, binding: Pick<EditorBinding, 'revision'>) => Promise<void>): void { this.track = handler; }
   private notice: (result: ConversationOpenResult, requestId: string) => void = () => {};
   observeIntent(handler: (result: ConversationOpenResult, requestId: string) => void): void { this.notice = handler; }
   private capture: (requestId: string, sourceScope?: ConversationScope) => Promise<{ readonly cancel: () => Promise<void> } | null> = async () => null;
@@ -112,10 +121,12 @@ export class WindowCoordinator implements PlacementPort {
   private async phase(reservation: NativeReservation, phase: NativeReservation['phase']): Promise<void> {
     await this.port?.request({ kind: 'phase', scope: reservation.scope, transitionId: reservation.transitionId, phase });
   }
-  private async transfer(request: Request, owner: Owner, binding: EditorBinding | null, sourceViewId: string, reservation: NativeReservation): Promise<EditorBinding> {
+  private async transfer(request: Request, owner: Owner, binding: EditorBinding | null, sourceViewId: string, reservation: NativeReservation, assertCurrent?: () => void): Promise<EditorBinding> {
+    assertCurrent?.();
     if (owner.storage.viewId === sourceViewId) await owner.quiesce();
+    assertCurrent?.();
     const plan = { scope: request.scope, sourceViewId, targetViewId: reservation.viewId,
-      transitionId: reservation.transitionId, targetLabel: reservation.label, expectedBinding: binding };
+      transitionId: reservation.transitionId, targetLabel: reservation.label, expectedBinding: binding, ...(assertCurrent ? { assertCurrent } : {}) };
     if (owner.storage.viewId === sourceViewId && owner.storage instanceof BrowserViewStorage && owner.storage.editorBinding()) {
       const committed = await owner.storage.reserveHandoff(plan);
       await owner.release();
@@ -127,7 +138,8 @@ export class WindowCoordinator implements PlacementPort {
   private async carryToNative(request: Request, reservation: NativeReservation): Promise<void> {
     if (!request.carryFrom || sameScope(request.carryFrom, request.scope) || this.port?.context.role !== 'main') return;
     if (await keptMainDraft(request.carryFrom, request.scope)) return;
-    const existing = (await sourceCarries(request.carryFrom)).find(carry => (carry.kind === 'offered' || carry.kind === 'applied' || carry.kind === 'cancelled') && carry.target && sameScope(carry.target, request.scope));
+    const carries = await sourceCarries(request.carryFrom);
+    const existing = carries.find(carry => (carry.kind === 'offered' || carry.kind === 'applied' || carry.kind === 'cancelled') && carry.target && sameScope(carry.target, request.scope));
     if (existing) return;
     let context = record(await this.port.request({ kind: 'intent-context' }), ['epoch', 'pendingCarryRequests']), epoch = count(context.epoch);
     const pending = () => { if (!Array.isArray(context.pendingCarryRequests) || context.pendingCarryRequests.length > 1024) throw new Error('Invalid native carry inventory'); return context.pendingCarryRequests.map(value => identifier(value, 200)); };
@@ -136,6 +148,8 @@ export class WindowCoordinator implements PlacementPort {
       await pruneDraftCarryHistory(epoch, pending());
     }
     const requestId = `${epoch}:main-${reservation.transitionId}`;
+    const unbound = carries.find(carry => carry.kind === 'offered' && carry.target === null && carry.requestId.endsWith(`:main-${reservation.transitionId}`));
+    if (unbound) { await bindDraftCarry(request.carryFrom, unbound.requestId, request.scope); return; }
     const captured = await this.capture(requestId, request.carryFrom);
     if (captured) {
       try { await bindDraftCarry(request.carryFrom, requestId, request.scope); }
@@ -143,20 +157,25 @@ export class WindowCoordinator implements PlacementPort {
     }
   }
   async acquire(request: Request, owner: Owner): Promise<PlacementAcquisition> {
+    const current = this.placementGuards.get(JSON.stringify(request.scope));
+    const assertCurrent = () => { if (current && !current()) throw new PlacementSuperseded(); };
     try {
+      assertCurrent();
       if (this.port?.context.role === 'chat') {
         if (!sameScope(this.port.context.reservation.scope, request.scope)) return this.intent({ kind: 'open', scope: request.scope, carry: request.carryFrom !== null }, request.scope);
         if (owner.storage.viewId !== this.port.context.viewId) throw new Error('The child editor changed its assigned saved view.');
         return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
       }
       const native = await this.lookup(request.scope);
+      assertCurrent();
       if (native.kind === 'opening' || native.kind === 'ready') {
         await this.carryToNative(request, native.reservation);
         const { binding } = await BrowserViewStorage.locateEditor(request.scope);
         if (binding && binding.viewId === native.reservation.viewId && (binding.kind === 'editing' || binding.targetLabel === native.reservation.label && binding.transitionId === native.reservation.transitionId)) await this.track(native.reservation, binding);
-        return this.launch(request);
+        assertCurrent(); return this.launch(request);
       }
       const located = await BrowserViewStorage.locateEditor(request.scope, owner.storage.viewId);
+      assertCurrent();
       let binding = located.binding;
       const selectedLegacy = located.legacyViewIds.includes(owner.storage.viewId) ? owner.storage.viewId : null;
       if (located.legacyViewIds.length > 1 && selectedLegacy === null) {
@@ -167,25 +186,27 @@ export class WindowCoordinator implements PlacementPort {
       const separate = this.port?.context.role === 'main' && this.port.context.liveRelay && (this.forced.get(JSON.stringify(request.scope)) ?? this.presentation.chats) === 'separate';
       if (separate) {
         const reservation = parseNativeReservation(await this.port.request({ kind: 'reserve', scope: request.scope, viewId, creationAgentId: request.creation ? request.agentId : null, newTransition: binding?.kind === 'editing' }));
+        assertCurrent();
         await this.carryToNative(request, reservation);
+        assertCurrent();
         if (request.creation && !binding && sourceViewId === null) {
           if (request.initialDraft !== null && request.initialDraft !== undefined) await BrowserViewStorage.prepareCreationDraft({ scope: request.scope, viewId: reservation.viewId, label: reservation.label, transitionId: reservation.transitionId, agentId: request.agentId }, request.initialDraft);
-          return this.launch(request);
+          assertCurrent(); return this.launch(request);
         }
-        let committed: EditorBinding;
+        await this.track(reservation, { revision: handoffRevision(binding) });
+        assertCurrent();
         if (binding?.kind === 'handoff-reserved') {
           if (binding.viewId !== reservation.viewId || binding.targetLabel !== reservation.label || binding.transitionId !== reservation.transitionId) throw new Error('The saved handoff and native reservation disagree. Recover the recorded target before retrying.');
-          committed = binding;
         } else {
           await this.phase(reservation, 'source-saved');
-          committed = await this.transfer(request, owner, binding, sourceViewId ?? viewId, reservation);
+          await this.transfer(request, owner, binding, sourceViewId ?? viewId, reservation, assertCurrent);
         }
-        await this.track(reservation, committed);
+        assertCurrent();
         if (reservation.phase === 'requested' || reservation.phase === 'failed' || reservation.phase === 'target-ready') await this.phase(reservation, 'source-saved');
         if (binding?.kind !== 'handoff-reserved' || reservation.phase !== 'source-released') {
           await this.phase(reservation, 'transfer-committed'); await this.phase(reservation, 'source-released');
         }
-        return this.launch(request);
+        assertCurrent(); return this.launch(request);
       }
       if (binding?.kind === 'editing' && owner.holds(binding.viewId)) return { kind: 'inline', view: { kind: 'owned', viewId: binding.viewId } };
       const label = this.port?.context.label ?? this.browserLabel();

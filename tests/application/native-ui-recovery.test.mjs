@@ -8,6 +8,7 @@ import { UiStore } from '../../apps/host/build/tsc/ui-store.js';
 import { createExperienceBundle } from '../../apps/host/build/tsc/experience-bundle.js';
 import { MainUiConnection } from '../../apps/desktop/dist/application/window-runtime.js';
 import { UI_RECOVERY_KEY } from '../../apps/desktop/dist/application/ui-recovery.js';
+import { UiConnection } from '../../apps/desktop/dist/application/ui-connection.js';
 const gate = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'native-ui-recovery-')), store = new UiStore(join(directory, 'ui.sqlite'), 'host');
@@ -35,6 +36,28 @@ async function fixture(t) {
       await store.execute({ op: 'apply', requestId: `1:${randomUUID()}`, expectedRevision: store.context().revision, bundle });
     } };
 }
+
+test('overlapping browser restores reuse one durable recovery reservation', async t => {
+  const f = await fixture(t), ui = new UiConnection(), entered = gate(), held = gate();
+  t.after(() => { held.resolve(); ui.close(); });
+  f.transport(async (request, run) => {
+    const response = await run();
+    if (request.op === 'context') { entered.resolve(); await held.promise; }
+    return response;
+  });
+  const one = ui.restore(), two = ui.restore(); await entered.promise; held.resolve(); await Promise.all([one, two]);
+  assert.equal(f.requests.filter(request => request.op === 'restore').length, 1);
+  assert.equal(f.cached(), null);
+});
+
+test('a successful restore advances the cached recovery context used during an outage', async t => {
+  const f = await fixture(t), ui = new UiConnection(); t.after(() => ui.close());
+  await ui.restore();
+  f.transport((request, run) => { if (request.op === 'context') throw new Error('Context temporarily unavailable'); return run(); });
+  await ui.restore();
+  assert.equal(f.store.context().revision, 2);
+  assert.equal(f.cached(), null);
+});
 
 test('a newer native restore gets its own reservation after an earlier commit loses its reply', async t => {
   const f = await fixture(t), committed = gate(), loseReply = gate(); let held = false;

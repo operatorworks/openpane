@@ -59,7 +59,7 @@ export function ThemeScope({ appearance, reducedMotion, density, colors, palette
   const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)', isRoot);
   const resolved = appearance ?? parent?.appearance ?? (prefersDark ? 'dark' : 'light');
   const tokens = variants?.[resolved];
-  return <ThemeProvider density={density} spacing={tokens?.spacing ?? spacing} radius={tokens?.radius ?? radius} typography={tokens?.typography ?? typography} fonts={tokens?.fonts ?? fonts} treatments={tokens?.treatments ?? treatments} chart={tokens?.chart ?? chart} colors={palette ? palette[resolved] : tokens?.colors ?? colors} appearance={resolved}
+  return <ThemeProvider density={tokens?.density ?? density} spacing={tokens?.spacing ?? spacing} radius={tokens?.radius ?? radius} typography={tokens?.typography ?? typography} fonts={tokens?.fonts ?? fonts} treatments={tokens?.treatments ?? treatments} chart={tokens?.chart ?? chart} colors={palette ? palette[resolved] : tokens?.colors ?? colors} appearance={resolved}
     reducedMotion={reducedMotion ?? (isRoot ? prefersReducedMotion : undefined)}>
     <ThemeSurface {...props}>{children}</ThemeSurface>
   </ThemeProvider>;

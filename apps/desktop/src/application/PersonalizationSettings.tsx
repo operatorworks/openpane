@@ -29,6 +29,8 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
   const [exported, setExported] = useState('');
   const [editor, setEditor] = useState<{ id: number; text: string; epoch: number; revision: number } | null>(null);
   const nextEditorId = useRef(0);
+  const fileIntents = useRef({ palette: 0, preferences: 0 });
+  const palettesUnavailable = saved?.preferences.kind === 'unavailable';
   const feedbackRequest = useRef(0);
   function report(message: string) { feedbackRequest.current++; setMessage(message); }
   async function perform(operation: Promise<PersonalizationOutcome>) {
@@ -48,15 +50,17 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
     const file = event.target.files?.[0];
     if (!file) return;
     event.target.value = '';
+    const intent = ++fileIntents.current[kind];
     if (kind === 'palette' && file.size > MAX_PALETTE_BYTES) { report(PALETTE_SIZE_DIAGNOSTIC); return; }
     try {
       const text = await file.text();
+      if (intent !== fileIntents.current[kind]) return;
       if (kind === 'palette') { setPaletteText(text); setPreview(null); }
       else if (saved && (saved.preferences.kind === 'valid' || saved.preferences.kind === 'invalid') && saved.preferences.revision !== null) {
         setEditor({ id: ++nextEditorId.current, text, epoch: saved.preferences.epoch, revision: saved.preferences.revision });
         report('Review the imported preferences, then save JSON to replace your choices.');
       } else report('Reset or retry saved preferences before importing JSON.');
-    } catch { report('Could not read this file.'); }
+    } catch { if (intent === fileIntents.current[kind]) report('Could not read this file.'); }
   }
   const nativeExport = location.protocol === 'tauri:' || '__TAURI_INTERNALS__' in window;
   function download() {
@@ -84,18 +88,18 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
         {resource.kind === 'ready' ? <>
           <strong>{resource.document.label}</strong> · {resource.document.namespace}/{resource.document.name} · {resource.digest.slice(0, 12)}
           <div className="personalization-controls">
-            <button data-openpane-part="button" aria-label={`Select ${resource.document.label} ${resource.digest.slice(0, 12)}`} onClick={() => void perform(session.selectPalette(resource.digest))}>Select</button>
+            <button data-openpane-part="button" aria-label={`Select ${resource.document.label} ${resource.digest.slice(0, 12)}`} disabled={palettesUnavailable} onClick={() => void perform(session.selectPalette(resource.digest))}>Select</button>
             <button data-openpane-part="button" aria-label={`Export ${resource.document.label} ${resource.digest.slice(0, 12)}`} onClick={() => setExported(resource.text)}>Export palette</button>
           </div>
         </> : <p role="alert">{resource.digest.slice(0, 12)}: {resource.diagnostic}</p>}
-        <button data-openpane-part="button" aria-label={resource.kind === 'ready' ? `Remove palette ${resource.digest.slice(0, 12)}` : `Remove unavailable palette ${index + 1} ${resource.digest.slice(0, 12)}`} onClick={() => void perform(session.removePalette(resource.key))}>Remove</button>
+        <button data-openpane-part="button" aria-label={resource.kind === 'ready' ? `Remove palette ${resource.digest.slice(0, 12)}` : `Remove unavailable palette ${index + 1} ${resource.digest.slice(0, 12)}`} disabled={palettesUnavailable} onClick={() => void perform(session.removePalette(resource.key))}>Remove</button>
       </li>)}</ul>
-      <label data-openpane-part="field-label">Palette JSON<textarea data-openpane-part="textarea" aria-label="Palette JSON" className="personalization-json" value={paletteText} onChange={event => { setPaletteText(event.target.value); setPreview(null); }} /></label>
+      <label data-openpane-part="field-label">Palette JSON<textarea data-openpane-part="textarea" aria-label="Palette JSON" className="personalization-json" value={paletteText} onChange={event => { fileIntents.current.palette++; setPaletteText(event.target.value); setPreview(null); }} /></label>
       <label data-openpane-part="field-label">Import palette file<input data-openpane-part="input" type="file" accept="application/json,.json" onChange={event => void readFile(event, 'palette')} /></label>
       <button data-openpane-part="button" onClick={previewPalette}>Preview palette</button>
       {preview && <>
         <ThemeScope palette={preview.colors} className="palette-preview" aria-label="Palette preview"><h3>{preview.label}</h3><p>Example conversation text.</p><p style={{ color: 'var(--aui-color-muted)' }}>Muted text</p><button data-openpane-part="button">Example control</button><p style={{ color: 'var(--aui-color-danger)' }}>Example error</p></ThemeScope>
-        <button data-openpane-part="button" onClick={() => void perform(session.importPalette(canonicalPaletteText(preview)))}>Import palette</button>
+        <button data-openpane-part="button" disabled={palettesUnavailable} onClick={() => void perform(session.importPalette(canonicalPaletteText(preview)))}>Import palette</button>
       </>}
     </section>
     <section className="settings-section" aria-label="Executable UI"><h2>Executable UI</h2>
@@ -119,6 +123,7 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
     <section className="settings-section" aria-label="Preferences JSON"><h2>Preferences JSON</h2>
       <div className="personalization-controls">
         <button data-openpane-part="button" onClick={() => {
+          fileIntents.current.preferences++;
           const preferences = saved?.preferences;
           if (preferences?.kind === 'valid') setEditor({ id: ++nextEditorId.current, text: JSON.stringify(preferences.document, null, 2), epoch: preferences.epoch, revision: preferences.revision });
           else if (preferences?.kind === 'invalid' && preferences.revision !== null) setEditor({ id: ++nextEditorId.current, text: JSON.stringify(document, null, 2), epoch: preferences.epoch, revision: preferences.revision });
@@ -130,7 +135,7 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
         }}>Export preferences</button>
         <label data-openpane-part="field-label">Import preferences file<input data-openpane-part="input" type="file" accept="application/json,.json" onChange={event => void readFile(event, 'preferences')} /></label>
       </div>
-      {editor && <><label data-openpane-part="field-label">Preferences JSON<textarea data-openpane-part="textarea" aria-label="Preferences JSON" className="personalization-json" value={editor.text} onChange={event => setEditor({ ...editor, text: event.target.value })} /></label>
+      {editor && <><label data-openpane-part="field-label">Preferences JSON<textarea data-openpane-part="textarea" aria-label="Preferences JSON" className="personalization-json" value={editor.text} onChange={event => { fileIntents.current.preferences++; setEditor({ ...editor, text: event.target.value }); }} /></label>
         <button data-openpane-part="button" onClick={() => {
           try { void perform(session.replacePreferences({ expectedEpoch: editor.epoch, expectedRevision: editor.revision, document: parseDesktopPreferences(JSON.parse(editor.text)) })).then(result => {
             if (result.kind === 'committed' && result.epoch !== null && result.revision !== null) {
@@ -139,7 +144,7 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
             }
           }); }
           catch (error) { report(error instanceof Error ? error.message : 'Invalid preferences JSON.'); }
-        }}>Save JSON</button><button data-openpane-part="button" onClick={() => setEditor(null)}>Close editor</button></>}
+        }}>Save JSON</button><button data-openpane-part="button" onClick={() => { fileIntents.current.preferences++; setEditor(null); }}>Close editor</button></>}
       <button data-openpane-part="button" onClick={() => void session.retry().then(() => report('Saved preferences checked.'))}>Retry saved preferences</button>
       <button data-openpane-part="button" disabled={saved?.preferences.kind === 'unavailable'} onClick={() => void perform(session.resetPersonalization())}>Reset saved preferences</button>
       <p>Reset keeps palettes, conversations and drafts, and saves executable UI disabled.</p>

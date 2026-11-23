@@ -11,6 +11,7 @@ export function uiEndpoint(store: UiStore | null, fault: string | null, observab
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const startTime = performance.timeOrigin + performance.now();
     let outcome: 'ok' | 'unavailable' = 'ok';
+    let executing = false;
     try {
       if (isClosing()) throw new UiRefusal('unavailable', 'UI service is shutting down');
       const origin = `http://127.0.0.1:${request.socket.localPort}`;
@@ -19,6 +20,7 @@ export function uiEndpoint(store: UiStore | null, fault: string | null, observab
         if (!store || (request.method !== 'GET' && request.method !== 'HEAD')) throw new UiRefusal('unavailable', 'UI assets unavailable');
         const match = /^\/ui-assets\/([a-f0-9]{64})\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,127})$/.exec(request.url);
         if (!match?.[1] || !match[2]) throw new Error('Invalid UI asset path');
+        executing = true;
         const bundle = store.bundle(match[1]), name = match[2];
         const asset = bundle.manifest.assets.find(asset => asset.name === name);
         if (!asset) throw new UiRefusal('not-found', 'Undeclared UI asset');
@@ -33,8 +35,13 @@ export function uiEndpoint(store: UiStore | null, fault: string | null, observab
       const operation = parseUiRequest(await readJson(request, UI_FRAME_BYTES, 5000));
       if (!['context', 'state', 'relay', 'placement-reserve', 'placement-idle', 'placement-failed', 'ack', 'paint', 'restore', 'display-list'].includes(operation.op)) throw new Error('UI operation requires the local CLI');
       if (!store) throw new UiRefusal('unavailable', fault ?? 'UI database unavailable; builtin appearance remains active');
+      executing = true;
       json(response, 200, { ok: true, value: await store.execute(operation) }, {}, 1024 * 1024);
-    } catch (error) { outcome = 'unavailable'; if (!response.headersSent) json(response, error instanceof UiRefusal && error.code === 'not-found' ? 404 : 400, uiFailure(error)); }
+    } catch (error) {
+      outcome = 'unavailable';
+      const failure = uiFailure(error instanceof UiRefusal || executing ? error : new UiRefusal('invalid-input', error instanceof Error ? error.message : 'Invalid UI request'));
+      if (!response.headersSent) json(response, failure.code === 'not-found' ? 404 : failure.code === 'unavailable' ? 503 : 400, failure);
+    }
     finally { observability.record({ operation: 'ui', client: 'browser-development', outcome, startTime, statusCode: response.headersSent ? response.statusCode : null }); }
   };
 }

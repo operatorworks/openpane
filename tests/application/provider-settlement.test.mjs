@@ -50,8 +50,9 @@ test('an inconclusive run-end read is read again after observation goes live on 
 });
 
 test('a reconcile that overlaps a run-end read joins it and makes one status read', async t => {
-  const { remote, a, f, scope, binding } = await streaming(t, () => 'accepted');
   const gate = Promise.withResolvers();
+  t.after(() => gate.resolve());
+  const { remote, a, f, scope, binding } = await streaming(t, () => 'accepted');
   remote.command(async (operation, path) => {
     if (path === '/lookup') await gate.promise;
     return { kind: 'confirmed', evidence: null, value: { kind: 'send', state: 'accepted', run: remote.ref(operation.binding, 'run', 'same-run') } };

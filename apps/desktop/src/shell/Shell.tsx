@@ -93,15 +93,15 @@ export function DesktopShell({ experience, contentPalette, appearance, onRestore
     {navigation}
     {protectedContent}
     <main id="main-content">
-      <div className="shell-view" hidden={showSettings || showExtensions}>
+      <div className="shell-view" data-shell-destination="home" hidden={showSettings || showExtensions}>
         <ContentBoundary key={boundaryKey} revision={revision}>
           <ThemeScope palette={contentPalette ?? palettes} className="content-theme">{view.kind === 'initial' ? children ?? defaultView ?? <DefaultView /> : defaultView ?? <DefaultView />}</ThemeScope>
         </ContentBoundary>
       </div>
-      {settingsView !== undefined && <div className="shell-view" hidden={!showSettings}>
+      {settingsView !== undefined && <div className="shell-view" data-shell-destination="settings" hidden={!showSettings}>
         <ContentBoundary key={`settings-${boundaryKey}`} revision={revision}>{settingsView}</ContentBoundary>
       </div>}
-      {extensionsView !== undefined && <div className="shell-view" hidden={!showExtensions}>
+      {extensionsView !== undefined && <div className="shell-view" data-shell-destination="extensions" hidden={!showExtensions}>
         <ContentBoundary key={`extensions-${boundaryKey}`} revision={revision}>{extensionsView}</ContentBoundary>
       </div>}
     </main>

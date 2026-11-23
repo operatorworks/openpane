@@ -1,5 +1,8 @@
 import type { ConversationOpenResult, ConversationScope } from '@openpane/contracts';
 import type { OwnedViewStorage } from './view-state.js';
+export class PlacementSuperseded extends Error {
+  constructor() { super('A newer appearance superseded this chat placement. Its saved work remains recoverable.'); }
+}
 
 export type PlacementAcquisition =
   | { readonly kind: 'inline'; readonly view: { readonly kind: 'owned'; readonly viewId: string } | { readonly kind: 'acquired'; readonly storage: OwnedViewStorage } }

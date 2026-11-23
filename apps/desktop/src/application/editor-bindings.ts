@@ -30,6 +30,9 @@ function next(value: number): number {
   if (!Number.isSafeInteger(value) || value < 0 || value === Number.MAX_SAFE_INTEGER) throw new Error('Editor generation exhausted');
   return value + 1;
 }
+export function handoffRevision(binding: EditorBinding | null): number {
+  return binding?.kind === 'handoff-reserved' ? binding.revision : next(binding?.revision ?? 0);
+}
 export interface HandoffPlan {
   readonly scope: ConversationScope;
   readonly sourceViewId: string;
@@ -37,11 +40,12 @@ export interface HandoffPlan {
   readonly transitionId: string;
   readonly targetLabel: string;
   readonly expectedBinding: EditorBinding | null;
+  readonly assertCurrent?: () => void;
 }
 /** The caller owns the conversation lock and both distinct view locks, or reuses its already held source locks. */
-export function transferEditor(db: IDBDatabase, plan: HandoffPlan): Promise<EditorBinding> {
+export function transferEditor(db: IDBDatabase, plan: HandoffPlan, transaction = db.transaction('records', 'readwrite')): Promise<EditorBinding> {
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction('records', 'readwrite'), store = transaction.objectStore('records');
+    const store = transaction.objectStore('records');
     const { scope, sourceViewId, targetViewId } = plan;
     const sourceDraftKey = ['draft', sourceViewId, scope.hostId, scope.conversationId];
     const targetDraftKey = ['draft', targetViewId, scope.hostId, scope.conversationId];
@@ -52,7 +56,7 @@ export function transferEditor(db: IDBDatabase, plan: HandoffPlan): Promise<Edit
       imageKeys: store.getAllKeys(scopeImageRange(sourceViewId, scope)), images: store.getAll(scopeImageRange(sourceViewId, scope)),
       targetDrafts: store.count(IDBKeyRange.bound(['draft', targetViewId], ['draft', targetViewId, []], false, true)),
       targetImages: store.count(IDBKeyRange.bound(['draft-image', targetViewId], ['draft-image', targetViewId, []], false, true)),
-      targetOwner: store.get(editorViewKey(targetViewId)),
+      targetOwner: store.get(editorViewKey(targetViewId)), sourceOwner: store.get(editorViewKey(sourceViewId)),
     };
     let remaining = Object.keys(requests).length, result: EditorBinding | undefined, failure: unknown;
     const commit = () => {
@@ -63,9 +67,11 @@ export function transferEditor(db: IDBDatabase, plan: HandoffPlan): Promise<Edit
           result = current; return;
         }
         if (requests.targetOwner.result !== undefined && !sameScope(parseScope(requests.targetOwner.result), scope)) throw new Error('The destination is dedicated to another conversation');
+        if (requests.sourceOwner.result !== undefined && !sameScope(parseScope(requests.sourceOwner.result), scope)) throw new Error('The source is dedicated to another conversation');
         if (current?.kind === 'handoff-reserved') throw new Error('This editor is already reserved for another handoff');
         if (current && !sameScope(current.scope, scope)) throw new Error('Editor binding scope mismatch');
         if (canonicalJson(current) !== canonicalJson(plan.expectedBinding) || current && current.viewId !== sourceViewId) throw new Error('Editor binding changed before handoff');
+        plan.assertCurrent?.();
         const source = decodeView(requests.sourceView.result, scope.hostId);
         if (sourceViewId === targetViewId && (requests.targetDrafts.result > (requests.sourceDraft.result === undefined ? 0 : 1) || requests.targetImages.result !== requests.imageKeys.result.length || source.route && !sameScope(source.route, scope) || source.pendingCreation && !sameScope(source.pendingCreation.scope, scope))) throw new Error('This legacy view contains other conversations; use a distinct dedicated destination.');
         if (sourceViewId !== targetViewId) {
@@ -84,6 +90,7 @@ export function transferEditor(db: IDBDatabase, plan: HandoffPlan): Promise<Edit
           const pending = source.pendingCreation && sameScope(source.pendingCreation.scope, scope) ? source.pendingCreation : null;
           const destination: SavedView = { version: 2, route: pending ? null : scope, pendingCreation: pending };
           store.put(destination, targetViewKey);
+          if (requests.sourceOwner.result !== undefined) store.delete(editorViewKey(sourceViewId));
           store.put({ ...source, route: source.route && sameScope(source.route, scope) ? null : source.route,
             pendingCreation: pending ? null : source.pendingCreation }, sourceViewKey);
         }

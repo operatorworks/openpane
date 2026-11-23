@@ -40,7 +40,9 @@ export class UiDisplayStore {
     this.pages = new DisplayPages(this.data, options.epoch, scope => this.scope(scope));
     options.transaction(() => {
       for (const row of options.db.prepare("SELECT scope,id FROM ui_display_keys WHERE state='running'").all()) {
-        const scope = parseScope(JSON.parse(displayText(row.scope))), id = displayText(row.id), key = queryKey(this.data.key(scope, id));
+        let scope: ConversationScope, id: string, key: ReturnType<typeof queryKey>;
+        try { scope = parseScope(JSON.parse(displayText(row.scope))); id = displayText(row.id); key = queryKey(this.data.key(scope, id)); }
+        catch { continue; }
         this.data.putKey(scope, id, { ...key, executeUntilMs: key.executeUntilMs || Date.now() + 45000, outcome: { kind: 'interrupted', reason: 'host-restarted' } }, 0, 0);
       }
     });

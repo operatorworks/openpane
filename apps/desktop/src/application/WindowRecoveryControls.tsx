@@ -24,7 +24,7 @@ function CarriedDraft({ runtime, carry }: { readonly runtime: WindowRuntime; rea
 export function WindowRecoveryControls({ runtime, recovery }: { readonly runtime: WindowRuntime; readonly recovery: WindowRecovery }) {
   if (recovery.kind === 'none') return null;
   const carries = recovery.carries ?? [];
-  if (recovery.kind === 'main') return recovery.windows.length || carries.length || recovery.carriesAfter || recovery.carryNotice ? <details className="window-recovery"><summary>Chat recovery · {recovery.windows.length} unfinished</summary>
+  if (recovery.kind === 'main') return recovery.windows.length || carries.length || recovery.carriesAfter || !recovery.carriesFirstPage || recovery.carryNotice ? <details className="window-recovery"><summary>Chat recovery · {recovery.windows.length} unfinished</summary>
     {recovery.carryNotice && <p data-openpane-part="status" role="status">{recovery.carryNotice}</p>}
     <p>These chats haven’t finished opening. Retrying uses the same conversation and saved draft.</p>
     {recovery.windows.map(window => <section key={JSON.stringify(window.scope)}><p>Unfinished chat {window.scope.conversationId.slice(-8)}</p>
@@ -33,6 +33,7 @@ export function WindowRecoveryControls({ runtime, recovery }: { readonly runtime
     </section>)}
     {carries.map(carry => <CarriedDraft key={carry.requestId} runtime={runtime} carry={carry} />)}
     {recovery.carriesAfter && <button data-openpane-part="button" type="button" onClick={() => void runtime.moreSavedTransfers()}>More saved transfer text</button>}
+    {!recovery.carriesFirstPage && <button data-openpane-part="button" type="button" onClick={() => void runtime.firstSavedTransfers()}>First saved transfer text</button>}
   </details> : null;
   const request = (intent: NativePlacementIntent) => <section key={intent.requestId}>
     <p>{intent.action.kind === 'create' ? 'New chat request' : 'Continuation request'} · {intent.target?.scope.conversationId.slice(-8) ?? 'Waiting to start'}</p>

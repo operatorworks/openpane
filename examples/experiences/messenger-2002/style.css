@@ -3,7 +3,8 @@
 [data-openpane-part="chat-directory"] { border: 2px inset var(--aui-color-control-border); border-radius: 0px; background-color: var(--aui-color-surface); padding: 8px; }
 [data-openpane-part="chat-window"] { border: 2px outset var(--aui-color-control-border); border-radius: 0px; padding: 12px; }
 [data-openpane-part="header"] { background-color: var(--aui-color-accent); color: var(--aui-color-on-accent); padding: 8px; font-weight: 700; }
-[data-openpane-part="button"] { border: 2px outset var(--aui-color-control-border); border-radius: 0px; padding: 6px 10px; background-color: var(--aui-color-raised); }
+[data-openpane-part="button"] { border: 2px outset var(--aui-color-control-border); border-radius: 0px; padding: 6px 10px; background-color: var(--aui-color-raised); color: var(--aui-color-text); }
+[data-openpane-part="button"][data-openpane-role="navigation"][data-openpane-state="selected"] { background-color: var(--aui-color-accent); color: var(--aui-color-on-accent); }
 [data-openpane-part="button"]:focus-visible { border-color: var(--aui-color-focus); }
 [data-openpane-part="transcript"] { background-color: var(--aui-color-surface); padding: 10px; }
 [data-openpane-part="transcript-row"] { border-radius: 0px; background-color: transparent; padding: 4px; font-size: 12px; }

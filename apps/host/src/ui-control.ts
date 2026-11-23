@@ -11,7 +11,13 @@ import type { UiRequest } from './ui-protocol.js';
 
 export function uiFailure(error: unknown): { readonly ok: false; readonly code: string; readonly error: string } {
   return error instanceof UiRefusal ? { ok: false, code: error.code, error: error.message.slice(0, 500) }
-    : { ok: false, code: 'invalid-input', error: 'Invalid UI request or unavailable UI data' };
+    : { ok: false, code: 'unavailable', error: 'UI operation failed. Restore UI storage or inspect host status before retrying.' };
+}
+export function uiInput<T>(parse: () => T): T {
+  try { return parse(); } catch (error) {
+    if (error instanceof UiRefusal) throw error;
+    throw new UiRefusal('invalid-input', error instanceof Error ? error.message.slice(0, 500) : 'Invalid UI input');
+  }
 }
 export interface UiControlSession { readonly owner: string; readonly signal: AbortSignal }
 export async function startUiControl(path: string, execute: (request: UiRequest, session: UiControlSession) => Promise<unknown>, options: { readonly disconnected?: (owner: string) => void } = {}): Promise<{ close(): Promise<void> }> {
@@ -21,31 +27,36 @@ export async function startUiControl(path: string, execute: (request: UiRequest,
     unlinkSync(path);
   } catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error; }
   let closing = false, recoveryFault = false;
-  const sockets = new Set<Socket>();
+  const sockets = new Set<Socket>(), disconnected = new Set<Promise<void>>();
+  const parse = (value: unknown): UiRequest => uiInput(() => parseUiRequest(value));
   const server = createServer(socket => {
     const reader = new UiFrames(socket), lifetime = new AbortController(), owner = randomUUID();
     const session = { owner, signal: lifetime.signal };
     const until = Date.now() + 45000;
     let deadline: ReturnType<typeof setTimeout> | undefined;
+    let finishRecovery = () => {};
+    const recovery = new Promise<void>(resolve => { finishRecovery = resolve; });
+    disconnected.add(recovery);
     sockets.add(socket);
     socket.once('close', () => {
       sockets.delete(socket); clearTimeout(deadline); lifetime.abort(); reader.close();
       try { options.disconnected?.(owner); } catch { recoveryFault = true; }
+      finally { disconnected.delete(recovery); finishRecovery(); }
     });
     void (async () => {
       try {
-        const request = parseUiRequest(await reader.next());
+        const request = parse(await reader.next());
         if (closing || !reader.alive) throw new UiRefusal('unavailable', 'UI service is shutting down');
         if (recoveryFault) throw new UiRefusal('unavailable', 'Query recovery could not be saved. Restore UI storage and restart the host.');
         const query = request.op === 'display-query-reserve' || request.op === 'display-query-retry';
-        if (!query && reader.queued) throw new Error('UI operations accept one request frame');
+        if (!query && reader.queued) throw new UiRefusal('invalid-input', 'UI operations accept one request frame');
         if (query) deadline = setTimeout(() => socket.destroy(), Math.max(1, until - Date.now()));
         const value = await execute(request, session);
         const granted = query && record(value).granted === true;
         if (!granted) { socket.end(uiFrame({ ok: true, value })); return; }
         if (!reader.alive || lifetime.signal.aborted) throw new UiRefusal('unavailable', 'Query owner disconnected');
         socket.write(uiFrame({ ok: true, value }));
-        const final = parseUiRequest(await reader.next(Math.max(1, until - Date.now())));
+        const final = parse(await reader.next(Math.max(1, until - Date.now())));
         if (closing || !reader.alive || lifetime.signal.aborted) throw new UiRefusal('unavailable', 'Query session ended');
         if ((final.op !== 'display-query-finalize' && final.op !== 'display-query-fail') || !sameScope(final.scope, request.scope) || final.publicationId !== request.publicationId || reader.queued) throw new UiRefusal('conflict', 'Query session accepts only its matching final result');
         const result = await execute(final, session);
@@ -65,9 +76,11 @@ export async function startUiControl(path: string, execute: (request: UiRequest,
     closing = true;
     const deadline = setTimeout(() => { for (const socket of sockets) socket.destroy(); }, 6000);
     return new Promise<void>((resolve, reject) => server.close(error => {
-      clearTimeout(deadline);
-      try { unlinkSync(path); } catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) { reject(error); return; } }
-      if (error) reject(error); else if (recoveryFault) reject(new Error('Query recovery could not be saved')); else resolve();
+      void Promise.all(disconnected).then(() => {
+        clearTimeout(deadline);
+        try { unlinkSync(path); } catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) { reject(error); return; } }
+        if (error) reject(error); else if (recoveryFault) reject(new Error('Query recovery could not be saved')); else resolve();
+      }, reject);
     }));
   } };
 }

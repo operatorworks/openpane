@@ -32,7 +32,7 @@ const server = createServer(async (request, response) => {
     reports.push(report); await appendFile(join(directory, 'reports.jsonl'), JSON.stringify(report) + '\n'); response.end('{}');
   } else if (path === '/observation') {
     const timer = setTimeout(() => { timers.delete(timer); response.end('{"observed":true}'); }, 1500); timers.add(timer);
-  } else if (path === '/state') response.end(JSON.stringify({ childrenReady: new Set(reports.filter(report => report.kind === 'child-ready').map(report => report.detail.label)).size, recovered: reports.some(report => report.kind === 'child-ready' && report.detail.recovered) }));
+  } else if (path === '/state') response.end(JSON.stringify({ childrenReady: new Set(reports.filter(report => report.kind === 'child-ready').map(report => report.detail.label)).size, recovered: reports.some(report => report.kind === 'child-ready' && report.detail.recovered), started: reports.some(report => report.kind === 'minimized') }));
   else if (path === '/snapshot') response.end('{"available":true}');
   else response.writeHead(404).end();
 });

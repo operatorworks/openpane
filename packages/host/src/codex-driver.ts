@@ -327,7 +327,9 @@ export function createCodexDriver(options: CodexDriverOptions): CodexDriver {
         image = { attachment, item: { type: 'image', url: `data:${attachment.mediaType};base64,${Buffer.from(bytes).toString('base64')}` } };
       } catch { return { kind: 'not-dispatched', reason: 'This image could not be read. Attach it again.' }; }
     }
-    const uiContext = options.uiContext?.(command.scope);
+    let uiContext: string | undefined;
+    try { uiContext = options.uiContext?.(command.scope); }
+    catch { return { kind: 'not-dispatched', reason: 'UI context could not be prepared. Try again with a new command.' }; }
     const input = [...(uiContext ? [{ type: 'text', text: uiContext, text_elements: [] }] : []), ...(command.body.text ? [{ type: 'text', text: command.body.text, text_elements: [] }] : []), ...(image ? [image.item] : [])];
     busy.add(key);
     let turn: ActiveTurn | null = null;

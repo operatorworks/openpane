@@ -26,6 +26,96 @@ async function rendered(host, result) {
 const route = (page, name) => page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name, exact: true });
 const panes = page => page.locator('[data-home-pane]:visible').evaluateAll(nodes => nodes.map(node => node.dataset.homePane));
 
+test('starting a chat from Home Agents persists the launch draft without sending it', { timeout: 45000 }, async t => {
+  const host = await fixture(t), page = await host.page();
+  await rendered(host, await apply(host, bundle(stack(['agents', 'conversation']))));
+  await route(page, 'Home').click();
+  await page.getByRole('textbox', { name: 'First message', exact: true }).fill('Unsent Home agent draft');
+  await page.locator('.home-agents button').first().click(); await connected(page);
+  assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Unsent Home agent draft');
+  assert.equal((await host.entries()).length, 0);
+  await page.reload(); await connected(page);
+  assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Unsent Home agent draft');
+});
+
+test('unreadable text and off-route Settings actions fail before appearance commit', { timeout: 60000 }, async t => {
+  const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  await draft(page, 'Approval stability probe'); await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('region', { name: 'Approval required', exact: true }).waitFor();
+  await draft(page, 'Readable protected draft');
+  const good = bundle(stack(['conversation'])); await rendered(host, await apply(host, good));
+  for (const css of [
+    '[data-openpane-part="button"][data-openpane-role="send"] { color: #11111101; }',
+    '[data-openpane-part="textarea"] { color: #111111; background-color: #111111; }',
+    '[data-openpane-part="button"][data-openpane-role="navigation"] { color: #000000; background-color: #000000fe; }',
+    '[data-openpane-part="button"][data-openpane-role="navigation"] { color: #000000; background-image: linear-gradient(to right, #000000, #000000); }',
+    '[data-openpane-part="page-rail"] { background-image: linear-gradient(to right, #000000, #000000); } [data-openpane-part="button"][data-openpane-role="navigation"] { color: #000000; background-color: transparent; }',
+    '[data-openpane-part="button"][data-openpane-role="approval"] { color: #111111; background-color: #111111; }',
+    '[data-openpane-part="page"] [data-openpane-part="button"] { color: transparent; }',
+  ]) {
+    const bad = createExperienceBundle({ ...good.manifest, assets: [{ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) }] }, css, []);
+    const result = await apply(host, bad); let status;
+    await wait(async () => { status = await requestUi(socket, { op: 'status', requestId: result.receipt.requestId }); return status.outcome !== 'pending'; }, 'unreadable appearance outcome');
+    assert.equal(status.outcome, 'failed', css);
+    assert.equal(await page.locator('.experience-content').getAttribute('data-openpane-experience'), good.digest);
+    assert.equal(await page.locator('textarea#message').inputValue(), 'Readable protected draft');
+  }
+  for (const css of [
+    '[data-openpane-part="button"][data-openpane-role="navigation"] { color: #ffffff; background-image: linear-gradient(to right, #000080, #1084d0); }',
+    '[data-openpane-part="button"][data-openpane-role="navigation"] { color: #000000; background-color: #ffffff; background-image: linear-gradient(to right, #ffffff44, #eeeeee88); }',
+  ]) {
+    const readable = createExperienceBundle({ ...good.manifest, assets: [{ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) }] }, css, []);
+    await rendered(host, await apply(host, readable));
+    assert.equal(await page.locator('textarea#message').inputValue(), 'Readable protected draft');
+  }
+});
+
+test('superseding a delivery during PNG decode never requests its obsolete stylesheet', { timeout: 45000 }, async t => {
+  const { png } = await import('../host/image-fixtures.mjs');
+  const host = await fixture(t), page = await host.page();
+  const good = bundle(stack(['agents', 'conversations']));
+  await rendered(host, await apply(host, good));
+  await page.evaluate(() => {
+    const decode = globalThis.createImageBitmap.bind(globalThis);
+    globalThis.createImageBitmap = async (...args) => {
+      const bitmap = await decode(...args);
+      globalThis.pngDecodeHeld = true;
+      await new Promise(resolve => { globalThis.releasePngDecode = resolve; });
+      return bitmap;
+    };
+  });
+  const bytes = png(), candidate = createExperienceBundle({ ...good.manifest,
+    assets: [...good.manifest.assets, { name: 'frame.png', mimeType: 'image/png', bytes: bytes.length, sha256: sha256(bytes) }],
+  }, good.stylesheet, [{ name: 'frame.png', base64: bytes.toString('base64') }]);
+  const obsoleteRequests = [];
+  page.on('request', request => { if (request.url().endsWith(`/ui-assets/${candidate.digest}/style.css`)) obsoleteRequests.push(request.url()); });
+  await apply(host, candidate);
+  await page.waitForFunction(() => globalThis.pngDecodeHeld);
+  await rendered(host, await apply(host, good));
+  await page.evaluate(async () => { globalThis.releasePngDecode(); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
+  assert.deepEqual(obsoleteRequests, []);
+  assert.equal(await page.locator(`link[href="/ui-assets/${candidate.digest}/style.css"]`).count(), 0);
+  assert.equal(await page.locator('.experience-content').getAttribute('data-openpane-experience'), good.digest);
+});
+
+test('a candidate stylesheet is validated without rules from the previous appearance', { timeout: 45000 }, async t => {
+  const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  await draft(page, 'Retain this draft after failed replacement');
+  const base = bundle(stack(['conversation']));
+  const styled = css => createExperienceBundle({ ...base.manifest, assets: [{ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) }] }, css, []);
+  const good = styled('[data-openpane-part="composer"] [data-openpane-part="button"][data-openpane-role="send"] { color: #123456; }');
+  await rendered(host, await apply(host, good));
+  const bad = styled('[data-openpane-part="button"][data-openpane-role="send"] { color: transparent; }');
+  const result = await apply(host, bad);
+  let status;
+  await wait(async () => { status = await requestUi(socket, { op: 'status', requestId: result.receipt.requestId }); return status.outcome !== 'pending'; }, 'replacement outcome');
+  assert.equal(status.outcome, 'failed');
+  assert.equal(await page.locator('.experience-content').getAttribute('data-openpane-experience'), good.digest);
+  assert.equal(await page.locator('textarea#message').inputValue(), 'Retain this draft after failed replacement');
+});
+
 test('real home panes share one editor across opposite order, routes, omission and inline open', { timeout: 60000 }, async t => {
   const host = await fixture(t), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);

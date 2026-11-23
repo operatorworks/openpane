@@ -53,6 +53,7 @@ export function fixture(options = {}) {
       nativeRuntime: behavior.runtime,
       desiredGitRevision: 'revision', appliedArtifact: { gitRevision: 'revision', artifactId: 'artifact' } } }; },
     async catalog(after, limit, filter) {
+      if (!filter && behavior.catalogEntries) return behavior.catalogEntries(after);
       if (filter) { filters.push({ after, filter }); return behavior.workspaceCatalog ? behavior.workspaceCatalog(after, filter) : []; }
       const supplied = await behavior.catalog(after); cursors.push(after); return (supplied ?? (after === null ? Array.from({ length: 100 }, (_, n) => ({ hostId, conversationId: `c-${n}` })) : [])).map(scope => ({ scope, preview: null, provider: null })); },
     async extensionCall(request) { calls.push(request); if (behavior.extensionCall) return behavior.extensionCall(request); return { kind: 'ok', output: request.input }; },

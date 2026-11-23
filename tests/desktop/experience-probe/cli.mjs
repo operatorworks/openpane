@@ -32,9 +32,10 @@ await writeFile(entry, `import {createConnection} from 'node:net';\nconst [mode,
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'AZURE_OPENAI_API_KEY'].includes(key)));
 const child = spawn(process.execPath, [join(root, 'apps/host/dist/main.js'), 'codex', '--data-dir', join(directory, 'profile'), '--workspace', workspace, '--executable', executable, '--port', '0'], { cwd: root, env, stdio: 'pipe' });
 let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
-const browser = await chromium.launch({ headless: false });
+let browser;
 let result;
 try {
+  browser = await chromium.launch({ headless: false });
   const info = await new Promise((resolveInfo, reject) => {
     let output = '';
     const timer = setTimeout(() => reject(new Error('Packaged host did not start')), 20000);
@@ -50,7 +51,8 @@ try {
   const scope = { hostId: info.hostId, conversationId };
   const prefix = [process.execPath, entry, 'ui', '--data-dir', directory];
   const pup = process.argv[3] ? resolve(process.argv[3]) : null;
-  const prompt = `Qualify OpenPane UI CLI access in this disposable workspace. Create probe.txt containing exactly "approved UI probe". Then run this exact argv as a command, requesting ordinary approval if necessary: ${JSON.stringify([...prefix, 'probe', '--scope-json', JSON.stringify(scope)])}. Do not change configuration or use another runtime. ${pup ? `Also execute ${JSON.stringify(pup)} --no-agent --output=json metrics query --query 'avg:system.cpu.user{*}' --from=${Math.floor(Date.now() / 1000) - 3600} --to=${Math.floor(Date.now() / 1000)}, with DD_SITE=us3.datadoghq.com and no --org; save stdout to pup-raw.json in this workspace. Do not print credentials. If it fails, stop and report that failure.` : ''} Report completion.`;
+  const toSeconds = Math.floor(Date.now() / 1000), range = { fromSeconds: toSeconds - 3600, toSeconds };
+  const prompt = `Qualify OpenPane UI CLI access in this disposable workspace. Create probe.txt containing exactly "approved UI probe". Then run this exact argv as a command, requesting ordinary approval if necessary: ${JSON.stringify([...prefix, 'probe', '--scope-json', JSON.stringify(scope)])}. Do not change configuration or use another runtime. ${pup ? `Also execute ${JSON.stringify(pup)} --no-agent --output=json metrics query --query 'avg:system.cpu.user{*}' --from=${range.fromSeconds} --to=${range.toSeconds}, with DD_SITE=us3.datadoghq.com and no --org; save stdout to pup-raw.json in this workspace. Do not print credentials. If it fails, stop and report that failure.` : ''} Report completion.`;
   await writeFile(join(directory, 'intent.json'), JSON.stringify({ scope, prefix, prompt, codexVersion: execFileSync(executable, ['--version'], { encoding: 'utf8' }).trim(), node: process.version }, null, 2));
   await editor.fill(prompt); await page.getByRole('button', { name: 'Send', exact: true }).click();
   const approvals = [], deadline = Date.now() + 180000;
@@ -65,7 +67,12 @@ try {
     }
     let edited = false, queried = !pup;
     try { edited = (await readFile(join(workspace, 'probe.txt'), 'utf8')).trim() === 'approved UI probe'; } catch {}
-    try { if (pup) queried = JSON.parse(await readFile(join(workspace, 'pup-raw.json'), 'utf8')) !== null; } catch {}
+    try {
+      if (pup) {
+        const { normalizePup } = await import('../../../apps/host/build/tsc/ui-pup.js');
+        normalizePup(JSON.parse(await readFile(join(workspace, 'pup-raw.json'), 'utf8')), 'avg:system.cpu.user{*}', 'CPU query qualification', range, Date.now()); queried = true;
+      }
+    } catch {}
     if (edited && received.length && queried) break;
     if (Date.now() > deadline) throw new Error('Approved CLI probe did not complete before deadline');
     await new Promise(resolve => setTimeout(resolve, 300));
@@ -76,7 +83,21 @@ try {
   result = { status: 'passed', scope, received, approvals: approvals.length, pupQualified: pup !== null, evidence: directory };
 } catch (error) { result = { status: 'failed', reason: error.message, received, evidence: directory }; }
 finally {
-  await browser.close(); if (child.exitCode === null && child.signalCode === null) { const exited = once(child, 'exit'); child.kill('SIGTERM'); await exited; }
+  await browser?.close();
+  if (child.exitCode === null && child.signalCode === null) {
+    const exited = once(child, 'exit');
+    const bounded = async milliseconds => {
+      let timer;
+      try { return await Promise.race([exited.then(() => true), new Promise(resolve => { timer = setTimeout(() => resolve(false), milliseconds); })]); }
+      finally { clearTimeout(timer); }
+    };
+    child.kill('SIGTERM');
+    if (!await bounded(10000)) {
+      child.kill('SIGKILL');
+      const stopped = await bounded(3000);
+      result = { status: 'failed', reason: stopped ? 'Probe host required forced shutdown' : 'Probe host shutdown could not be confirmed', received, evidence: directory };
+    }
+  }
   receiver.closeAllConnections?.(); await new Promise(resolve => receiver.close(resolve));
   await writeFile(join(directory, 'host-stderr.log'), stderr);
 }

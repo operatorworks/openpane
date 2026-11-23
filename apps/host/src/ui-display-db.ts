@@ -93,9 +93,10 @@ export class DisplayDatabase {
     this.db.prepare('INSERT INTO ui_display_events(sequence,scope,id,kind,bytes) VALUES(?,?,?,?,?)').run(sequence, displayScope(scope), publicationId, kind, bytes);
   }
   publication(scope: ConversationScope, publicationId: string): DisplayPublication | null {
-    const row = this.db.prepare('SELECT value FROM ui_display_cards WHERE scope=? AND id=?').get(displayScope(scope), publicationId);
+    const row = this.db.prepare('SELECT value,sequence FROM ui_display_cards WHERE scope=? AND id=?').get(displayScope(scope), publicationId);
     if (!row) return null;
     const publication = parseDisplayPublication(JSON.parse(displayText(row.value)));
+    if (publication.sequence !== count(row.sequence)) throw new Error('Stored display sequence disagrees with its publication');
     if (!sameScope(publication.scope, scope) || publication.publicationId !== publicationId || publication.digest !== displayDigest(publication.event)) throw new Error('Stored display payload identity or digest mismatch');
     const key = this.key(scope, publicationId);
     const receipt = key?.mode === 'raw' && !key.removed ? key.receipt : key?.mode === 'query' && key.outcome.kind === 'published' ? key.outcome.receipt : null;
@@ -110,6 +111,9 @@ export class DisplayDatabase {
     const row = this.db.prepare(`SELECT (SELECT count(*) FROM ui_display_keys WHERE scope=? AND state='published') AS expected,
       (SELECT count(*) FROM ui_display_cards WHERE scope=?) AS actual`).get(displayScope(scope), displayScope(scope));
     if (!row || row.expected !== row.actual) throw new UiRefusal('unavailable', 'Stored display payload is unavailable; remove the affected card or repair UI data');
+    try {
+      for (const card of this.db.prepare('SELECT id FROM ui_display_cards WHERE scope=?').all(displayScope(scope))) this.publication(scope, displayText(card.id));
+    } catch { throw new UiRefusal('unavailable', 'Stored display payload is unavailable; remove the affected card or repair UI data'); }
   }
   compact(): void {
     this.db.exec(`DELETE FROM ui_display_keys WHERE state IN ('removed','abandoned'); DELETE FROM ui_display_events; DELETE FROM ui_display_removals;`);

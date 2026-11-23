@@ -30,6 +30,7 @@ child.stdout.on('data', chunk => {
 child.stderr.on('data', chunk => { stderrBytes += chunk.length; if (stderrBytes > 16384) stop('pup-output-limit'); });
 child.stdout.on('error', () => stop('pup-failed')); child.stderr.on('error', () => stop('pup-failed'));
 child.once('error', () => { failure ??= 'pup-unavailable'; });
+child.once('exit', () => { clearTimeout(deadline); signal('SIGKILL'); });
 child.once('close', (code, killedBy) => {
   signal('SIGKILL');
   clearTimeout(deadline); clearTimeout(escalation); process.stdin.destroy();

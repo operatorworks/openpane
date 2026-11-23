@@ -23,6 +23,73 @@ async function fixture(t) {
   return page;
 }
 
+for (const boundary of ['reserve', 'quiesce']) test(`a superseded native placement preserves the source editor after ${boundary}`, async t => {
+  const page = await fixture(t), result = await page.evaluate(async boundary => {
+    const S = globalThis.BrowserViewStorage, scope = { hostId: 'host', conversationId: 'guarded' };
+    const source = await S.claimEditor({ scope, viewId: 'guarded-source', label: 'main', transitionId: null, creation: { agentId: 'agent' } }, () => {});
+    const drafts = source.drafts(() => {}); await drafts.load(scope);
+    await drafts.save({ version: 3, scope, draft: 'Keep the guarded draft', draftRevision: 1, outbox: [], frontendSends: [], image: null });
+    let release, entered, current = true, launched = 0, released = false;
+    const held = new Promise(resolve => { release = resolve; }), began = new Promise(resolve => { entered = resolve; });
+    const reservation = { scope, viewId: source.viewId, label: 'child', transitionId: 'guarded-move', creationAgentId: null, phase: 'requested', bindingRevision: null, writerGeneration: null };
+    const coordinator = new globalThis.WindowCoordinator({ context: { role: 'main', liveRelay: true }, async request(command) {
+      if (command.kind === 'lookup') return { kind: 'absent' };
+      if (command.kind === 'reserve') { if (boundary === 'reserve') { entered(); await held; } return reservation; }
+      if (command.kind === 'phase') return {};
+      if (command.kind === 'launch') { launched++; return { kind: 'pending', scope, reason: 'Opening' }; }
+      throw new Error(command.kind);
+    } });
+    coordinator.setPresentation({ chats: 'separate', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } });
+    const pending = coordinator.withPlacementGuard(scope, () => current, () => coordinator.acquire({ scope, agentId: 'agent', agentLabel: 'Agent', creation: false, carryFrom: null, initialDraft: null }, {
+      storage: source, holds: id => id === source.viewId, async quiesce() { if (boundary === 'quiesce') { entered(); await held; } }, async release() { released = true; await source.close(); },
+    }));
+    await began; current = false; release(); const placed = await pending;
+    const binding = (await S.locateEditor(scope)).binding, saved = await drafts.load(scope); await source.close();
+    return { kind: placed.kind, binding: binding.kind, viewId: binding.viewId, text: saved.draft, launched, released };
+  }, boundary);
+  assert.deepEqual(result, { kind: 'refused', binding: 'editing', viewId: 'guarded-source', text: 'Keep the guarded draft', launched: 0, released: false });
+});
+
+test('a main carry resumes its saved unbound snapshot without recapturing later source edits', async t => {
+  const page = await fixture(t), result = await page.evaluate(async () => {
+    const S = globalThis.BrowserViewStorage, c = globalThis.carries, sourceScope = { hostId: 'host', conversationId: 'carry-source' }, scope = { ...sourceScope, conversationId: 'carry-target' };
+    const source = await S.claimEditor({ scope: sourceScope, viewId: 'carry-source-view', label: 'main', transitionId: null, creation: { agentId: 'agent' } }, () => {});
+    await c.offerDraftCarry({ source: sourceScope, sourceViewId: source.viewId, requestId: '1:main-carry-move', writerGeneration: source.editorBinding().writerGeneration, emptyOnly: true, expected: { text: 'Original offered text', revision: 1 } });
+    const reservation = { scope, viewId: 'carry-target-view', label: 'child', transitionId: 'carry-move', creationAgentId: null, phase: 'requested', bindingRevision: null, writerGeneration: null };
+    let captures = 0;
+    const coordinator = new globalThis.WindowCoordinator({ context: { role: 'main', liveRelay: true }, async request(command) {
+      if (command.kind === 'lookup') return { kind: 'opening', reservation };
+      if (command.kind === 'intent-context') return { epoch: 1, pendingCarryRequests: [] };
+      if (command.kind === 'launch') return { kind: 'pending', scope, reason: 'Opening' };
+      throw new Error(command.kind);
+    } });
+    coordinator.captureCarry(async () => { captures++; throw new Error('Later source text must not replace a saved offer'); });
+    const placed = await coordinator.acquire({ scope, creation: false, carryFrom: sourceScope, initialDraft: null, agentId: 'agent', agentLabel: 'Agent' }, { storage: source, holds: () => false, async quiesce() {}, async release() {} });
+    const [carry] = await c.targetCarries(scope); await source.close();
+    return { kind: placed.kind, captures, text: carry?.expected.text, requestId: carry?.requestId };
+  });
+  assert.deepEqual(result, { kind: 'pending', captures: 0, text: 'Original offered text', requestId: '1:main-carry-move' });
+});
+
+test('saved transfer recovery can return to its first page after reaching the last page', async t => {
+  const page = await fixture(t), result = await page.evaluate(async () => {
+    const S = globalThis.BrowserViewStorage, c = globalThis.carries;
+    for (let n = 0; n < 9; n++) {
+      const scope = { hostId: 'host', conversationId: `paged-${n}` }, source = await S.claimEditor({ scope, viewId: `paged-view-${n}`, label: 'main', transitionId: null, creation: { agentId: 'agent' } }, () => {});
+      await c.offerDraftCarry({ source: scope, sourceViewId: source.viewId, requestId: `1:page-${n}`, writerGeneration: source.editorBinding().writerGeneration, expected: { text: `Saved ${n}`, revision: 1 } });
+      await c.cancelDraftCarry((await c.sourceCarries(scope))[0]); await source.close();
+    }
+    const runtime = new globalThis.WindowRuntime({ version: 1, role: 'main', label: 'main', brokerInstance: 'broker', documentIncarnation: 'main', viewId: 'catalog', liveRelay: true, reservation: null });
+    runtime.controller.getSnapshot = () => ({ host: { kind: 'ready', metadata: { hostId: 'host' } }, lastPlacement: null });
+    runtime.port.request = async command => { if (command.kind === 'reservations') return []; throw new Error(command.kind); };
+    await runtime.refreshRecovery(); const first = runtime.getSnapshot().recovery.carries.map(carry => carry.requestId);
+    await runtime.moreSavedTransfers(); const last = runtime.getSnapshot().recovery;
+    await runtime.firstSavedTransfers(); const restored = runtime.getSnapshot().recovery; runtime.close();
+    return { first, restored: restored.carries.map(carry => carry.requestId), lastCount: last.carries.length, lastAfter: last.carriesAfter, firstPage: restored.carriesFirstPage };
+  });
+  assert.equal(result.first.length, 8); assert.equal(result.lastCount, 1); assert.equal(result.lastAfter, null); assert.equal(result.firstPage, true); assert.deepEqual(result.restored, result.first);
+});
+
 test('scoped legacy moves preserve independent drafts, images, outboxes and unrelated active routes', async t => {
   const page = await fixture(t);
   const result = await page.evaluate(async () => {
@@ -683,7 +750,7 @@ test('native placement policy waits until the appearance generation has painted'
   const page = await fixture(t), result = await page.evaluate(async () => {
     const runtime = new globalThis.WindowRuntime({ version: 1, role: 'main', label: 'main', brokerInstance: 'broker', documentIncarnation: 'main', viewId: 'catalog', liveRelay: true, reservation: null });
     let confirmedGeneration = null, localBuiltin = false, builtinPainted = false;
-    const state = { selection: { deliveryGeneration: 2, revision: 4 }, bundle: { digest: 'a'.repeat(64), manifest: { presentation: { navigation: 'rail', chats: 'separate', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } } } } };
+    const state = { selection: { deliveryGeneration: 2, revision: 4 }, transitions: [], bundle: { digest: 'a'.repeat(64), manifest: { presentation: { navigation: 'rail', chats: 'separate', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } } } } };
     runtime.ui.getSnapshot = () => ({ state, localBuiltin, deliveryContext: 'document', validatedVisual: builtinPainted ? { kind: 'local-builtin' } : confirmedGeneration === null ? { kind: 'none' } : { kind: 'delivery', context: 'document', generation: confirmedGeneration, revision: 4, digest: 'a'.repeat(64) }, confirmedGeneration });
     runtime.recoveryWake = async () => {}; runtime.drive = async () => {};
     runtime.controller.getSnapshot = () => ({ active: null });
@@ -735,7 +802,7 @@ test('one unreadable saved view cannot block another unbound chat', async t => {
   const page = await fixture(t), result = await page.evaluate(async () => {
     const request = indexedDB.open('openpane-browser-views', 1); request.onupgradeneeded = () => request.result.createObjectStore('records');
     const db = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
-    const original = { version: 999, route: { hostId: 'host', conversationId: 'broken' }, pendingCreation: null };
+    const original = { version: 999, route: { hostId: 'host', conversationId: 'broken' }, pendingCreation: [] };
     await new Promise((resolve, reject) => { const tx = db.transaction('records', 'readwrite'); tx.objectStore('records').put(original, ['view', 'broken-view', 'host']); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error); }); db.close();
     const healthy = await globalThis.BrowserViewStorage.locateEditor({ hostId: 'host', conversationId: 'healthy' });
     const broken = await globalThis.BrowserViewStorage.locateEditor(original.route).then(() => 'opened', error => error.message);
@@ -847,4 +914,63 @@ test('an older automatic handoff cannot reserve or fail a newer unpainted delive
     return { reserved, failed, transition: state.transitions[0].slot.transitionId, notice: runtime.getSnapshot().placementNotice };
   });
   assert.deepEqual(result, { reserved: [], failed: [], transition: 't3', notice: null });
+});
+
+test('saved draft inspection carries its matching pending creation identity', async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const Storage = globalThis.BrowserViewStorage, scope = { hostId: 'host', conversationId: 'unconfirmed' }, pendingCreation = { scope, agentId: 'original-agent' };
+    const owner = await Storage.reopen('closed-unconfirmed', () => {});
+    await owner.saveView('host', { version: 2, route: null, pendingCreation });
+    const drafts = owner.drafts(() => {}); await drafts.load(scope); await drafts.save({ version: 3, scope, draft: 'Saved before confirmation', draftRevision: 1, outbox: [], frontendSends: [], image: null });
+    await owner.close(); return { recovery: await Storage.readLegacyDraft('closed-unconfirmed', 'host'), pendingCreation };
+  });
+  assert.deepEqual(result.recovery.pendingCreation, result.pendingCreation); assert.equal(result.recovery.text, 'Saved before confirmation');
+});
+
+
+test('a distinct-view handoff removes only its matching source ownership marker', async t => {
+  const page = await fixture(t), result = await page.evaluate(async () => {
+    const S = globalThis.BrowserViewStorage, scope = { hostId: 'host', conversationId: 'reverse-index' };
+    const source = await S.claimEditor({ scope, viewId: 'reverse-source', label: 'main', transitionId: null, creation: { agentId: 'agent' } }, () => {});
+    await source.reserveHandoff({ scope, sourceViewId: source.viewId, targetViewId: 'reverse-target', expectedBinding: source.editorBinding(), transitionId: 'reverse-move', targetLabel: 'child' });
+    await source.close();
+    const old = await S.bindingForView('reverse-source'), target = await S.bindingForView('reverse-target');
+    return { old, targetView: target.viewId, targetScope: target.scope };
+  });
+  assert.deepEqual(result, { old: null, targetView: 'reverse-target', targetScope: { hostId: 'host', conversationId: 'reverse-index' } });
+});
+
+test('an unreadable third legacy view is checked after two matching drafts', async t => {
+  const page = await fixture(t), result = await page.evaluate(async () => {
+    const S = globalThis.BrowserViewStorage, scope = { hostId: 'host', conversationId: 'legacy-scan' };
+    const storage = await S.reopen('scan-bootstrap', () => {}); await storage.close();
+    const db = await new Promise((resolve, reject) => { const request = indexedDB.open('openpane-browser-views', 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    await new Promise((resolve, reject) => { const tx = db.transaction('records', 'readwrite'), store = tx.objectStore('records');
+      for (const view of ['scan-a', 'scan-b']) store.put({ scope, draft: view, outbox: [] }, ['draft', view, 'host', scope.conversationId]);
+      store.put({ version: 9, route: scope, pendingCreation: null }, ['view', 'scan-z', 'host']); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error); }); db.close();
+    try { await S.locateEditor(scope, 'scan-a'); return null; } catch (error) { return String(error); }
+  });
+  assert.match(result, /saved editor.*unreadable/i);
+});
+
+test('closing a source waits for its live handoff transaction before releasing ownership', async t => {
+  const page = await fixture(t), result = await page.evaluate(async () => {
+    const S = globalThis.BrowserViewStorage, scope = { hostId: 'host', conversationId: 'close-transfer' };
+    const source = await S.claimEditor({ scope, viewId: 'close-transfer-source', label: 'main', transitionId: null, creation: { agentId: 'agent' } }, () => {});
+    let entered, released = false, held = true, closed = false;
+    const began = new Promise(resolve => { entered = resolve; }), original = IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction = function (...args) {
+      const tx = original.apply(this, args);
+      if (args[1] === 'readwrite') { const store = tx.objectStore('records'); const keepAlive = () => { if (held) { const request = store.get('test-handoff-barrier'); request.onsuccess = keepAlive; } }; keepAlive(); entered(); }
+      return tx;
+    };
+    try {
+      const transfer = source.reserveHandoff({ scope, sourceViewId: source.viewId, targetViewId: source.viewId, expectedBinding: source.editorBinding(), transitionId: 'close-transfer', targetLabel: 'child' });
+      await began; const closing = source.close().then(() => { closed = true; }); await new Promise(resolve => setTimeout(resolve, 25));
+      const closedBeforeCommit = closed; held = false; await transfer; await closing; released = closed;
+      return { closedBeforeCommit, released };
+    } finally { held = false; IDBDatabase.prototype.transaction = original; await source.close(); }
+  });
+  assert.deepEqual(result, { closedBeforeCommit: false, released: true });
 });

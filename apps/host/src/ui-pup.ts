@@ -35,7 +35,7 @@ export function normalizePup(input: unknown, query: string, title: string, range
       const bucketMs = count(series.interval) * 1000;
       if (start < fromMs - bucketMs || end > toMs + bucketMs || start > toMs || end < fromMs) throw new Error('Pup series is outside the reserved range');
       for (const point of series.pointlist) {
-        if (!Array.isArray(point) || point.length !== 2 || count(point[0]) < start || count(point[0]) > end) throw new Error('Pup v1 point timestamp disagrees with its epoch-millisecond series bounds');
+        if (!Array.isArray(point) || point.length !== 2 || count(point[0]) < start || count(point[0]) > end || (count(point[0]) - start) % bucketMs !== 0) throw new Error('Pup v1 point timestamp disagrees with its epoch-millisecond series bounds');
       }
       if (!Array.isArray(series.unit) || series.unit.length !== 2) throw new Error('Unsupported pup v1 unit metadata');
       const unitLabel = (value: unknown): string | null => {
@@ -47,7 +47,7 @@ export function normalizePup(input: unknown, query: string, title: string, range
       const numerator = unitLabel(series.unit[0]), denominator = unitLabel(series.unit[1]);
       const unit = denominator === null ? numerator : numerator === null ? `per ${denominator}` : `${numerator}/${denominator}`;
       const name = boundedText(series.display_name, 200), scope = boundedText(series.scope, 200);
-      return { label: scope === '*' ? name : boundedText(`${name} {${scope}}`, 200), unit, points: series.pointlist };
+      return { label: boundedText(scope === '*' ? name : `${name} {${scope}}`, 200), unit, points: series.pointlist };
     }),
   });
 }

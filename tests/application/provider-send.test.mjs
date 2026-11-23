@@ -838,3 +838,37 @@ test('offered commands require a fresh actor after host restart and keep old evi
   assert.equal((await host.frontendBinding({ scope: hostScope, id: command.clientCommandId, action: 'recover' }, actor, scope => frontendToolsFor(host).producer(scope))).kind, 'bound');
   assert.equal(a.calls.reconciles.length, 1);
 });
+
+test('an authorized follow-up retries a shared status read refused before provider admission', async t => {
+  const gate = Promise.withResolvers(), entered = Promise.withResolvers();
+  t.after(() => gate.resolve());
+  const a = aguiExtension({ request: text => ({ ...actualInput(text), runId: `run-${text}` }), submit: (operation, { effect }) => effect(operation, 'accepted', operation.request.runId) });
+  const registry = createProviderRegistry([{ ...a.value, authority: { credentials: {},
+    issue: () => ({ credential: null, expectedAuthority: 'remote-provider', assertAuthorized() {} }), async close() {} } }]);
+  await registry.activate(); t.after(() => registry.close());
+  const [discovered] = await registry.discover();
+  const target = { kind: 'provider', contributionId: discovered.contributionId, instance: discovered.instance, agent: discovered.agents[0], presentationVersion: 1, expectedAuthority: discovered.expectedAuthority };
+  const f = hostFixture(t); let originalAuthorized = true;
+  const actor = { id: 'original-owner', platform: 'desktop', authorized: () => originalAuthorized };
+  const other = { id: 'different-owner', platform: 'desktop', authorized: () => true };
+  const host = f.open({ providers: registry });
+  await host.createProviderConversation(hostScope, target, registry);
+  const command = offered(hostScope);
+  await host.conversation(hostScope, actor).submit(command);
+  const execute = registry.executeCommand;
+  let held = false;
+  registry.executeCommand = async (capture, fresh, beforeEffect) => {
+    if (!fresh && !held) { held = true; entered.resolve(); await gate.promise; }
+    return execute(capture, fresh, beforeEffect);
+  };
+  const original = host.reconcile(hostScope, command.clientCommandId, actor).then(value => ({value}), error => ({error}));
+  await entered.promise;
+  const followup = host.conversation(hostScope, other).submit(send(hostScope, 'follow-up', 'Next'));
+  // submit reaches its shared-read join synchronously before returning the promise.
+  originalAuthorized = false; gate.resolve();
+  assert.ok((await original).error);
+  const result = await followup;
+  assert.equal(result.kind, 'receipt'); assert.equal(result.receipt.state.kind, 'accepted');
+  assert.equal(a.calls.reconciles.length, 1, 'only the independently authorized retry reaches provider admission');
+  assert.equal(a.calls.submits.length, 2);
+});

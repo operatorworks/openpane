@@ -69,7 +69,7 @@ test('independent patches, CAS edits, immutable imports and atomic selected remo
   assert.deepEqual(result.final.palettes, []);
 });
 
-test('palette capacity permits identical import, corrupt rows require explicit repair, capability failure is honest', async t => {
+test('palette capacity permits identical import, corrupt rows require explicit repair, portable verification works without WebCrypto', async t => {
   const page = await fixture(t);
   const result = await page.evaluate(async () => {
     const owner = new PersonalizationStorage();
@@ -89,7 +89,7 @@ test('palette capacity permits identical import, corrupt rows require explicit r
     const subtle = crypto.subtle;
     Object.defineProperty(crypto, 'subtle', { value: undefined, configurable: true });
     const incapable = await owner.readSnapshot();
-    const refused = await owner.importPalette(JSON.stringify(original));
+    const refused = await owner.importPalette(JSON.stringify({ ...original, label: 'Palette 0' }));
     Object.defineProperty(crypto, 'subtle', { value: subtle, configurable: true });
     owner.close();
     return { duplicate: duplicate.kind, excess, corrupted: corrupted.palettes.find(row => row.digest === digest), selection, reimport, repaired: repaired.kind, incapable: incapable.palettes[0], refused };
@@ -100,8 +100,8 @@ test('palette capacity permits identical import, corrupt rows require explicit r
   assert.equal(result.selection.kind, 'refused');
   assert.match(result.reimport.diagnostic, /Remove/);
   assert.equal(result.repaired, 'committed');
-  assert.match(result.incapable.diagnostic, /verification is unavailable/);
-  assert.match(result.refused.diagnostic, /verification is unavailable/);
+  assert.equal(result.incapable.kind, 'ready');
+  assert.equal(result.refused.kind, 'committed');
 });
 
 test('abort leaves committed data intact and failed session recovery survives focus and invalidation', async t => {
@@ -628,11 +628,15 @@ test('committed UI disable invalidates the peer before the writer verifies unrel
   await peer.addScriptTag({ content: (await bundle).outputFiles[0].text });
   await page.evaluate(async () => { globalThis.session = new PersonalizationSession(); session.start(); await until(() => session.getSnapshot().readiness === 'ready'); await session.importPalette(JSON.stringify(starterPalette())); });
   await peer.evaluate(async () => { globalThis.session = new PersonalizationSession(); session.start(); await new Promise(resolve => { if (session.getSnapshot().readiness === 'ready') resolve(); else { const done = session.subscribe(() => { if (session.getSnapshot().readiness === 'ready') { done(); resolve(); } }); } }); });
+  await peer.evaluate(() => {
+    const digest = crypto.subtle.digest.bind(crypto.subtle);
+    crypto.subtle.digest = async (...args) => { globalThis.peerDigestHeld = true; await new Promise(resolve => { globalThis.releasePeerDigest = resolve; }); return digest(...args); };
+  });
   await page.evaluate(async () => { globalThis.gate = holdDigests(); globalThis.disabling = session.patchPreferences({ kind: 'ui-enabled', enabled: false }); await until(() => gate.entered === 1); });
   await peer.waitForFunction(() => !globalThis.session.getSnapshot().document.ui.enabled, undefined, { timeout: 5000 });
   assert.equal(await peer.evaluate(() => session.getSnapshot().document.ui.enabled), false);
   await page.evaluate(async () => { gate.release(); await disabling; gate.restore(); session.close(); });
-  await peer.evaluate(() => session.close());
+  await peer.evaluate(() => { if (globalThis.releasePeerDigest) releasePeerDigest(); session.close(); });
 });
 
 for (const next of ['stale replacement', 'aborted replacement', 'unrelated removal', 'candidate removal', 'committed replacement', 'new builtin choice']) test(`pending palette selection respects committed intent after ${next}`, async t => {
@@ -661,4 +665,96 @@ for (const next of ['stale replacement', 'aborted replacement', 'unrelated remov
   assert.equal(result.saved.preferences.document.palette.kind, retained ? 'imported' : 'builtin');
   if (next === 'stale replacement') assert.equal(result.intervening.kind, 'refused');
   if (next === 'aborted replacement') assert.equal(result.intervening.kind, 'unavailable');
+});
+
+for (const choice of ['builtin', 'appearance reset', 'replacement']) test(`a shared owner ${choice} supersedes an earlier verifying selection`, async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async choice => {
+    const one = new PersonalizationStorage(), two = new PersonalizationStorage();
+    const imported = await one.importPalette(JSON.stringify(starterPalette()));
+    const digest = imported.snapshot.palettes[0].digest;
+    const gate = holdDigests(); const selecting = one.selectPalette(digest); await until(() => gate.entered === 1);
+    if (choice === 'builtin') await two.selectPalette(null);
+    else if (choice === 'appearance reset') await two.resetAppearance();
+    else { const current = (await two.readSnapshot()).preferences; await two.replacePreferences({ expectedEpoch: current.epoch, expectedRevision: current.revision, document: defaultDesktopPreferences }); }
+    gate.release(); const selected = await selecting; gate.restore();
+    const saved = await two.readSnapshot(); one.close(); two.close(); return { selected, saved };
+  }, choice);
+  assert.equal(result.selected.kind, 'refused');
+  assert.equal(result.saved.preferences.document.palette.kind, 'builtin');
+});
+
+test('a palette selection requested after replacement begins remains the newer choice', async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const owner = new PersonalizationStorage(); const imported = await owner.importPalette(JSON.stringify(starterPalette()));
+    const current = (await owner.readSnapshot()).preferences;
+    const replacing = owner.replacePreferences({ expectedEpoch: current.epoch, expectedRevision: current.revision, document: defaultDesktopPreferences });
+    const selecting = owner.selectPalette(imported.snapshot.palettes[0].digest);
+    const outcomes = await Promise.all([replacing, selecting]); const saved = await owner.readSnapshot(); owner.close(); return { outcomes, saved };
+  });
+  assert.deepEqual(result.outcomes.map(value => value.kind), ['committed', 'committed']);
+  assert.equal(result.saved.preferences.document.palette.kind, 'imported');
+});
+
+test('unavailable preferences preserve palette resources against import and removal', async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const owner = new PersonalizationStorage(); const imported = await owner.importPalette(JSON.stringify(starterPalette()));
+    const resource = imported.snapshot.palettes[0];
+    await writeRaw({ storageVersion: 2, revision: 7, document: { ...defaultDesktopPreferences, palette: { kind: 'imported', digest: resource.digest } } });
+    const removed = await owner.removePalette(resource.key);
+    const added = await owner.importPalette(JSON.stringify({ ...starterPalette(), label: 'Another' }));
+    const saved = await owner.readSnapshot(); owner.close(); return { removed, added, saved };
+  });
+  assert.equal(result.removed.kind, 'refused'); assert.equal(result.added.kind, 'refused');
+  assert.equal(result.saved.palettes.length, 1);
+});
+
+test('Enable waits for a superseding authoritative focus read to confirm its committed intent', async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const session = new PersonalizationSession(); session.start(); await until(() => session.getSnapshot().readiness === 'ready');
+    await session.importPalette(JSON.stringify(starterPalette()));
+    const put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function() { throw new DOMException('quota', 'QuotaExceededError'); };
+    await session.restoreDefaultView(); IDBObjectStore.prototype.put = put;
+    const gate = holdDigests(2), enabling = session.patchPreferences({ kind: 'ui-enabled', enabled: true });
+    await until(() => gate.entered === 1); dispatchEvent(new Event('focus')); await until(() => gate.entered === 2);
+    gate.release(0); const written = await enabling; gate.release(1);
+    await until(() => session.getSnapshot().saved.preferences.revision >= written.revision);
+    const snapshot = session.getSnapshot(); gate.restore(); session.close(); return snapshot;
+  });
+  assert.equal(result.document.ui.enabled, true); assert.equal(result.recovery.view, 'none');
+});
+
+test('Retry started during startup can authorize its result after the startup deadline', { timeout: 15_000 }, async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const seed = new PersonalizationStorage(); await seed.importPalette(JSON.stringify(starterPalette())); seed.close();
+    const gate = holdDigests(2); const session = new PersonalizationSession(); session.start(); await until(() => gate.entered === 1);
+    const retrying = session.retry(); await until(() => gate.entered === 2); await until(() => session.getSnapshot().readiness === 'blocked');
+    gate.release(1); await retrying; const snapshot = session.getSnapshot(); gate.release(0); gate.restore(); session.close(); return snapshot;
+  });
+  assert.equal(result.readiness, 'ready'); assert.equal(result.document.ui.enabled, true);
+});
+
+test('Retry reopens a closed IndexedDB connection without reloading the page', async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const owner = new PersonalizationStorage(); await owner.patchPreferences({ kind: 'appearance', appearance: 'dark' });
+    (await owner.database).close(); const failed = await owner.readSnapshot(); const recovered = await owner.readSnapshot(); owner.close(); return { failed, recovered };
+  });
+  assert.equal(result.failed.preferences.kind, 'unavailable');
+  assert.equal(result.recovered.preferences.kind, 'valid'); assert.equal(result.recovered.preferences.document.appearance, 'dark');
+});
+
+test('a committed disable reaches its writer before unrelated palette digest verification', async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const session = new PersonalizationSession(); session.start(); await until(() => session.getSnapshot().readiness === 'ready');
+    await session.importPalette(JSON.stringify(starterPalette()));
+    const gate = holdDigests(), disabling = session.patchPreferences({ kind: 'ui-enabled', enabled: false }); await until(() => gate.entered === 1);
+    const snapshot = session.getSnapshot(); gate.release(); await disabling; gate.restore(); session.close(); return snapshot;
+  });
+  assert.equal(result.document.ui.enabled, false);
 });

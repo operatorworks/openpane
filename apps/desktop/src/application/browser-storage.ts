@@ -121,7 +121,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
             if (bytes instanceof Uint8Array && bytes.byteLength <= 4 * 1024 * 1024 && typeof metadata.name === 'string') image = { name: metadata.name.slice(0, 200), bytes };
           }
         } catch {}
-        return { kind: !binding || binding.viewId === viewId ? 'bound' : 'independent', viewId, scope, text: draft.draft, scopes, queuedTexts, queuedCount: entries.length, ...(image ? { image } : {}) };
+        return { ...(saved.pendingCreation && sameScope(saved.pendingCreation.scope, scope) ? { pendingCreation: saved.pendingCreation } : {}), kind: !binding || binding.viewId === viewId ? 'bound' : 'independent', viewId, scope, text: draft.draft, scopes, queuedTexts, queuedCount: entries.length, ...(image ? { image } : {}) };
       }
       return null;
     } finally { db.close(); release?.(); }
@@ -192,7 +192,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
                   unreadable.add(key[1]);
                   const raw: unknown = cursor.value;
                   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-                    const value = record(raw), pending = value.pendingCreation && typeof value.pendingCreation === 'object' ? record(value.pendingCreation) : null;
+                    const value = record(raw), pending = value.pendingCreation && typeof value.pendingCreation === 'object' && !Array.isArray(value.pendingCreation) ? record(value.pendingCreation) : null;
                     for (const candidate of [value.route, pending?.scope, value.pendingCreation]) {
                       let matches = false; try { matches = sameScope(parseScope(candidate), scope); } catch {}
                       if (matches) throw new Error('The saved editor for this conversation is unreadable. Its original records are preserved.');
@@ -203,7 +203,6 @@ export class BrowserViewStorage implements OwnedViewStorage {
                 if (saved.route && sameScope(saved.route, scope) || saved.pendingCreation && sameScope(saved.pendingCreation.scope, scope)) found.add(key[1]);
               }
             }
-            if (found.size > 1) return;
             cursor.continue();
           } catch (error) { failure = error; transaction.abort(); }
         };
@@ -347,7 +346,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
         releaseTarget = await claim(plan.targetViewId);
         if (!releaseTarget) throw new Error('The destination saved view is already open.');
       }
-      return await transferEditor(this.db, plan);
+      return await transferEditor(this.db, plan, this.begin('readwrite'));
     } catch (error) { this.frozen.delete(scopeKey); throw error; }
     finally { releaseTarget?.(); }
   }

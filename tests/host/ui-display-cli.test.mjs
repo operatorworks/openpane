@@ -93,7 +93,7 @@ test('foreign or absent scopes and expired unknown IDs refuse before starting an
   for (const scope of [{ ...f.scope, hostId: 'foreign' }, { ...f.scope, conversationId: 'absent' }]) {
     const result = await f.cli(f.query(await f.id(), scope)).done; assert.equal(result.code, 1); assert.match(result.stderr, /another host|unavailable/);
   }
-  const expired = await f.cli(f.query(`0:${randomUUID()}`)).done; assert.equal(expired.code, 1); assert.match(expired.stderr, /current ui context/);
+  const expired = await f.cli(f.query(`0:${randomUUID()}`)).done; assert.equal(expired.code, 1); assert.match(expired.stderr, /current ui context/); assert.equal(JSON.parse(expired.stderr).code, 'expired');
   assert.deepEqual(await f.calls(), []);
   const response = await fetch(`${f.host.origin}/api/ui/v1`, { method: 'POST', headers: { Origin: f.host.origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'display-query-reserve', scope: f.scope, publicationId: await f.id(), input: {} }) });
   assert.equal(response.status, 400); assert.deepEqual((await f.page()).body.value.publications, []);

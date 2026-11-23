@@ -230,6 +230,7 @@ export function createFrontendSends(deps: {
     },
     pause(): void { clearTimeout(timer); authority.lifetime.abort(); },
     async release(key: string): Promise<void> { const entry = entries.get(key); if (entry) await unavailable(entry); },
+    quiesceView(viewId: string): void { for (const writer of writers.get(viewId) ?? []) writer.retired = true; },
     async releaseView(viewId: string): Promise<void> {
       for (const writer of writers.get(viewId) ?? []) writer.retired = true;
       for (const [key, item] of provisional) if (item.viewId === viewId) { item.retained.release(); item.borrow.release(); provisional.delete(key); }

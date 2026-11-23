@@ -21,7 +21,7 @@ type Lifetime = {
 export class DesktopExtensionLifecycle {
   private desired = new Map<string, DesktopCustomization>();
   private readonly owners = new Map<string, Lifetime>();
-  private readonly cleanupFailures = new Set<string>();
+  private readonly cleanupFailures = new Map<string, Extract<NamespaceActivation, { readonly kind: 'failed' }>>();
   private readonly listeners = new Set<() => void>();
   private snapshot: readonly NamespaceActivation[] = [];
   private attachment: { sink: GenerationSink; token: object } | undefined;
@@ -89,8 +89,8 @@ export class DesktopExtensionLifecycle {
 
   private recordCleanupFailure(owner: Lifetime, error: unknown): void {
     const namespace = owner.entry.manifest.namespace;
-    this.cleanupFailures.add(namespace);
     owner.state = { kind: 'failed', namespace, message: `Executable UI cleanup failed. ${customizationMessage(error)} Restart the app before enabling this namespace.` };
+    this.cleanupFailures.set(namespace, owner.state);
   }
 
   private retire(owner: Lifetime): void {
@@ -122,11 +122,9 @@ export class DesktopExtensionLifecycle {
   }
 
   private publish(): void {
-    this.snapshot = [...new Set([...this.desired.keys(), ...this.cleanupFailures])].sort().map(namespace => {
-      if (this.cleanupFailures.has(namespace)) {
-        const state = this.owners.get(namespace)?.state;
-        return state?.kind === 'failed' ? state : { kind: 'failed', namespace, message: 'Executable UI cleanup failed. Restart the app before enabling this namespace.' };
-      }
+    this.snapshot = [...new Set([...this.desired.keys(), ...this.cleanupFailures.keys()])].sort().map(namespace => {
+      const failure = this.cleanupFailures.get(namespace);
+      if (failure) return failure;
       const owner = this.owners.get(namespace);
       return owner?.wanted ? owner.state : { kind: 'loading', namespace };
     });
@@ -140,9 +138,9 @@ export class DesktopExtensionLifecycle {
     this.desired.clear();
     for (const owner of this.owners.values()) { owner.wanted = false; this.retire(owner); }
     this.publish();
-    await Promise.all([...this.owners.values()].flatMap(owner => owner.retirement?.kind === 'pending' ? [owner.retirement.completion] : []));
     if (this.attachment) this.attachment.sink.clear(this.attachment.token);
     this.attachment = undefined;
+    await Promise.all([...this.owners.values()].flatMap(owner => owner.retirement?.kind === 'pending' ? [owner.retirement.completion] : []));
     this.listeners.clear();
   }
 }

@@ -17,8 +17,9 @@ const html = '<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta n
 
 function previewRoutes(host, origin, plan) {
   // A document's full import graph is compiled together, including modules it has not requested yet.
-  // Retaining hashed outputs lets older documents finish lazy imports after another tab reloads.
+  // Retain immutable snapshots for open documents; refuse new snapshots before the cache exceeds its budget.
   const assets = new Map();
+  let assetBytes = 0;
   async function snapshot() {
     const config = desktopConfig('browser', plan, { development: true });
     const result = await build({ ...config, configFile: false, root: join(root, 'apps/desktop'), mode: 'browser', logLevel: 'error',
@@ -27,11 +28,15 @@ function previewRoutes(host, origin, plan) {
           output: { ...config.build.rollupOptions.output, entryFileNames: 'assets/preview-[hash].js' } } } });
     const outputs = (Array.isArray(result) ? result : [result]).flatMap(item => item.output);
     const entry = outputs.find(item => item.type === 'chunk' && item.isEntry);
-    for (const output of outputs) assets.set('/' + output.fileName, output.type === 'chunk' ? output.code : output.source);
+    const additions = outputs.filter(output => !assets.has('/' + output.fileName));
+    const bytes = additions.reduce((total, output) => total + Buffer.byteLength(output.type === 'chunk' ? output.code : output.source), 0);
+    if (assetBytes + bytes > 128 * 1024 * 1024 || assets.size + additions.length > 4096) throw new Error('Preview snapshot capacity reached. Restart the preview command to release earlier snapshots.');
+    for (const output of additions) assets.set('/' + output.fileName, output.type === 'chunk' ? output.code : output.source);
+    assetBytes += bytes;
     const css = [...(entry.viteMetadata?.importedCss ?? [])].map(file => `<link rel="stylesheet" href="/${file}">`).join('');
     return html.replace('</head>', css + '</head>').replace('</body>', `<script type="module" src="/${entry.fileName}"></script></body>`);
   }
-  return { name: 'openpane-local-preview', closeBundle() { assets.clear(); }, configureServer(server) {
+  return { name: 'openpane-local-preview', closeBundle() { assets.clear(); assetBytes = 0; }, configureServer(server) {
     server.middlewares.use((req, res, next) => {
       const path = new URL(req.url ?? '/', origin).pathname;
       const refuse = (status, message) => { res.statusCode = status; res.end(message); };

@@ -31,6 +31,8 @@ test('CSS AST scopes every selector and recursively scopes allowed at-rules', ()
     '[data-openpane-part="button"] { background-image: url("https://example.com/a.png"); }',
     '@import "remote.css";', '@keyframes fade { to { color: #ffffff; } }', '@font-face { font-family: remote; src: url("font.woff"); }',
     '[data-openpane-part="header"] { & [data-openpane-part="button"] { color: #000000; } }',
+    '[data-openpane-part="main"] { @media (min-width: 1px) { [data-openpane-part="button"] { color: #000000; } } }',
+    '[data-openpane-part="main"] { @supports (color: #000000) { [data-openpane-part="button"] { color: #000000; } } }',
     '[data-openpane-part="button"]:has(body) { color: #000000; }']) assert.throws(() => bundle(css), css);
 });
 test('directory ingestion copies immutable bytes and refuses escaping symlinks', async t => {
@@ -100,6 +102,9 @@ test('directory ingestion rejects a named pipe without waiting for a writer', { 
 
 test('semantic CSS accepts only CSS hex lengths and valid local font lists',()=>{
   for(const color of ['#abc','#abcd','#abcdef','#abcdef12'])assert.doesNotThrow(()=>bundle(`[data-openpane-part="button"] { color: ${color}; }`));
+  assert.doesNotThrow(() => bundle('[data-openpane-part="button"] { color: inherit; }'));
+  assert.throws(() => bundle('[data-openpane-part="header"] { background-image: linear-gradient(to right, inherit, #ffffff); }'));
+  assert.throws(() => bundle('[data-openpane-part="button"] { box-shadow: 1px 1px 0 inherit; }'));
   for(const color of ['#ab','#abcde','#abcdef1','#abcdef123'])assert.throws(()=>bundle(`[data-openpane-part="button"] { color: ${color}; }`));
   assert.doesNotThrow(()=>bundle('[data-openpane-part="button"] { font-family: "Segoe UI", sans-serif; }'));
   assert.throws(()=>bundle('[data-openpane-part="button"] { font-family: Tahoma,,sans-serif; }'));
@@ -122,4 +127,13 @@ test('authored control states, gradients and bevels use bounded parsed values an
     'linear-gradient(12deg, #fff, #000)', 'linear-gradient(to right, #fff, #000), url("remote.png")', 'linear-gradient(to right, #fff, #000'])
     assert.throws(() => bundle(`[data-openpane-part="header"] { background-image: ${value}; }`), value);
   assert.throws(() => bundle('[data-openpane-part="button"] { box-shadow: ' + Array(5).fill('1px 1px 0 #ffffff').join(',') + '; }'));
+});
+
+
+test('interaction states cannot make authored foreground text transparent', () => {
+  for (const state of ['hover', 'active', 'focus', 'focus-visible', 'focus-within', 'checked', 'disabled', 'enabled']) {
+    for (const color of ['transparent', '#0000', '#00000001']) assert.throws(() => bundle(
+      `[data-openpane-part="button"][data-openpane-role="navigation"]:${state} { color: ${color}; }`), /interaction text/);
+    assert.doesNotThrow(() => bundle(`[data-openpane-part="button"][data-openpane-state="selected"]:${state} { color: var(--aui-color-text); }`));
+  }
 });

@@ -155,6 +155,33 @@ impl Reservation {
             transition_id,
         })
     }
+    pub fn recover_inline(&mut self, expected: &str) -> Result<InlineRecovery, &'static str> {
+        let recovery = self.inline_recovery(expected)?;
+        if self.transition_id != recovery.transition_id {
+            self.transition_id = recovery.transition_id.clone();
+            self.phase = Phase::Failed;
+        }
+        Ok(recovery)
+    }
+    pub fn confirm_binding(&mut self, revision: u64, writer: u64) -> Result<(), &'static str> {
+        if revision == 0
+            || writer == 0
+            || revision > 9_007_199_254_740_991
+            || writer > 9_007_199_254_740_991
+            || self
+                .binding_revision
+                .is_some_and(|current| revision < current)
+            || self
+                .writer_generation
+                .is_some_and(|current| writer < current)
+        {
+            return Err("stale-binding-generation");
+        }
+        self.binding_revision = Some(revision);
+        self.writer_generation = Some(writer);
+        self.phase = Phase::TargetReady;
+        Ok(())
+    }
     fn validate(&self) -> Result<(), &'static str> {
         self.scope.validate()?;
         identifier(&self.view_id, 200)?;
@@ -232,8 +259,13 @@ impl Profile {
         if self.windows.len() > MAX_WINDOWS || self.intents.len() > MAX_INTENTS {
             return Err("native-record-capacity");
         }
+        let mut labels = std::collections::BTreeSet::new();
+        let mut views = std::collections::BTreeSet::new();
         for (key, value) in &self.windows {
             value.validate()?;
+            if !labels.insert(&value.label) || !views.insert(&value.view_id) {
+                return Err("native-reservation-collision");
+            }
             if key != &value.scope.key() {
                 return Err("native-binding-key-mismatch");
             }
@@ -371,6 +403,29 @@ impl Profile {
         self.intent_epoch += 1;
         Ok(())
     }
+    pub fn retry_intent(
+        &mut self,
+        source: &Scope,
+        request_id: &str,
+    ) -> Result<Intent, &'static str> {
+        let key = Self::intent_key(source, request_id);
+        let current = self.intents.get(&key).ok_or("unknown-intent")?;
+        if current
+            .result
+            .as_ref()
+            .and_then(|result| result.get("kind"))
+            .and_then(serde_json::Value::as_str)
+            != Some("refused")
+        {
+            return Ok(current.clone());
+        }
+        if self.pending_intents(&source.host_id).count() >= MAX_PENDING_INTENTS {
+            return Err("native-intent-capacity");
+        }
+        let intent = self.intents.get_mut(&key).ok_or("unknown-intent")?;
+        intent.result = None;
+        Ok(intent.clone())
+    }
     pub fn pending_intents<'a>(
         &'a self,
         host_id: &'a str,
@@ -465,6 +520,9 @@ impl Profile {
                 Err("intent-target-conflict")
             };
         }
+        if previous.result.is_some() {
+            return Err("intent-already-completed");
+        }
         match &previous.action {
             Action::Open { scope, .. } if scope != &reservation.scope => {
                 return Err("intent-target-conflict")
@@ -515,6 +573,102 @@ mod tests {
             phase: Phase::Requested,
             binding_revision: None,
             writer_generation: None,
+        }
+    }
+    #[test]
+    fn completed_inline_recovery_replays_without_reopening_its_reservation() {
+        let mut entry = reservation();
+        let first = entry.recover_inline("transition").unwrap();
+        entry.confirm_binding(8, 8).unwrap();
+        let replay = entry.recover_inline("transition").unwrap();
+        assert_eq!(replay.transition_id, first.transition_id);
+        assert_eq!(entry.phase, Phase::TargetReady);
+        assert_eq!(entry.binding_revision, Some(8));
+    }
+    #[test]
+    fn child_binding_confirmation_never_regresses() {
+        let mut entry = reservation();
+        entry.confirm_binding(8, 8).unwrap();
+        entry.confirm_binding(8, 8).unwrap();
+        assert!(entry.confirm_binding(7, 8).is_err());
+        assert!(entry.confirm_binding(8, 7).is_err());
+        assert_eq!(entry.binding_revision, Some(8));
+        assert_eq!(entry.writer_generation, Some(8));
+    }
+    #[test]
+    fn lost_retry_reply_cannot_reopen_a_completed_success() {
+        let mut p = profile();
+        let source = scope("source");
+        p.intent(
+            source.clone(),
+            "1:retry".into(),
+            Action::Create {
+                agent_id: "agent".into(),
+                carry: false,
+            },
+        )
+        .unwrap();
+        p.complete_intent(
+            &source,
+            "1:retry",
+            serde_json::json!({"kind":"refused","reason":"Try explicitly"}),
+        )
+        .unwrap();
+        assert!(p.retry_intent(&source, "1:retry").unwrap().result.is_none());
+        let target = p
+            .assign_intent(&source, "1:retry", reservation())
+            .unwrap()
+            .target
+            .unwrap();
+        let success =
+            serde_json::json!({"kind":"detached","scope":target.scope,"label":target.label});
+        p.complete_intent(&source, "1:retry", success.clone())
+            .unwrap();
+        assert_eq!(
+            p.retry_intent(&source, "1:retry").unwrap().result,
+            Some(success)
+        );
+        assert_eq!(p.pending_intents("host").count(), 0);
+    }
+    #[test]
+    fn terminal_unassigned_intent_refuses_late_assignment_without_allocating() {
+        let mut p = profile();
+        let source = scope("source");
+        let target = reservation();
+        p.intent(
+            source.clone(),
+            "1:terminal".into(),
+            Action::Create {
+                agent_id: "agent".into(),
+                carry: false,
+            },
+        )
+        .unwrap();
+        p.complete_intent(
+            &source,
+            "1:terminal",
+            serde_json::json!({"kind":"refused","reason":"Cancelled before allocation"}),
+        )
+        .unwrap();
+        let before = serde_json::to_value(&p).unwrap();
+        assert!(p.assign_intent(&source, "1:terminal", target).is_err());
+        assert_eq!(serde_json::to_value(&p).unwrap(), before);
+    }
+    #[test]
+    fn loaded_profile_rejects_duplicate_window_labels_and_view_ids() {
+        for duplicate_label in [true, false] {
+            let mut p = profile();
+            let first = reservation();
+            let mut second = first.clone();
+            second.scope = scope("second");
+            if duplicate_label {
+                second.view_id = "other-view".into();
+            } else {
+                second.label = "other-label".into();
+            }
+            p.windows.insert(first.scope.key(), first);
+            p.windows.insert(second.scope.key(), second);
+            assert!(p.validate().is_err(), "duplicate label={duplicate_label}");
         }
     }
     #[test]

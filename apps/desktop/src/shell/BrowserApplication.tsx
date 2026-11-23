@@ -130,13 +130,12 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   }
   async function reopenFromPane(viewId: string): Promise<void> {
     const epoch = navigationEpoch.current;
-    await controller.reopenView(viewId);
-    if (controller.getSnapshot().active) revealOpened(epoch);
+    if (await controller.reopenView(viewId)) revealOpened(epoch);
   }
-  async function openFromPane(operation: () => Promise<ConversationOpenResult>): Promise<ConversationOpenResult> {
+  async function openFromPane<T extends ConversationOpenResult | undefined>(operation: () => Promise<T>): Promise<T> {
     const epoch = navigationEpoch.current;
     const result = await operation();
-    if (result.kind === 'inline') revealOpened(epoch);
+    if (result?.kind === 'inline') revealOpened(epoch);
     return result;
   }
   const [selectedExtension, setSelectedExtension] = useState<string | null>(null);
@@ -241,7 +240,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     return entry ? conversationLabel(entry) : scope.conversationId;
   })() : null;
   // The footer carries the conversation's disclosure wherever its composer is on screen.
-  const composerVisible = Boolean(activeConversation) && ((selectedView === 'chats' && !slots.workspace) || (workspaceOpen && Boolean(slots.workspace)));
+  const composerVisible = Boolean(activeConversation) && (((selectedView === 'chats' || selectedView === 'home' && homePaneOrder(home).includes('conversation')) && !slots.workspace) || (workspaceOpen && Boolean(slots.workspace)));
   const canStart = enabled && app.saved.pendingCreation === null && !opening;
   const conversation = catalogOnly ? <section className="chat-catalog-empty" aria-label="Chats in separate windows"><h1>Chats open in their own windows</h1><p>Choose a chat from the catalog or start a new chat with an available agent.</p>{placementNotice && <p data-openpane-part="status" role="status">{placementNotice}</p>}</section> : slots.workspace ? <p data-openpane-part="status">This conversation is open in its extension workspace.</p> : activeConversation && !opening
     ? activeConversation
@@ -254,7 +253,12 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const hostAlerts = <>
     {launchNotice && <p data-openpane-part="status" role="status">{launchNotice}</p>}
     {catalogOnly && launchText && !opening && <details><summary>Unsent launch text</summary><textarea data-openpane-part="textarea" readOnly aria-label="Unsent launch text" value={launchText} /></details>}
-    {app.savedDraftRecovery && <SavedDraftRecovery key={`${app.savedDraftRecovery.viewId}/${app.savedDraftRecovery.scope.conversationId}`} recovery={app.savedDraftRecovery} onSelectScope={scope => { if (app.savedDraftRecovery) void controller.inspectSavedDraft(app.savedDraftRecovery.viewId, scope); }} onOpen={() => { if (app.savedDraftRecovery) void (app.savedDraftRecovery.kind === 'bound' ? controller.create() : controller.open(app.savedDraftRecovery.scope)); }} onRemainingWork={() => { if (app.savedDraftRecovery) void controller.openRemainingSavedWork(app.savedDraftRecovery); }} onDismiss={() => { if (app.savedDraftRecovery) controller.dismissSavedDraftRecovery(app.savedDraftRecovery); }} />}
+    {app.savedDraftRecovery && <SavedDraftRecovery
+      key={`${app.savedDraftRecovery.viewId}/${app.savedDraftRecovery.scope.conversationId}`} recovery={app.savedDraftRecovery}
+      onSelectScope={scope => { if (app.savedDraftRecovery) void controller.inspectSavedDraft(app.savedDraftRecovery.viewId, scope); }}
+      onOpen={() => { const saved = app.savedDraftRecovery; if (saved) void openFromPane(() => saved.kind === 'bound' ? controller.create() : controller.open(saved.scope)); }}
+      onRemainingWork={() => { const saved = app.savedDraftRecovery; if (saved) void openFromPane(() => controller.openRemainingSavedWork(saved)); }}
+      onDismiss={() => { if (app.savedDraftRecovery) controller.dismissSavedDraftRecovery(app.savedDraftRecovery); }} />}
     {app.storageFailure && <div className="application-alert" role="alert"><strong>Local storage unavailable. Commands are blocked.</strong><p>{app.storageFailure}</p><p>Existing records have not been discarded. Restore browser storage access, then reload.</p></div>}
     {app.error && <p className="application-alert" role="alert">{app.error}</p>}
     {!placementNotice && app.lastPlacement?.kind === 'pending' && <p data-openpane-part="status" role="status">{app.lastPlacement.reason}</p>}
@@ -267,7 +271,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     {app.saved.pendingCreation.agentId === null && <label data-openpane-part="field-label" className="agent-choice">Agent if this chat was not created<select data-openpane-part="select" aria-label="Agent for pending creation" disabled={!enabled} value={recoveryAgent ?? ''} onChange={event => setRecoveryChoice(event.target.value ? { scopeKey: pendingScopeKey, agentId: event.target.value } : null)}>
       <option value="">Check the saved chat first</option>{options}
     </select></label>}
-    <button data-openpane-part="button" disabled={!enabled} onClick={() => void controller.recoverCreation(recoveryAgent ?? undefined)}>Recover creation</button>
+    <button data-openpane-part="button" disabled={!enabled} onClick={() => void openFromPane(() => controller.recoverCreation(recoveryAgent ?? undefined))}>Recover creation</button>
   </div>;
   const personalizationNotice = <>{personalization.diagnostic && <p className="application-alert" role="alert">{personalization.diagnostic}</p>}
     {selectedPalette.kind === 'imported' && !paletteResource && <p role="alert">Selected palette is unavailable. Reimport it or choose builtin in Settings.</p>}
@@ -322,7 +326,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
       {!app.active && moduleList('status')}
     </div>;
   const homeView = <HomeSurface composition={home} destination={selectedView} panes={{
-    agents: <AgentsPane agents={choices} enabled={canStart} onCreate={id => void openFromPane(() => controller.create(id))} />,
+    agents: <AgentsPane agents={choices} enabled={canStart} onCreate={id => { if (app.active) void openFromPane(() => controller.create(id)); else void startConversation(id, false); }} />,
     conversations: directory, conversation: views,
     extensions: <ExtensionsList rows={rows} enabled={!suspended} onOpen={namespace => { setSelectedExtension(namespace); setSelectedView('extensions'); }} />,
     status: <StatusPane host={<HostStatusLabel host={app.host} />} conversation={app.active ? `Conversation ${app.active.scope.conversationId}` : 'No conversation open'} build={presentation.buildLabel} />,
@@ -366,7 +370,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   </nav>;
   if (personalization.readiness === 'loading') return <ThemeScope><p data-openpane-part="status" role="status">Loading local preferences…</p></ThemeScope>;
   const resolvedAppearance = experience ? (experience.manifest.theme.mode === 'system' ? undefined : experience.manifest.theme.mode) : preferences.appearance === 'system' ? undefined : preferences.appearance;
-  if (fixedChat) return <ThemeScope density={experience?.manifest.theme.density ?? 'comfortable'} inert={suspended} variants={experience?.manifest.theme} appearance={resolvedAppearance} palette={contentPalette} className="application-chat-window" data-openpane-part="main">
+  if (fixedChat) return <ThemeScope density={experience?.manifest.theme.density ?? 'comfortable'} inert={suspended} variants={experience?.manifest.theme} appearance={resolvedAppearance} palette={experience ? contentPalette : palettes} className="application-chat-window" data-openpane-part="main">
     <header className="application-chat-header" data-openpane-part="page-header"><h1 data-openpane-part="caption-title">{app.active?.agent.label ?? 'Opening chat'}</h1>
       <button data-openpane-part="button" type="button" data-openpane-essential="new-chat" disabled={!enabled || !app.active} onClick={() => void controller.create(app.active?.agent.id)}>New chat</button>
     </header>

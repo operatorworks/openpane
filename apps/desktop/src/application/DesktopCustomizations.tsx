@@ -36,6 +36,7 @@ const BUILTIN_SLOTS: Readonly<Record<Slot, SlotPreference>> = {
 export function selectSlot<S extends Slot>(owners: readonly NamespaceActivation[], slot: S, preference: SlotPreference = { kind: 'automatic' }): SlotSelection<S> {
   if (preference.kind === 'builtin') return DEFAULT_SLOT;
   if (preference.kind === 'extension') {
+    if (owners.some(owner => owner.namespace === preference.namespace && owner.kind === 'loading')) return DEFAULT_SLOT;
     const owner = owners.find((owner): owner is SlotOwner<S> => owner.namespace === preference.namespace && owner.kind === 'ready' && owner.presentation[slot] !== undefined);
     return owner ? { kind: 'claimed', owner } : { kind: 'missing', namespace: preference.namespace };
   }

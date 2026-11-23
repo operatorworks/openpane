@@ -62,6 +62,7 @@ async function run() {
     const key = `view-${context.slot}`;
     await navigator.locks.request(key, async () => {
       const old = await get(database, key);
+      if (old !== undefined && old !== `draft for ${context.slot}`) throw new Error('Recovered draft text changed');
       await put(database, key, old ?? `draft for ${context.slot}`);
       try { await command({ kind: 'open', slot: 0 }); throw new Error('Child created a window'); }
       catch (error) { if (String(error).includes('Child created')) throw error; }
@@ -92,7 +93,8 @@ async function run() {
         };
         controls.append(button);
       }
-      await report('child-ready', { ...context, duplicateExcluded: unavailable, recovered: old !== undefined });
+      await report('child-ready', { ...context, duplicateExcluded: unavailable, recovered: old === `draft for ${context.slot}` });
+      while (!(await (await fetch('/state')).json()).started) await sleep(100);
       const deadline = performance.now() + 310000;
       for (let index = 0; performance.now() < deadline; index++) {
         void fetch('/observation').then(response => response.json()).catch(error => report('failure', String(error)));

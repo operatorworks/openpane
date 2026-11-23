@@ -107,7 +107,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   const chats = entries.filter(entry => !filter || entry.provider.providerAgentId === filter);
   /** Opens or creates a chat. A rejection is shown here; any other failure is in the host status strip. */
   async function attempt(action: () => ReturnType<WorkspaceViewProps['open']>) {
-    if (inFlight.current) return;
+    if (inFlight.current) { setNotice('The previous chat operation is still finishing. Try again when it finishes.'); return; }
     const attempt = {}; inFlight.current = attempt; waiting.current = attempt;
     setNotice(''); setAwaiting({ before: selectedKey });
     try {
@@ -115,13 +115,13 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
       if (waiting.current !== attempt) return;
       stopAwaiting();
       if (result.kind === 'inline') setNarrowPane('conversation');
-      else { setNarrowPane('list'); setNotice(result.kind === 'detached' ? 'Chat opened in its own window.' : result.kind === 'refused' ? result.reason : ''); }
+      else { setNarrowPane('list'); setNotice(result.kind === 'detached' ? 'Chat opened in its own window.' : result.reason); }
     }
     catch { if (waiting.current !== attempt) return; stopAwaiting(); setNotice('That chat could not be opened. Refresh the list and try again.'); }
     finally { if (inFlight.current === attempt) inFlight.current = null; }
   }
   function openChat(scope: ConversationScope) {
-    if (selectedKey === `${scope.hostId}/${scope.conversationId}`) { setNarrowPane('conversation'); return; }
+    if (selectedKey === `${scope.hostId}/${scope.conversationId}`) { stopAwaiting(); setNotice(''); setNarrowPane('conversation'); return; }
     void attempt(() => props.open(scope));
   }
   function chatWith(coworker: Coworker) {
@@ -134,7 +134,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
     }
     void attempt(() => props.create(coworker.id));
   }
-  const target = current ?? (filter ? byId.get(filter) : coworkers[0]);
+  const target = filter ? byId.get(filter) : current ?? coworkers[0];
   return <ThemeScope className="coworkers-workspace" colors={PALETTE[theme.appearance]} data-pane={narrowPane}>
     <nav className="coworkers-app-bar" aria-label="Coworkers app bar">
       <div role="group" aria-label="Coworkers sections" className="coworkers-sections">

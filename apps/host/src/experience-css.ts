@@ -17,9 +17,9 @@ const visualProperties = new Set(['color', 'background-color', 'accent-color', '
 const spacingProperties = new Set(['gap', 'row-gap', 'column-gap', 'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left']);
 const borderProperties = new Set(['border', 'border-top', 'border-right', 'border-bottom', 'border-left']);
 const borderStyle = /^(solid|dashed|dotted|double|inset|outset|none)$/;
-function color(node: ValueNode | undefined): boolean {
+function color(node: ValueNode | undefined, allowInherit = false): boolean {
   if (!node) return false;
-  if (node.type === 'word') return /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i.test(node.value) || /^(transparent|currentColor|inherit)$/.test(node.value);
+  if (node.type === 'word') return /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i.test(node.value) || /^(transparent|currentColor)$/.test(node.value) || allowInherit && node.value === 'inherit';
   if (node.type !== 'function' || node.value !== 'var' || node.unclosed) return false;
   const args = meaningful(node.nodes);
   return args.length === 1 && args[0]?.type === 'word' && colorVariables.has(args[0].value);
@@ -66,7 +66,7 @@ function declaration(property: string, value: string, assets: ReadonlySet<string
   if (!EXPERIENCE_PROPERTIES.some(name => name === property)) throw new Error(`Unsupported experience declaration: ${property}`);
   const nodes = meaningful(valueParser(value).nodes);
   const first = nodes[0];
-  if (visualProperties.has(property) && nodes.length === 1 && color(first)) return;
+  if (visualProperties.has(property) && nodes.length === 1 && color(first, true)) return;
   if (spacingProperties.has(property) && lengths(nodes, 64, property === 'padding' ? 4 : property === 'gap' ? 2 : 1)) return;
   if (property === 'font-size' && lengths(nodes, 48) && parseFloat(value) >= 10) return;
   if (property === 'line-height' && /^(1(?:\.\d+)?|2(?:\.0+)?)$/.test(value)) return;
@@ -98,7 +98,8 @@ export function scopeExperienceCss(css: string, digest: string, images: Readonly
     for (let parent: Container | Document | undefined = rule.parent; parent; parent = parent.parent) if (++depth > 4) throw new Error('Experience CSS nesting exceeds limit');
   });
   root.walkRules(rule => {
-    if (++rules > 256 || rule.parent?.type === 'rule') throw new Error('Experience CSS rule limit or nesting');
+    if (++rules > 256) throw new Error('Experience CSS rule limit or nesting');
+    for (let parent: Container | Document | undefined = rule.parent; parent; parent = parent.parent) if (parent.type === 'rule') throw new Error('Experience CSS rule limit or nesting');
     const selectors = selectorParser().astSync(rule.selector);
     if (selectors.nodes.length > 16) throw new Error('Too many experience selectors');
     for (const selector of selectors.nodes) {
@@ -135,6 +136,11 @@ export function scopeExperienceCss(css: string, digest: string, images: Readonly
     if (decl.important || decl.parent?.type !== 'rule') throw new Error('Unsupported experience declaration context');
     const property = decl.prop.toLowerCase(), value = decl.value.trim();
     declaration(property, value, images);
+    if (property === 'color' && /:(?:hover|active|focus|focus-visible|focus-within|checked|disabled|enabled)(?![\w-])/u.test(decl.parent.selector)) {
+      const alpha = /^#[\da-f]{4}$/iu.test(value) ? parseInt(value.slice(-1).repeat(2), 16)
+        : /^#[\da-f]{8}$/iu.test(value) ? parseInt(value.slice(-2), 16) : 255;
+      if (value === 'transparent' || alpha < 128) throw new Error('Experience interaction text must remain readable');
+    }
     if (property === 'background-image' && value.startsWith('url(')) {
       const name = /^url\("([a-zA-Z0-9][a-zA-Z0-9._-]*)"\)$/.exec(value)?.[1];
       if (!name) throw new Error('Invalid experience image');

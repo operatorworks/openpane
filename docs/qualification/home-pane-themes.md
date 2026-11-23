@@ -137,6 +137,9 @@ snapshot byte for byte. The resulting commit's tree and parent were verified.
 | AIM stylesheet | `f68f0dd93aff4fcaab485cd7b7d0eb1942473760334357a3e9490cda2a121ded` |
 | WKWebView component script | `78f964d6367652446c92c3959f5a07d48c0e2a75ca6f294e6ac7d7866acc2a5b` |
 
+These SHA-256 values hash the complete files. Build logs print `artifactId`,
+which hashes the canonical manifest payload; it is a different identity field.
+
 The native component result is in
 `/var/folders/3s/_jrxnd6s1tl_lhh2mqtxx1xc0000gn/T/openpane-native-home-zZ0gac/`.
 The iOS result and inspected screenshot are under

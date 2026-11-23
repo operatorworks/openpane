@@ -163,6 +163,9 @@ pub enum Command {
     CloseCancelled {
         incarnation: String,
     },
+    ReadClose {
+        incarnation: String,
+    },
     CloseReady {
         incarnation: String,
     },

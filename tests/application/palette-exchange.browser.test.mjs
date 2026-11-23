@@ -206,3 +206,48 @@ test('an older JSON save acknowledgment cannot overwrite a newer refused draft s
   assert.equal(await editor.inputValue(), newestDraft);
   assert.equal(await rootAppearance(page), 'dark');
 });
+
+for (const newer of ['editor draft', 'second file', 'closed editor']) test(`a pending preferences file read respects the newer ${newer}`, async t => {
+  const host = await fixture(t), page = await host.page(); await settings(page);
+  await page.evaluate(() => {
+    const read = File.prototype.text;
+    File.prototype.text = async function() {
+      if (this.name !== 'slow.json') return read.call(this);
+      globalThis.fileReadHeld = true; await new Promise(resolve => { globalThis.releaseFileRead = resolve; });
+      const text = await read.call(this); globalThis.fileReadCompleted = true; return text;
+    };
+  });
+  const fileInput = page.getByLabel('Import preferences file', { exact: true });
+  await fileInput.setInputFiles({ name: 'slow.json', mimeType: 'application/json', buffer: Buffer.from('older file text') });
+  await page.waitForFunction(() => globalThis.fileReadHeld);
+  const editor = page.getByRole('textbox', { name: 'Preferences JSON', exact: true });
+  if (newer === 'second file') {
+    await fileInput.setInputFiles({ name: 'newer.json', mimeType: 'application/json', buffer: Buffer.from('newer file text') });
+    await wait(async () => await editor.inputValue() === 'newer file text', 'newer file displayed');
+  } else {
+    await page.getByRole('button', { name: 'Edit preferences JSON', exact: true }).click();
+    await editor.fill('newer unsaved draft');
+    if (newer === 'closed editor') await page.getByRole('button', { name: 'Close editor', exact: true }).click();
+  }
+  await page.evaluate(() => globalThis.releaseFileRead()); await page.waitForFunction(() => globalThis.fileReadCompleted);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  if (newer === 'closed editor') assert.equal(await editor.count(), 0);
+  else assert.equal(await editor.inputValue(), newer === 'second file' ? 'newer file text' : 'newer unsaved draft');
+});
+
+test('a pending palette file read cannot replace newer manually entered JSON', async t => {
+  const host = await fixture(t), page = await host.page(); await settings(page);
+  await page.evaluate(() => {
+    const read = File.prototype.text;
+    File.prototype.text = async function() {
+      globalThis.paletteFileHeld = true; await new Promise(resolve => { globalThis.releasePaletteFile = resolve; });
+      const text = await read.call(this); globalThis.paletteFileCompleted = true; return text;
+    };
+  });
+  await page.getByLabel('Import palette file', { exact: true }).setInputFiles({ name: 'slow.json', mimeType: 'application/json', buffer: Buffer.from('old palette text') });
+  await page.waitForFunction(() => globalThis.paletteFileHeld);
+  const editor = page.getByRole('textbox', { name: 'Palette JSON', exact: true }); await editor.fill('newer palette text');
+  await page.evaluate(() => globalThis.releasePaletteFile()); await page.waitForFunction(() => globalThis.paletteFileCompleted);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await editor.inputValue(), 'newer palette text');
+});

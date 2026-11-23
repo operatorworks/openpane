@@ -89,9 +89,13 @@ export async function publishDatadog(command: DatadogCommand): Promise<{ readonl
     };
     if (action.kind === 'retry') {
       try { if (await pupVersion(granted.input.executable, controller.signal) !== granted.input.version) throw new Error('Pup version changed'); }
-      catch { await fail('pup-unavailable'); throw new Error('The reserved pup version is unavailable. Use a new publication ID after configuring the intended version.'); }
+      catch {
+        if (controller.signal.aborted) { await fail('cancelled'); throw new UiRefusal('unavailable', 'Pup query cancelled. Inspect display status before an explicit retry.'); }
+        await fail('pup-unavailable'); throw new UiRefusal('unavailable', 'The reserved pup version is unavailable. Use a new publication ID after configuring the intended version.');
+      }
     }
-    if (!session.alive() || controller.signal.aborted) throw new UiRefusal('unavailable', 'Query owner disconnected before execution');
+    if (controller.signal.aborted) { await fail('cancelled'); throw new UiRefusal('unavailable', 'Pup query cancelled before execution. Inspect display status before an explicit retry.'); }
+    if (!session.alive()) throw new UiRefusal('unavailable', 'Query owner disconnected before execution');
     const result = await runPup(granted.input.executable, ['--no-agent', '--output=json', 'metrics', 'query', `--query=${granted.input.query}`,
       `--from=${granted.reservation.fromSeconds}`, `--to=${granted.reservation.toSeconds}`], { signal: controller.signal, deadlineMs: count(first.executeUntilMs), env: { ...process.env, DD_SITE: granted.input.site } });
     if (result.kind === 'failed') {

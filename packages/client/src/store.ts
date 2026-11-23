@@ -100,6 +100,14 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
     publish();
   }).catch(() => undefined);
   let saves: Promise<void> = ready;
+  // Snapshot pending edits at Send, so a failed edit cannot silently restore removed content.
+  const composerEdits = new Set<Promise<unknown>>();
+  function editComposer<T>(operation: () => Promise<T>): Promise<T> {
+    const result = enqueue(operation);
+    composerEdits.add(result);
+    void result.then(() => composerEdits.delete(result), () => composerEdits.delete(result));
+    return result;
+  }
   function enqueue<T>(operation: () => Promise<T>): Promise<T> {
     if (closed) return Promise.reject(new Error('This conversation store has closed.'));
     const result = saves.then(async () => {
@@ -214,7 +222,10 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
   }
   async function submit(body: CommandBody | null): Promise<SubmitResult> {
     if (closed) await ready;
+    const edits = body === null ? Promise.all(composerEdits) : null;
+    void edits?.catch(() => {});
     const entry = await enqueue(async () => {
+      await edits;
       requireCompatible();
       const id = createCommandId(), intent = body ?? composerBody();
       if (local.outbox.some(value => value.command.clientCommandId === id) || local.frontendSends.some(value => value.command.clientCommandId === id) || Object.hasOwn(view.document.receipts, id)) throw new Error('Command ID generator reused an existing ID');
@@ -253,7 +264,7 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
     getSnapshot: () => view,
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     setDraft(text) {
-      return enqueue(async () => {
+      return editComposer(async () => {
         await persist(revised({ draft: text }));
         publish();
       });
@@ -283,7 +294,7 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
       if (bytes.byteLength > IMAGE_MAX_BYTES) throw new Error('Choose an image of at most 4 MB.');
       if (!imageType(bytes)) throw new Error('Choose a PNG or JPEG image.');
       const name = imageName(file.name);
-      const started = await enqueue(async () => {
+      const started = await editComposer(async () => {
         const image: ComposerImageRecord = immutable({ selectionId: createImageId(), uploadId: parseUploadId(createImageId()), name, byteLength: bytes.byteLength, attachment: null });
         await persist(revised({ image }), { selectionId: image.selectionId, bytes });
         return { done: upload(image, bytes) };
@@ -314,7 +325,7 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
     },
     async removeImage() {
       if (closed) await ready;
-      await enqueue(async () => {
+      await editComposer(async () => {
         if (!local.image) return;
         await persist(revised({ image: null }));
         publish();

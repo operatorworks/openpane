@@ -12,9 +12,9 @@ function decisions({ activity }: ConversationModuleProps) {
 function ReviewTranscript(props: ConversationModuleProps) {
   const unresolved = decisions(props);
   return <section aria-label="Review transcript">
-    <Surface className="review-decisions"><Text as="h2">Unresolved decisions</Text>
+    <Surface className="review-decisions"><Text as="h2">Review notes</Text>
       {unresolved.length ? <ul>{unresolved.map((line, index) => <li key={index}>{line}</li>)}</ul>
-        : <Text>No unresolved decisions identified. Ask the agent to review the plan.</Text>}
+        : <Text>No review notes identified. Ask the agent to review the plan.</Text>}
     </Surface>
     {props.activity.domain.messages.length === 0 ? <Text>This review has no messages yet.</Text>
       : props.activity.domain.messages.map(message => <article key={message.messageId}>
@@ -31,6 +31,7 @@ function ReviewWorkspace(props: WorkspaceViewProps) {
       const result = await action();
       if (result?.kind === 'refused') setError(result.reason);
       else if (result?.kind === 'detached') setNotice('Review opened in its own window.');
+      else if (result?.kind === 'pending') setNotice(result.reason);
     } catch { setError('Could not open this review. Retry, or check the host status above.'); } finally { setBusy(false); }
   }
   return <section aria-label="Plan review workspace" className="review-workspace">
@@ -54,7 +55,7 @@ function ReviewPlan(props: ConversationModuleProps) {
   return createElement(Surface, { className: 'review-plan' },
     createElement(Text, { as: 'h2' }, 'Plan review'),
     createElement(Text, null, 'Ask the current agent to review the plan and suggest a next step.'),
-    createElement(Text, null, `${unresolved.length} possible unresolved decisions in this conversation.`));
+    createElement(Text, null, `${unresolved.length} review notes in this conversation.`));
 }
 function ReviewGuidance() {
   return createElement(Surface, null,

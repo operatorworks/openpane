@@ -3,6 +3,11 @@ import { PUP_GUARDIAN } from './ui-pup-guardian.js';
 import type { DisplayQueryFailure } from './ui-display-protocol.js';
 import { record } from '@openpane/contracts/decode';
 
+const PUP_EXECUTION_ENVIRONMENT = new Set(['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'WINDIR', 'COMSPEC', 'PATHEXT', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'APPDATA', 'LOCALAPPDATA', 'LANG', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy']);
+function pupEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(environment).filter(([name]) => PUP_EXECUTION_ENVIRONMENT.has(name) || /^(?:DD_|PUP_|LC_)/.test(name)));
+}
+
 export type PupProcessResult = { readonly kind: 'completed'; readonly stdout: string } | { readonly kind: 'failed'; readonly reason: DisplayQueryFailure };
 export async function runPup(executable: string, args: readonly string[], options: {
   readonly signal: AbortSignal; readonly env?: NodeJS.ProcessEnv; readonly timeoutMs?: number; readonly stdoutBytes?: number; readonly deadlineMs?: number;
@@ -14,7 +19,7 @@ export async function runPup(executable: string, args: readonly string[], option
     const chunks: Buffer[] = [];
     let failure: DisplayQueryFailure | null = null, bytes = 0;
     const start = () => spawn(process.execPath, ['-e', PUP_GUARDIAN, JSON.stringify({ executable, args, deadlineMs, stdoutBytes })], {
-      stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', env: options.env ?? process.env,
+      stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', env: pupEnvironment(options.env ?? process.env),
     });
     let guardian: ReturnType<typeof start>;
     try { guardian = start(); } catch { resolve({ kind: 'failed', reason: 'pup-unavailable' }); return; }

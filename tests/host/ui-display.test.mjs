@@ -23,6 +23,25 @@ async function fixture(t) {
 const input = () => ({ query: 'avg:system.cpu.user{*}', title: 'CPU', from: '1h', to: 'now', executable: '/fixture/pup', executableHint: 'PATH:pup', version: '1.23.6', site: 'us3.datadoghq.com', siteHint: 'us3.datadoghq.com' });
 const queryEvent = reservation => event({ ...card(), query: reservation.query, fromMs: reservation.fromSeconds * 1000, toMs: reservation.toSeconds * 1000 });
 
+test('an unreadable running query does not disable appearance recovery after restart', async t => {
+  const f = await fixture(t), publicationId = f.id();
+  await f.execute({ op: 'display-query-reserve', scope, publicationId, input: input() }, 'owner');
+  f.store.endUiSession('owner');
+  f.store.db.prepare("UPDATE ui_display_keys SET state='running',value=json_set(value,'$.version',999) WHERE id=?").run(publicationId);
+  f.restart();
+  assert.equal(f.store.context().selection.selected.kind, 'builtin');
+  const context = f.store.context();
+  await f.execute({ op: 'restore', requestId: `recovery:${context.recoveryGeneration}:${randomUUID()}`, expectedRevision: context.revision, expectedRecoveryGeneration: context.recoveryGeneration });
+  assert.equal(f.store.db.prepare('SELECT json_extract(value,\'$.version\') AS version FROM ui_display_keys WHERE id=?').get(publicationId).version, 999);
+});
+
+test('a damaged card sequence reports unavailable instead of silently hiding the card', async t => {
+  const f = await fixture(t), publicationId = f.id();
+  await f.execute({ op: 'display-publish', scope, publicationId, event: event() });
+  f.store.db.prepare('UPDATE ui_display_cards SET sequence=0 WHERE id=?').run(publicationId);
+  await assert.rejects(f.execute({ op: 'display-list', subscription: f.subscription() }), error => error.code === 'unavailable');
+});
+
 test('display publication replay, conflict, removal and restart preserve exactly one scoped event', async t => {
   const f = await fixture(t), publicationId = f.id(), request = { op: 'display-publish', scope, publicationId, event: event() };
   const published = await f.execute(request); assert.equal(published.kind, 'published');
@@ -244,7 +263,7 @@ for (const field of ['event', 'sequence', 'publishedAtMs']) test(`stored card ${
   } finally { db.close(); }
   f.restart();
   assert.deepEqual((await f.execute({ op: 'display-status', scope, publicationId })).receipt, original.receipt);
-  await assert.rejects(f.execute({ op: 'display-list', subscription: f.subscription() }), /receipt|identity|digest/);
+  await assert.rejects(f.execute({ op: 'display-list', subscription: f.subscription() }), error => error.code === 'unavailable');
 });
 
 

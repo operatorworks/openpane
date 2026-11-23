@@ -35,6 +35,10 @@ function paintedReport(value: unknown): {
 export class NativeMainUiRelay implements NativeUiRelayPort {
   private previousChildren = new Set<string>();
   constructor(private readonly port: DesktopWindowPort) {}
+  async liveChildren(main: WindowContext): Promise<readonly string[]> {
+    const drained = record(await this.port.request({ kind: 'drain-ui' }), ['children', 'reports', 'localBuiltin']);
+    return nativeChildren(drained.children, main).map(child => child.context.documentIncarnation);
+  }
   async publish(snapshot: UiClientSnapshot, main: WindowContext, post: (request: unknown) => Promise<unknown>): Promise<boolean> {
     const drained = record(await this.port.request({ kind: 'drain-ui' }), ['children', 'reports', 'localBuiltin']);
     const children = nativeChildren(drained.children, main);
@@ -61,9 +65,9 @@ export class NativeMainUiRelay implements NativeUiRelayPort {
       try { context = parseWindowContext(entry.context); report = paintedReport(entry.report); }
       catch { await this.port.request({ kind: 'confirm-ui', ids: [id] }); continue; }
       if (!live.has(context.documentIncarnation)) { await this.port.request({ kind: 'confirm-ui', ids: [id] }); continue; }
-      if (!children.some(child => child.context.documentIncarnation === context.documentIncarnation && child.visible)) continue;
       // Old generations are explicitly retired, never counted as a paint of the current delivery.
       if (report.deliveryGeneration !== snapshot.selection.deliveryGeneration) { await this.port.request({ kind: 'confirm-ui', ids: [id] }); continue; }
+      if (!children.some(child => child.context.documentIncarnation === context.documentIncarnation && child.visible)) continue;
       try {
       if (report.kind === 'rendered') await post({ op: 'paint', session: context.documentIncarnation,
         deliveryGeneration: report.deliveryGeneration, selectionRevision: report.selectionRevision, digest: report.digest });
@@ -99,6 +103,7 @@ export class ChildUiConnection implements UiTransport {
   private requested = false;
   private confirmed: string | null = null;
   private presencePending = false;
+  private presenceTask: Promise<void> | null = null;
   private painted: UiClientSnapshot | null = null;
   private failure: { readonly state: UiClientSnapshot; readonly reason: string } | null = null;
   constructor(private readonly port: DesktopWindowPort) {
@@ -116,10 +121,15 @@ export class ChildUiConnection implements UiTransport {
     document.addEventListener('visibilitychange', this.visibility);
   }
   private visibility = (): void => { void this.presence().then(this.refresh, () => this.update({ diagnostic: 'Native presence could not be confirmed' })); };
-  private async presence(): Promise<void> {
+  private presence(): Promise<void> {
     this.presencePending = true;
-    await this.port.request({ kind: 'presence', visible: document.visibilityState === 'visible', display: this.cards.subscription() });
-    this.presencePending = false;
+    return this.presenceTask ??= (async () => {
+      while (this.presencePending && !this.closed) {
+        this.presencePending = false;
+        try { await this.port.request({ kind: 'presence', visible: document.visibilityState === 'visible', display: this.cards.subscription() }); }
+        catch (error) { this.presencePending = true; throw error; }
+      }
+    })().finally(() => { this.presenceTask = null; });
   }
   selectScope(scope: ConversationScope | null): void {
     if (scope && (this.port.context.role !== 'chat' || !sameScope(scope, this.port.context.reservation.scope))) throw new Error('A child may only read its assigned cards');
@@ -138,9 +148,9 @@ export class ChildUiConnection implements UiTransport {
           if (typeof value.localBuiltin !== 'boolean') throw new Error('Invalid native recovery state');
           if (value.context !== null) {
             const context = parseWindowContext(value.context);
+            if (context.role !== 'chat' || context.documentIncarnation !== this.port.context.documentIncarnation || context.viewId !== this.port.context.viewId) throw new Error('Native relay changed window identity');
             this.update({ deliveryContext: JSON.stringify(context) });
             if (this.cards.profile(context.profileId, context.hostId)) await this.presence();
-            if (context.role !== 'chat' || context.documentIncarnation !== this.port.context.documentIncarnation || context.viewId !== this.port.context.viewId) throw new Error('Native relay changed window identity');
           }
           const state = value.state === null ? null : parseUiClientSnapshot(value.state);
           const advanced = this.cards.accept(state?.display ?? null);

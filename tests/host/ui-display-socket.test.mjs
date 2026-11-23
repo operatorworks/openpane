@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createConnection } from 'node:net';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { METRICS_EVENT_NAME } from '@openpane/contracts';
 import { UiStore } from '../../apps/host/build/tsc/ui-store.js';
 import { startUiControl, openUiQuerySession, requestUi } from '../../apps/host/build/tsc/ui-control.js';
+import { publishDatadog } from '../../apps/host/build/tsc/ui-display-client.js';
+import { runDisplayCli } from '../../apps/host/build/tsc/ui-display-cli.js';
 import { UiFrames, uiFrame, uiResponse } from '../../apps/host/build/tsc/ui-frames.js';
 
 const scope = { hostId: 'host', conversationId: 'chat' };
@@ -17,11 +19,11 @@ async function wait(check) { const until = Date.now() + 4000; while (!await chec
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'openpane-display-socket-')), socket = join(directory, 'ui.sock');
   const store = new UiStore(join(directory, 'ui.sqlite'), 'host', undefined, value => value.hostId === scope.hostId && value.conversationId === scope.conversationId);
-  const behavior = { after: async () => {} };
-  const control = await startUiControl(socket, async (request, session) => { const value = await store.execute(request, session); await behavior.after(request, value); return value; }, { disconnected: owner => store.endUiSession(owner) });
+  const behavior = { after: async () => {}, readOptions: undefined };
+  const control = await startUiControl(socket, async (request, session) => { const value = request.op === 'display-list' && behavior.readOptions ? store.readDisplay(request.subscription, behavior.readOptions) : await store.execute(request, session); await behavior.after(request, value); return value; }, { disconnected: owner => store.endUiSession(owner) });
   t.after(async () => { await control.close(); store.close(); await rm(directory, { recursive: true, force: true }); });
   const id = () => `${store.context().requestEpoch}:${randomUUID()}`;
-  return { socket, store, behavior, id, reserve: publicationId => ({ op: 'display-query-reserve', scope, publicationId, input: queryInput }), status: publicationId => requestUi(socket, { op: 'display-status', scope, publicationId }) };
+  return { directory, socket, store, behavior, id, reserve: publicationId => ({ op: 'display-query-reserve', scope, publicationId, input: queryInput }), status: publicationId => requestUi(socket, { op: 'display-status', scope, publicationId }) };
 }
 
 test('a live socket owns its winning query attempt and other connections cannot publish its result', async t => {
@@ -76,4 +78,58 @@ test('the host bounds an unfinished raw query connection and persists interrupti
   assert.equal(uiResponse(await reader.next()).granted, true);
   await reader.ended;
   await wait(async () => (await f.status(publicationId)).reservation.kind === 'interrupted');
+});
+
+test('display CLI accepts a successful null delivery response', async t => {
+  const f = await fixture(t), values = { 'scope-json': JSON.stringify(scope), 'subscription-id': 'idle-cli' };
+  const page = await runDisplayCli('list', f.socket, values, async () => null);
+  assert.ok(page); f.behavior.readOptions = {bytes:1};
+  assert.equal(await runDisplayCli('list', f.socket, { ...values, 'cursor-json': JSON.stringify(page.next) }, async () => null), null);
+});
+
+test('cancellation while the reservation reply is pending settles without a drain window', async t => {
+  const f = await fixture(t), publicationId = f.id(), pup = join(f.directory, 'pup');
+  await writeFile(pup, `#!${process.execPath}\nif(process.argv.includes('--version'))console.log('pup 2.0.1');else if(process.argv.includes('auth'))console.log(JSON.stringify({site:'us3.datadoghq.com'}));else require('node:fs').writeFileSync(${JSON.stringify(join(f.directory,'unexpected-query'))},'started');`, {mode:0o700});
+  f.behavior.after = async request => { if (request.op === 'display-query-reserve') process.emit('SIGTERM'); };
+  await assert.rejects(publishDatadog({ socket:f.socket, scope, publicationId, action:{kind:'query',query:queryInput.query,title:queryInput.title,from:queryInput.from,to:queryInput.to,pup} }), /cancelled/);
+  assert.equal((await f.status(publicationId)).reservation.kind, 'failed');
+  assert.equal((await f.status(publicationId)).reservation.reason, 'cancelled');
+  const retry = await openUiQuerySession(f.socket, {op:'display-query-retry',scope,publicationId,expectedAttempt:1});
+  assert.equal(retry.first.granted,true);
+  await retry.request({op:'display-query-fail',scope,publicationId,attempt:2,reason:'cancelled'});retry.close();
+  await assert.rejects(import('node:fs/promises').then(({access})=>access(join(f.directory,'unexpected-query'))), {code:'ENOENT'});
+});
+
+test('cancelling a reserved version probe records cancellation and starts no metrics query', async t => {
+  const f = await fixture(t), publicationId = f.id(), pup = join(f.directory, 'pup'), ready = join(f.directory,'version-ready');
+  await writeFile(pup, `#!${process.execPath}\nconst fs=require('node:fs');fs.writeFileSync(${JSON.stringify(ready)},'ready');setInterval(()=>{},1000);`, {mode:0o700});
+  const initial = await openUiQuerySession(f.socket, {...f.reserve(publicationId),input:{...queryInput,executable:pup,executableHint:pup}});
+  await initial.request({op:'display-query-fail',scope,publicationId,attempt:1,reason:'pup-failed'});initial.close();
+  const running = publishDatadog({socket:f.socket,scope,publicationId,action:{kind:'retry',expectedAttempt:1}});
+  const outcome = running.then(value=>({value}),error=>({error}));
+  await wait(()=>import('node:fs/promises').then(({access})=>access(ready)).then(()=>true,()=>false));
+  process.emit('SIGTERM');
+  assert.match(String((await outcome).error), /cancelled/);
+  const reservation = (await f.status(publicationId)).reservation;
+  assert.equal(reservation.kind,'failed');assert.equal(reservation.reason,'cancelled');assert.equal(reservation.attempt,2);
+});
+
+test('socket input errors retain invalid-input while execution faults report unavailable', async t => {
+  const f = await fixture(t);
+  await assert.rejects(requestUi(f.socket,{op:'not-real'}),error=>error.code==='invalid-input');
+  f.behavior.after = async () => {throw new Error('PRIVATE_STORAGE_DETAIL');};
+  await assert.rejects(requestUi(f.socket,{op:'context'}),error=>error.code==='unavailable'&&!error.message.includes('PRIVATE_STORAGE_DETAIL'));
+});
+
+test('forced socket shutdown waits for its query recovery fault before settling', {timeout:5000}, async t => {
+  const original = globalThis.setTimeout;
+  t.mock.method(globalThis,'setTimeout',(handler,ms,...args)=>original(handler,ms===6000?20:ms,...args));
+  const directory = await mkdtemp(join(tmpdir(),'openpane-query-close-')), socket=join(directory,'ui.sock'), disconnected=Promise.withResolvers();
+  let control, session;
+  t.after(async()=>{session?.close();await control?.close().catch(()=>{});await rm(directory,{recursive:true,force:true});});
+  control=await startUiControl(socket,async()=>({granted:true}),{disconnected(){disconnected.resolve();throw new Error('fixture recovery fault');}});
+  session=await openUiQuerySession(socket,{op:'display-query-reserve',scope,publicationId:'1:fixture',input:queryInput});
+  const outcome=await control.close().then(()=>({ok:true}),error=>({error}));
+  await disconnected.promise;
+  assert.match(String(outcome.error),/Query recovery could not be saved/);
 });

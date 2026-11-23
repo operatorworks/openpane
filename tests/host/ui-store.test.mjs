@@ -20,6 +20,50 @@ async function fixture(t) {
 }
 const envelope = receipt => Object.fromEntries(['requestId', 'deliveryGeneration', 'selectionRevision', 'digest'].map(key => [key, receipt[key]]));
 const paint = (store, window, receipt) => store.execute({ op: 'paint', session: window.documentIncarnation, deliveryGeneration: receipt.deliveryGeneration, selectionRevision: receipt.selectionRevision, digest: receipt.digest });
+test('reapplying verified bytes repairs a damaged bundle with the same digest', async t => {
+  const f = await fixture(t), valid = bundle('repairable');
+  await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: valid });
+  f.store.db.prepare('UPDATE ui_bundles SET value=? WHERE digest=?').run('{broken', valid.digest);
+  f.restart();
+  assert.equal(f.store.context().selection.selected.kind, 'builtin');
+  await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: f.store.context().revision, bundle: valid });
+  assert.deepEqual(f.store.bundle(valid.digest), valid);
+  f.restart(); assert.equal(f.store.context().selection.selected.digest, valid.digest);
+});
+test('a resumed native main renews its live children before expiring the receipt cohort', async t => {
+  const f = await fixture(t), main = f.window(), child = { ...main, role: 'chat', label: 'child', documentIncarnation: 'child', viewId: 'child', scope: { hostId: 'host', conversationId: 'chat' } };
+  let now = Date.now(); t.mock.method(Date, 'now', () => now);
+  const state = sequence => ({ op: 'state', context: main, visible: true, presenceSequence: sequence, after: null, waitMs: 0, nativePlacement: true, liveChildren: ['child'] });
+  const relay = sequence => ({ op: 'relay', main, children: [{ context: child, visible: true, presenceSequence: sequence }], departed: [] });
+  await f.store.execute(state(1)); await f.store.execute(relay(1));
+  const receipt = (await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: 0 })).receipt;
+  now += 16000;
+  await f.store.execute(state(2));
+  const resumed = await f.store.execute(relay(2));
+  assert.deepEqual(resumed.children[0].envelope, envelope(receipt));
+  for (const window of [main, child]) {
+    await paint(f.store, window, receipt);
+    await f.store.execute({ op: 'ack', session: window.documentIncarnation, envelope: envelope(receipt), result: { kind: 'rendered' } });
+  }
+  assert.equal((await f.store.execute({ op: 'status', requestId: receipt.requestId })).outcome, 'all-rendered');
+});
+test('an existing child paint also settles a later placement resolution in the same receipt', async t => {
+  const f = await fixture(t), main = f.window(), scope = { hostId: 'host', conversationId: 'existing' };
+  const child = { ...main, role: 'chat', label: 'child', documentIncarnation: 'child', viewId: 'child', scope };
+  await f.store.execute({ op: 'state', context: main, visible: true, presenceSequence: 1, after: null, waitMs: 0, nativePlacement: true });
+  await f.store.execute({ op: 'relay', main, children: [{ context: child, visible: true, presenceSequence: 1 }], departed: [] });
+  const base = bundle('existing-child'), separate = createExperienceBundle({ ...base.manifest, presentation: { ...base.manifest.presentation, chats: 'separate' } }, null, []);
+  const receipt = (await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: separate })).receipt;
+  for (const window of [main, child]) {
+    await paint(f.store, window, receipt);
+    await f.store.execute({ op: 'ack', session: window.documentIncarnation, envelope: envelope(receipt), result: { kind: 'rendered' } });
+  }
+  const transition = receipt.participants.find(participant => participant.slot.kind === 'transition').slot;
+  const target = { scope, viewId: 'child', label: 'child', nativeTransitionId: 'native', bindingRevision: 2 };
+  await f.store.execute({ op: 'placement-reserve', session: main.documentIncarnation, envelope: envelope(receipt), transitionId: transition.transitionId, target });
+  await f.store.execute({ op: 'relay', main, children: [{ context: child, visible: true, presenceSequence: 2, placement: { nativeTransitionId: 'native', bindingRevision: 2 } }], departed: [] });
+  assert.equal((await f.store.execute({ op: 'status', requestId: receipt.requestId })).outcome, 'all-rendered');
+});
 test('selection and idempotency commit together; stale or conflicting writes preserve the current selection', async t => {
   const f = await fixture(t);
   assert.equal(f.store.context().selection.selected.kind, 'builtin');

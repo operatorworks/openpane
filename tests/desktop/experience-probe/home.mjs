@@ -1,7 +1,7 @@
 import { createServer, request as forward } from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, mkdir, copyFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -57,7 +57,11 @@ try {
   const url = `http://127.0.0.1:${server.address().port}/browser.html`;
   child = spawn(join(app, 'Contents/MacOS/experience-probe'), [url], { stdio: ['ignore', 'ignore', 'pipe'] }); let stderr = ''; child.stderr.on('data', bytes => { stderr += bytes; });
   const result = await Promise.race([reported, new Promise(resolve => { timeout = setTimeout(() => resolve({ passed: false, error: 'Native Home probe timed out' }), 90000); }), once(child, 'exit').then(([code, signal]) => ({ passed: false, error: `Native probe exited before reporting: ${code}/${signal}` }))]);
-  await writeFile(join(evidence, 'result.json'), JSON.stringify({ ...result, source: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), dirtySource: execFileSync('git', ['diff', '--stat'], { cwd: root, encoding: 'utf8' }), note: 'Production Home/ExperienceScope/BrowserApplication and controller in WKWebView, synthetic composition events, recorded service. This does not emulate a physical IME or replace production native-window qualification.' }, null, 2));
+  const artifacts = { componentScript: sha256(javascript), componentStyles: sha256(css), nativeExecutable: sha256(await readFile(join(app, 'Contents/MacOS/experience-probe'))),
+    uiControl: sha256(await readFile(join(root, 'apps/host/build/tsc/ui-control.js'))), bundleValidator: sha256(await readFile(join(root, 'apps/host/build/tsc/experience-bundle.js'))) };
+  await writeFile(join(evidence, 'result.json'), JSON.stringify({ ...result, workspaceHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
+    workspaceStatus: execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: root, encoding: 'utf8' }), artifacts,
+    note: 'Artifact hashes identify the code exercised; workspace HEAD/status are context, not a freshness claim. Build prerequisites before running. Production Home/ExperienceScope/BrowserApplication and controller in WKWebView, synthetic composition events, recorded service. This does not emulate a physical IME or replace production native-window qualification.' }, null, 2));
   await writeFile(join(evidence, 'native-stderr.log'), stderr);
   console.log(JSON.stringify({ ...result, evidence })); if (!result.passed) process.exitCode = 1;
 } finally {

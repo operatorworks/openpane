@@ -30,7 +30,7 @@ export interface OwnedViewStorage {
   drafts(onFailure: (error: unknown) => void): DraftStoragePort;
   close(): void | Promise<void>;
 }
-export interface SavedDraftRecovery { readonly kind: 'independent' | 'bound' | 'continued'; readonly viewId: string; readonly scope: ConversationScope; readonly text: string; readonly scopes?: readonly ConversationScope[]; readonly queuedTexts?: readonly string[]; readonly queuedCount?: number; readonly image?: { readonly name: string; readonly bytes: Uint8Array } }
+export interface SavedDraftRecovery { readonly pendingCreation?: NonNullable<SavedView['pendingCreation']>; readonly kind: 'independent' | 'bound' | 'continued'; readonly viewId: string; readonly scope: ConversationScope; readonly text: string; readonly scopes?: readonly ConversationScope[]; readonly queuedTexts?: readonly string[]; readonly queuedCount?: number; readonly image?: { readonly name: string; readonly bytes: Uint8Array } }
 export interface ViewStorageFactory {
   readLegacyDraft?(viewId: string, hostId: string, selectedScope?: ConversationScope): Promise<SavedDraftRecovery | null>;
   openRemainingWork?(viewId: string, hostId: string): Promise<void>;

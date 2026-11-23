@@ -145,7 +145,7 @@ export function ExtensionWorkspace({ contentPalette = palettes, row, metadata, w
   useEffect(() => { if (hostKey !== null) void controller.loadWorkspace(namespace); }, [controller, namespace, hostKey]);
   const agents: readonly WorkspaceAgent[] = namespaceAgents(metadata, namespace).map(agent => ({ id: agent.id, label: agent.label,
     installationId: agent.installationId, providerAgentId: agent.providerAgentId, availability: agent.availability }));
-  const listed = workspaces[namespace];
+  const listed = Object.hasOwn(workspaces, namespace) ? workspaces[namespace] : undefined;
   const loaded: readonly WorkspaceConversation[] = (listed?.entries ?? []).flatMap(entry => entry.provider?.namespace === namespace
     ? [{ scope: entry.scope, preview: entry.preview, provider: { installationId: entry.provider.installationId, providerAgentId: entry.provider.providerAgentId } }] : []);
   const activeAgent = active && 'kind' in active.agent && active.agent.namespace === namespace ? active.agent : null;

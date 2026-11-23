@@ -208,7 +208,7 @@ export function openLocalHost<E, P>(options: LocalHostOptions<E, P>): LocalHost<
     return store.settle(scope, id, observed, observations);
   });
   type ReadOrigin = 'run-end' | 'caller';
-  interface StatusRead { readonly origin: ReadOrigin; readonly receipt: Promise<Receipt> }
+  interface StatusRead { readonly origin: ReadOrigin; readonly receipt: Promise<Receipt>; readonly admission: { admitted: boolean } }
   // Overlapping reads of one provider command share one status read. An observed run end is not settlement evidence; it
   // triggers one status read per command per host process. Only a run-end read the provider admitted spends that attempt,
   // so a run end seen while the provider is being replaced, or met by a caller read that may predate it, is read again.
@@ -222,8 +222,9 @@ export function openLocalHost<E, P>(options: LocalHostOptions<E, P>): LocalHost<
       try { effectFence(stored, assertCallerAuthority); } catch (error) { return Promise.reject(error); }
       return running.receipt;
     }
-    const receipt = readOnce(stored, assertCallerAuthority, origin === 'run-end' ? () => runEndReads.add(key) : () => {});
-    statusReads.set(key, { origin, receipt });
+    const admission = { admitted: false };
+    const receipt = readOnce(stored, assertCallerAuthority, () => { admission.admitted = true; if (origin === 'run-end') runEndReads.add(key); });
+    statusReads.set(key, { origin, receipt, admission });
     const forget = () => { if (statusReads.get(key)?.receipt === receipt) statusReads.delete(key); };
     void receipt.then(forget, forget);
     return receipt;
@@ -250,7 +251,15 @@ export function openLocalHost<E, P>(options: LocalHostOptions<E, P>): LocalHost<
       authorized(scope);
     };
     assertRequester();
-    await reconcileStored(blocker, 'caller', assertRequester);
+    const shared = statusReads.get(commandKey(scope, blocker.command.clientCommandId));
+    try { await reconcileStored(blocker, 'caller', assertRequester); }
+    catch (error) { if (!shared || shared.admission.admitted) throw error; }
+    if (shared && !shared.admission.admitted) {
+      const current = store.command(scope, blocker.command.clientCommandId);
+      if (!current) throw new Error('Unknown command');
+      assertRequester();
+      await reconcileStored(current, 'caller', assertRequester);
+    }
     assertRequester();
     return store.blockingSend(scope, 'provider') === null;
   };

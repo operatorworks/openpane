@@ -202,8 +202,21 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("failed to run OpenPane desktop");
+        .build(tauri::generate_context!())
+        .expect("failed to build OpenPane desktop")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested {
+                api, code: None, ..
+            } = event
+            {
+                if app
+                    .state::<chat_windows::ChatWindows>()
+                    .close_requested(app, "main")
+                {
+                    api.prevent_exit();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

@@ -1,4 +1,6 @@
 import type { ServiceMetadata } from '@openpane/contracts/service';
+import type { FrontendJournal, FrontendRecoveryReference } from '@openpane/client';
+import type { ConversationScope } from '@openpane/contracts';
 import type { OwnedViewStorage } from './view-state.js';
 import { SupersededDraftsError } from './view-state.js';
 import type { FrontendSends } from './frontend-sends.js';
@@ -23,6 +25,13 @@ function pause(signal: AbortSignal): Promise<void> {
     signal.addEventListener('abort', finish, { once: true });
     if (signal.aborted) finish();
   });
+}
+async function waitForClose(target: RecoveryTarget, viewId: string, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  let cancel = () => {};
+  const cancelled = new Promise<void>(resolve => { cancel = resolve; signal.addEventListener('abort', cancel, { once: true }); });
+  try { await Promise.race([target.pool.closed(viewId), cancelled]); }
+  finally { signal.removeEventListener('abort', cancel); }
 }
 async function scanView(target: RecoveryTarget, signal: AbortSignal, valid: () => boolean): Promise<boolean> {
   const { pool, frontend, lease, metadata } = target, storage = lease.storage;
@@ -52,31 +61,68 @@ async function scanView(target: RecoveryTarget, signal: AbortSignal, valid: () =
   } while (after !== null && valid());
   return pending;
 }
-async function scan(target: RecoveryTarget, signal: AbortSignal, valid: () => boolean): Promise<boolean> {
-  let pending = await scanView(target, signal, valid);
-  if (!target.openOtherView) return pending;
+// Snapshot closed journals under their lease, then release all editor locks before a network call.
+async function scanOther(target: RecoveryTarget, viewId: string, signal: AbortSignal, valid: () => boolean): Promise<boolean> {
+  const records: { scope: ConversationScope; references: readonly FrontendRecoveryReference[] }[] = [];
+  const alreadyOwned = target.pool.holds(viewId);
+  const lease = await target.openOtherView?.(viewId);
+  if (!lease) return false;
+  try {
+    let after: string | null = null;
+    do {
+      const page = await lease.storage.draftScopes(target.metadata.hostId, after);
+      if (!valid()) return false;
+      for (const scope of page.scopes) {
+        let borrow: StoreBorrow;
+        try { borrow = await target.pool.recovery(lease, scope); }
+        catch (error) { if (error instanceof SupersededDraftsError) continue; throw error; }
+        try { records.push({ scope, references: [...borrow.store.frontendJournal.read()] }); }
+        finally { borrow.release(); }
+      }
+      after = page.after;
+    } while (after !== null && valid());
+  } finally { lease.release(); }
+  if (!alreadyOwned) await waitForClose(target, viewId, signal);
+  let pending = false;
+  for (const record of records) {
+    let references = record.references;
+    async function update(id: string, acknowledged: boolean): Promise<void> {
+      const alreadyOwned = target.pool.holds(viewId);
+      const lease = await target.openOtherView?.(viewId);
+      if (!lease) throw new Error('This saved editor is open in another document.');
+      try {
+        const borrow = await target.pool.recovery(lease, record.scope);
+        try {
+          const journal = borrow.store.frontendJournal;
+          await (acknowledged ? journal.acknowledged(id) : journal.unavailable(id));
+          references = [...journal.read()];
+        } finally { borrow.release(); }
+      } finally { lease.release(); }
+      if (!alreadyOwned) await waitForClose(target, viewId, signal);
+    }
+    const journal: FrontendJournal = { read: () => references, unavailable: id => update(id, false), acknowledged: id => update(id, true) };
+    for (const reference of record.references) {
+      if (!valid()) return false;
+      await target.frontend.recover({ viewId, journal, reference, current: valid, signal, failed: error => target.otherViewFailed?.(error) });
+    }
+    pending = target.frontend.needsRecovery(viewId, journal) || pending;
+  }
+  return pending;
+}
+async function discover(target: RecoveryTarget, valid: () => boolean, views: Set<string>): Promise<void> {
   let after: string | null = null;
   do {
     const page = await target.lease.storage.savedViews(target.metadata.hostId, after);
-    if (!valid()) return false;
-    for (const viewId of page.ids) {
-      if (!valid()) return false;
-      if (viewId === target.lease.storage.viewId) continue;
-      let lease: ViewBorrow | null = null;
-      try {
-        lease = await target.openOtherView(viewId);
-        if (lease && valid()) pending = await scanView({ ...target, lease }, signal, valid) || pending;
-      } catch (error) { if (valid()) target.otherViewFailed?.(error); }
-      finally { lease?.release(); }
-      if (valid()) await pause(signal);
-    }
+    if (!valid()) return;
+    for (const id of page.ids) if (id !== target.lease.storage.viewId) views.add(id);
     after = page.after;
   } while (after !== null && valid());
-  return pending;
 }
 export function createFrontendRecovery() {
   let desired: RecoveryTarget | null = null, running: Pass | null = null, requested = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let discoverViews = false;
+  const pendingViews = new Set<string>();
   async function start(): Promise<void> {
     if (running || !desired || !requested) return;
     clearTimeout(timer);
@@ -90,7 +136,17 @@ export function createFrontendRecovery() {
     let retained: ViewBorrow | undefined, pending = false;
     try {
       retained = target.pool.retainRecovery(target.lease);
-      if (valid()) pending = await scan(target, pass.lifetime.signal, valid);
+      if (valid()) pending = await scanView(target, pass.lifetime.signal, valid);
+      if (target.openOtherView) {
+        if (discoverViews) { await discover(target, valid, pendingViews); if (valid()) discoverViews = false; }
+        for (const viewId of pendingViews) {
+          if (!valid()) break;
+          if (viewId === target.lease.storage.viewId) { pendingViews.delete(viewId); continue; }
+          try { if (!await scanOther(target, viewId, pass.lifetime.signal, valid) && valid()) pendingViews.delete(viewId); }
+          catch (error) { if (valid()) { pendingViews.delete(viewId); target.otherViewFailed?.(error); } }
+        }
+        pending = pending || pendingViews.size > 0;
+      }
     } catch (error) {
       if (valid()) target.pool.failed(target.lease.storage, error);
     } finally {
@@ -112,6 +168,8 @@ export function createFrontendRecovery() {
     retarget(next: RecoveryTarget | null): void {
       if (sameTarget(desired, next)) return;
       desired = next;
+      discoverViews = next !== null;
+      pendingViews.clear();
       clearTimeout(timer);
       timer = undefined;
       requested = next !== null;
@@ -119,7 +177,8 @@ export function createFrontendRecovery() {
       queueMicrotask(() => { void start(); });
     },
     wake(source: { readonly pool: RecoveryTarget['pool']; readonly storage: OwnedViewStorage }): void {
-      if (desired?.pool !== source.pool || desired.lease.storage !== source.storage) return;
+      if (!desired || desired.pool !== source.pool || desired.lease.storage !== source.storage && !desired.openOtherView) return;
+      if (desired.lease.storage !== source.storage) pendingViews.add(source.storage.viewId);
       requested = true;
       running?.lifetime.abort();
       clearTimeout(timer);

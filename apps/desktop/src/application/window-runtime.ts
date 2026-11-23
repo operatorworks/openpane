@@ -19,10 +19,11 @@ import type { DesktopWindowContext, NativePlacementIntent, NativeReservation } f
 import type { DraftCarry } from './draft-carry.js';
 import { bindDraftCarry, offerDraftCarry, sourceCarries, targetCarries, cancelDraftCarry, refuseDraftCarry, retryDraftCarry, hostCarries, removeRetainedCarry } from './draft-carry.js';
 import { WindowCoordinator } from './window-coordinator.js';
+import { PlacementSuperseded } from './placement-port.js';
 
 export type WindowRecovery =
   | { readonly kind: 'none' }
-  | { readonly kind: 'main'; readonly windows: readonly NativeReservation[]; readonly carries: readonly DraftCarry[]; readonly carriesAfter: IDBValidKey | null; readonly carryNotice: string | null }
+  | { readonly kind: 'main'; readonly windows: readonly NativeReservation[]; readonly carries: readonly DraftCarry[]; readonly carriesAfter: IDBValidKey | null; readonly carriesFirstPage: boolean; readonly carryNotice: string | null }
   | { readonly kind: 'chat'; readonly pending: readonly NativePlacementIntent[]; readonly history: readonly NativePlacementIntent[]; readonly after: string | null;
       readonly carries: readonly DraftCarry[] };
 export interface WindowRuntimeSnapshot { readonly closing: boolean; readonly canRetryCreation: boolean; readonly recovery: WindowRecovery; readonly catalogOnly: boolean; readonly capabilityNotice: string | null; readonly placementNotice: string | null }
@@ -174,7 +175,7 @@ export class WindowRuntime {
       const attempt = this.placingPolicy;
       if (!(this.ui instanceof UiConnection) || !attempt || !sameScope(attempt.scope, reservation.scope)) return;
       for (const transition of attempt.transitions) {
-        if (this.confirmedPolicyDelivery() !== attempt.delivery) return;
+        if (this.confirmedPolicyDelivery() !== attempt.delivery) throw new PlacementSuperseded();
         await this.ui.reservePlacement(transition, {
         scope: reservation.scope, viewId: reservation.viewId, label: reservation.label,
         nativeTransitionId: reservation.transitionId, bindingRevision: binding.revision,
@@ -206,6 +207,11 @@ export class WindowRuntime {
         if (this.closed) { unlisten(); return; }
         this.cleanups.push(unlisten);
         if (event === 'openpane-ui-wakeup') void this.recoveryWake();
+        if (event === 'openpane-close-requested') void this.port?.request({ kind: 'read-close' }).then(value => {
+          const state = record(value, ['pending']);
+          if (typeof state.pending !== 'boolean') throw new Error('Invalid native close state');
+          if (state.pending && !this.closed) void this.closeWindow();
+        }).catch(error => this.update({ placementNotice: String(error) }));
       }, error => this.update({ placementNotice: String(error) }));
     }
     this.ui.start();
@@ -230,14 +236,15 @@ export class WindowRuntime {
     const supported = this.context.role === 'main' && this.context.liveRelay;
     const active = this.controller.getSnapshot().active;
     const catalogOnly = separate && supported && !active;
-    this.coordinator.setPresentation(presentation);
+    if (builtin || this.confirmedPolicyDelivery()) this.coordinator.setPresentation(presentation);
     const delivery = builtin || !state.state ? null : JSON.stringify([state.deliveryContext, state.state.selection.deliveryGeneration, state.state.selection.revision, state.state.bundle?.digest]);
     if (this.policyDelivery !== delivery) { this.policyDelivery = delivery; this.policyAppliedScope = null; if (this.processing) this.recoveryDirty = true; }
     this.separatePolicy = separate && supported;
     if (!this.separatePolicy) { this.policyScope = null; this.policyAppliedScope = null; }
     else {
       const pending = this.controller.getSnapshot().lastPlacement;
-      const scope = active?.scope ?? (pending?.kind === 'pending' ? pending.scope : null);
+      const reserved = state.state?.transitions.find(transition => transition.slot.target)?.slot.target?.scope;
+      const scope = reserved ?? active?.scope ?? (pending?.kind === 'pending' ? pending.scope : null);
       if (scope && (!this.policyAppliedScope || !sameScope(this.policyAppliedScope, scope))) this.policyScope = scope;
     }
     this.update({ catalogOnly, capabilityNotice: separate && this.context.role !== 'chat' && !supported
@@ -278,37 +285,37 @@ export class WindowRuntime {
     if (state.busy || state.host.kind !== 'ready' || state.storageFailure) return;
     this.processing = true;
     try {
-      if (this.recoveryDirty) { this.recoveryDirty = false; await this.refreshRecovery(); }
+      if (this.recoveryDirty || this.context.role === 'main' && state.lastPlacement?.kind === 'pending') { this.recoveryDirty = false; await this.refreshRecovery(); }
       if (this.context.role === 'chat') {
         if (state.saved.pendingCreation && !this.childReady) await this.controller.recoverCreation();
-        await this.syncDraftCarries();
+        await this.syncDraftCarries().catch(error => this.update({ placementNotice: String(error) }));
         const current = this.controller.getSnapshot(), binding = this.childOwner?.editorBinding();
         if (!this.childReady && !this.childRefusalReported && !current.active && !current.saved.pendingCreation && current.error && this.context.reservation.creationAgentId) {
           await this.port?.request({ kind: 'creation-refused' }); this.childRefusalReported = true; this.update({ canRetryCreation: true });
         }
-        if (!this.childReady && current.active && binding && sameScope(current.active.scope, this.context.reservation.scope)) {
+        if (!this.childReady && current.host.kind === 'ready' && !current.storageFailure && !current.saved.pendingCreation && current.active && binding && sameScope(current.active.scope, this.context.reservation.scope)) {
           await this.port?.request({ kind: 'ready', binding, visible: document.visibilityState === 'visible' });
           this.childReady = true; if (this.ui instanceof ChildUiConnection) this.ui.refresh();
         }
         return;
       }
-      await this.syncDraftCarries();
+      await this.syncDraftCarries().catch(error => this.update({ placementNotice: String(error) }));
       const delivery = this.confirmedPolicyDelivery();
       if (this.policyScope && delivery && delivery === this.policyDelivery) {
         const scope = this.policyScope;
-        const attempt = { scope, delivery, transitions: this.ui.getSnapshot().state?.transitions ?? [] };
+        const attempt = { scope, delivery, transitions: (this.ui.getSnapshot().state?.transitions ?? []).filter(transition => !transition.slot.target || sameScope(transition.slot.target.scope, scope)) };
         this.policyAppliedScope = scope;
         this.placingPolicy = attempt;
         let placed: ConversationOpenResult;
-        try { placed = await this.controller.openReserved(scope); } finally { this.placingPolicy = null; }
+        try { placed = await this.coordinator.withPlacementGuard(scope, () => this.confirmedPolicyDelivery() === delivery && this.policyDelivery === delivery, () => this.controller.openReserved(scope)); } finally { this.placingPolicy = null; }
         if (this.confirmedPolicyDelivery() === delivery && this.policyDelivery === delivery) {
           if (placed.kind === 'detached') this.policyScope = null;
           else if (placed.kind === 'refused') {
-            this.policyScope = null;
             if (this.ui instanceof UiConnection) for (const transition of attempt.transitions) {
               if (this.confirmedPolicyDelivery() !== delivery) break;
               await this.ui.failPlacement(transition, placed.reason);
             }
+            this.policyScope = null;
           }
           this.update({ placementNotice: placed.kind === 'refused' || placed.kind === 'pending' ? placed.reason : null });
         }
@@ -324,7 +331,7 @@ export class WindowRuntime {
       const value = await this.port.request({ kind: 'pending-intents' });
       if (!Array.isArray(value) || value.length > 32) throw new Error('Invalid native intent queue');
       for (const raw of value) await this.processIntent(parseNativePlacementIntent(raw));
-    } catch (error) { this.update({ placementNotice: error instanceof Error ? error.message : String(error) }); }
+    } catch (error) { if (!(error instanceof PlacementSuperseded)) this.update({ placementNotice: error instanceof Error ? error.message : String(error) }); }
     finally { this.processing = false; if (this.recoveryDirty && !this.closed) queueMicrotask(() => { void this.drive(); }); }
   }
   private async processIntent(intent: NativePlacementIntent): Promise<void> {
@@ -386,12 +393,17 @@ export class WindowRuntime {
       let carries: readonly DraftCarry[] = [], carriesAfter: IDBValidKey | null = null, carryNotice: string | null = null;
       try { if (hostId) { const page = await hostCarries(hostId, this.carryRecoveryAfter); carries = page.carries; carriesAfter = page.after; if (page.unreadable) carryNotice = 'Some saved transfer records cannot be read. Other chats remain available; original records are preserved.'; } }
       catch { carryNotice = 'Saved draft transfer history could not be read. Original drafts are preserved.'; }
-      this.update({ recovery: { kind: 'main', windows: value.map(parseNativeReservation).filter(window => window.scope.hostId === hostId), carries, carriesAfter, carryNotice } });
+      this.update({ recovery: { kind: 'main', windows: value.map(parseNativeReservation).filter(window => window.scope.hostId === hostId), carries, carriesAfter, carriesFirstPage: this.carryRecoveryAfter === null, carryNotice } });
       const pending = state.lastPlacement;
       if (pending?.kind === 'pending' && pending.scope?.hostId === hostId) {
         const native = parseNativeWindowLookup(await this.port.request({ kind: 'lookup', scope: pending.scope }), pending.scope);
         if (native.kind === 'opening' && native.reservation.phase === 'failed') {
           const result = { kind: 'refused', reason: 'The assigned chat could not be created. Open its saved window to review the refusal; its unsent draft is preserved.' } as const;
+          const delivery = this.confirmedPolicyDelivery();
+          if (delivery && delivery === this.policyDelivery && this.ui instanceof UiConnection) for (const transition of this.ui.getSnapshot().state?.transitions ?? []) {
+            if (this.confirmedPolicyDelivery() !== delivery) break;
+            if (transition.slot.target && sameScope(transition.slot.target.scope, pending.scope)) await this.ui.failPlacement(transition, result.reason);
+          }
           if (this.controller.settlePlacement(pending, result)) { this.policyScope = null; this.update({ placementNotice: result.reason }); }
         }
         if (native.kind === 'ready' && this.controller.settlePlacement(pending, { kind: 'detached', scope: pending.scope, label: native.reservation.label })) {
@@ -488,6 +500,10 @@ export class WindowRuntime {
   async moreSavedTransfers(): Promise<void> {
     if (this.snapshot.recovery.kind !== 'main' || !this.snapshot.recovery.carriesAfter) return;
     this.carryRecoveryAfter = this.snapshot.recovery.carriesAfter; await this.refreshRecovery();
+  }
+  async firstSavedTransfers(): Promise<void> {
+    if (this.context.role !== 'main') return;
+    this.carryRecoveryAfter = null; await this.refreshRecovery();
   }
   async removeSavedCarry(carry: DraftCarry): Promise<void> {
     try { await removeRetainedCarry(carry); await this.refreshRecovery(); }

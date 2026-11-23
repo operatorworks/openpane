@@ -23,7 +23,7 @@ export type UiRequest = DisplayRequest
   | { readonly op: 'placement-reserve'; readonly session: string; readonly envelope: DeliveryEnvelope; readonly transitionId: string; readonly target: NativePlacementTarget }
   | { readonly op: 'placement-idle'; readonly session: string; readonly envelope: DeliveryEnvelope; readonly transitionId: string }
   | { readonly op: 'placement-failed'; readonly session: string; readonly envelope: DeliveryEnvelope; readonly transitionId: string; readonly reason: string }
-  | { readonly op: 'state'; readonly after: number | null; readonly waitMs: number; readonly context: WindowContext; readonly visible: boolean; readonly presenceSequence: number; readonly nativePlacement?: boolean; readonly display?: DisplaySubscription | null }
+  | { readonly op: 'state'; readonly after: number | null; readonly waitMs: number; readonly context: WindowContext; readonly visible: boolean; readonly presenceSequence: number; readonly nativePlacement?: boolean; readonly display?: DisplaySubscription | null; readonly liveChildren?: readonly string[] }
   | { readonly op: 'ack'; readonly session: string; readonly envelope: DeliveryEnvelope; readonly result: { readonly kind: 'rendered' } | { readonly kind: 'failed'; readonly reason: string } };
 export const parseDeliveryEnvelope = parseDelivery;
 export function parseUiRequest(value: unknown): UiRequest {
@@ -68,13 +68,19 @@ export function parseUiRequest(value: unknown): UiRequest {
     }
     case 'state': {
       const keys = ['op', 'after', 'waitMs', 'context', 'visible', 'presenceSequence'];
-      if (Object.hasOwn(input, 'nativePlacement')) keys.push('nativePlacement'); if (Object.hasOwn(input, 'display')) keys.push('display'); record(input, keys);
+      if (Object.hasOwn(input, 'nativePlacement')) keys.push('nativePlacement'); if (Object.hasOwn(input, 'display')) keys.push('display'); if (Object.hasOwn(input, 'liveChildren')) keys.push('liveChildren'); record(input, keys);
       if (input.nativePlacement !== undefined && typeof input.nativePlacement !== 'boolean') throw new Error('Invalid native placement capability');
       const waitMs = count(input.waitMs);
       if (waitMs > 2000 || typeof input.visible !== 'boolean') throw new Error('Invalid UI state request');
       const context = parseWindowContext(input.context), display = input.display == null ? null : parseDisplaySubscription(input.display);
+      let liveChildren: readonly string[] = [];
+      if (Object.hasOwn(input, 'liveChildren')) {
+        if (context.role !== 'main' || input.nativePlacement !== true || !Array.isArray(input.liveChildren) || input.liveChildren.length > 32) throw new Error('Invalid native child inventory');
+        liveChildren = input.liveChildren.map(value => identifier(value, 200));
+        if (new Set(liveChildren).size !== liveChildren.length) throw new Error('Duplicate native child inventory');
+      }
       if (display && context.role === 'chat' && !sameScope(display.scope, context.scope)) throw new Error('Foreign chat display subscription');
-      return { op: input.op, after: input.after === null ? null : count(input.after), waitMs, context, visible: input.visible, presenceSequence: count(input.presenceSequence), nativePlacement: input.nativePlacement === true, display };
+      return { op: input.op, after: input.after === null ? null : count(input.after), waitMs, context, visible: input.visible, presenceSequence: count(input.presenceSequence), nativePlacement: input.nativePlacement === true, display, liveChildren };
     }
     case 'placement-reserve': case 'placement-idle': case 'placement-failed': {
       const keys = ['op', 'session', 'envelope', 'transitionId'];

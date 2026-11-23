@@ -106,3 +106,11 @@ test('wait deadline bounds a final stalled status socket and returns its last pe
   assert.equal(result.code, 0, result.stderr); assert.ok(performance.now() - started < 1500); assert.ok(polls >= 2);
   assert.deepEqual(JSON.parse(result.stdout), { outcome: 'pending', receipt: { requestId: '1:wait-fixture' }, waitEnded: true });
 });
+
+test('packaged UI argument validation reports invalid-input refusal codes', async () => {
+  for (const args of [[], ['--unknown'], ['--data-dir','/unreachable-fixture','display','list','--scope-json','not-json']]) {
+    const result = await command(cli, ['ui', ...args]);
+    assert.equal(result.code,1);
+    assert.equal(JSON.parse(result.stderr).code,'invalid-input');
+  }
+});

@@ -11,14 +11,53 @@ import { DisplayTransportContext } from './display-state.js';
 
 const connectionSubscribers = new WeakMap<UiTransport, number>();
 function visibleFrame(): Promise<void> { return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); }
+function rgb(value: string) {
+  const match = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)$/u.exec(value);
+  return match ? { red: Number(match[1]), green: Number(match[2]), blue: Number(match[3]), alpha: Number(match[4] ?? 1) } : null;
+}
+type Rgb = NonNullable<ReturnType<typeof rgb>>;
+function composite(front: Rgb, back: Rgb): Rgb {
+  const alpha = front.alpha + back.alpha * (1 - front.alpha);
+  const channel = (a: number, b: number) => alpha ? (a * front.alpha + b * back.alpha * (1 - front.alpha)) / alpha : 0;
+  return { red: channel(front.red, back.red), green: channel(front.green, back.green), blue: channel(front.blue, back.blue), alpha };
+}
+function luminance(color: Rgb): number {
+  const linear = (value: number) => { const channel = value / 255; return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * linear(color.red) + 0.7152 * linear(color.green) + 0.0722 * linear(color.blue);
+}
+function readableText(control: HTMLElement, style: CSSStyleDeclaration): void {
+  const foreground = rgb(style.color);
+  if (!foreground) return;
+  if (foreground.alpha < 0.5) throw new Error('An essential OpenPane control has transparent text');
+  let background: Rgb = { red: 0, green: 0, blue: 0, alpha: 0 };
+  for (let surface: HTMLElement | null = control; surface; surface = surface.parentElement) {
+    const css = getComputedStyle(surface);
+    let layer = rgb(css.backgroundColor);
+    if (!layer) return;
+    if (css.backgroundImage !== 'none') {
+      const stops = [...css.backgroundImage.matchAll(/rgba?\([^)]*\)/gu)].flatMap(match => { const color = rgb(match[0]); return color ? [color] : []; });
+      const first = stops[0];
+      // A constant gradient is a solid fill. Other artwork may include small control decorations.
+      if (!css.backgroundImage.startsWith('linear-gradient(') || (css.backgroundImage.match(/linear-gradient\(/gu) ?? []).length !== 1
+        || stops.length < 2 || !first || stops.some(stop => stop.red !== first.red || stop.green !== first.green || stop.blue !== first.blue || stop.alpha !== first.alpha)) return;
+      layer = composite(first, layer);
+    }
+    background = composite(background, layer);
+    if (background.alpha === 1) break;
+  }
+  background = composite(background, { red: 255, green: 255, blue: 255, alpha: 1 });
+  const text = luminance(composite(foreground, background)), fill = luminance(background);
+  if ((Math.max(text, fill) + 0.05) / (Math.min(text, fill) + 0.05) < 1.5) throw new Error('An essential OpenPane control has unreadable text');
+}
 function essentialControls(root: HTMLElement): void {
-  const controls = root.querySelectorAll<HTMLElement>('[data-openpane-essential]');
+  const controls = root.querySelectorAll<HTMLElement>('[data-openpane-essential], .settings-panel button, .settings-panel input, .settings-panel textarea, .settings-panel select, .extensions-panel [data-openpane-part="button"], .extension-back');
   if (!controls.length) throw new Error('Essential OpenPane controls are missing');
   for (const control of controls) {
     if (control.closest('[hidden]')) continue;
     const bounds = control.getBoundingClientRect(), style = getComputedStyle(control);
     if (!bounds.width || !bounds.height || style.visibility !== 'visible' || style.display === 'none' || Number(style.opacity) === 0) throw new Error('An essential OpenPane control is hidden');
     if (/^(?:rgba|hsla)\([^)]*[,/]\s*0(?:\.0+)?\s*\)$/u.test(style.color) || style.color === 'transparent') throw new Error('An essential OpenPane control has transparent text');
+    readableText(control, style);
     let left = bounds.left, top = bounds.top, right = bounds.right, bottom = bounds.bottom, scrollReachable = false;
     for (let ancestor = control.parentElement; ancestor && ancestor !== root.parentElement; ancestor = ancestor.parentElement) {
       const clip = ancestor.getBoundingClientRect(), css = getComputedStyle(ancestor);
@@ -53,6 +92,7 @@ async function stage(state: UiClientSnapshot, signal: AbortSignal): Promise<HTML
     try { if (bitmap.width > 2048 || bitmap.height > 2048) throw new Error('Experience artwork dimensions exceed limits'); }
     finally { bitmap.close(); }
   }));
+  signal.throwIfAborted();
   if (!manifest.stylesheet) return null;
   const link = document.createElement('link'); link.rel = 'stylesheet'; link.media = 'not all'; link.href = `/ui-assets/${digest}/${manifest.stylesheet}`;
   await new Promise<void>((resolve, reject) => {
@@ -91,10 +131,11 @@ function validateHome(root: HTMLElement, visual: VisualSelection): void {
   });
   if (JSON.stringify(actual) !== JSON.stringify(homePaneOrder(visual.manifest.presentation.home))) throw new Error('Home pane composition did not render in the declared order');
 }
-/** Measures the existing Home synchronously, then restores every DOM attribute before the browser can paint. */
-function validateDestination(root: HTMLElement, visual: VisualSelection, destination: 'home' | 'chats'): void {
+/** Measures mounted destinations synchronously and restores their DOM before the browser can paint. */
+function validateDestination(root: HTMLElement, visual: VisualSelection, destination: 'home' | 'chats' | 'settings' | 'extensions'): void {
   const home = root.querySelector<HTMLElement>('[data-home-destination]');
-  if (!home || home.dataset.homeDestination === destination && !home.closest('[hidden]')) return;
+  const view = destination === 'home' || destination === 'chats' ? home?.closest<HTMLElement>('.shell-view') : root.querySelector<HTMLElement>(`[data-shell-destination="${destination}"]`);
+  if (!view || !home || home.dataset.homeDestination === destination && !home.closest('[hidden]')) return;
   const undo: (() => void)[] = [];
   const attribute = (node: HTMLElement, name: string, value: string | null) => {
     const previous = node.getAttribute(name);
@@ -103,10 +144,14 @@ function validateDestination(root: HTMLElement, visual: VisualSelection, destina
   };
   const restoreFrame = captureFrame(root);
   try {
-    const view = home.closest<HTMLElement>('.shell-view');
-    if (view?.parentElement) for (const sibling of view.parentElement.children) {
+    if (view.parentElement) for (const sibling of view.parentElement.children) {
       if (sibling instanceof HTMLElement && sibling.classList.contains('shell-view')) attribute(sibling, 'hidden', sibling === view ? null : '');
     }
+    for (const button of root.querySelectorAll<HTMLElement>('[data-openpane-role="navigation"][data-openpane-essential]')) {
+      const selected = button.dataset.openpaneEssential === destination;
+      attribute(button, 'data-openpane-state', selected ? 'selected' : null); attribute(button, 'aria-pressed', String(selected));
+    }
+    if (destination === 'settings' || destination === 'extensions') { essentialControls(root); return; }
     const layout = homeLayout(visual.manifest.presentation.home, destination);
     attribute(home, 'data-home-destination', destination);
     attribute(home, 'data-home-columns', layout.columns ? 'two' : 'one');
@@ -167,6 +212,12 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
         setPhase('staging');
         if (!transport.localBuiltin && state) link = await stage(state, abort.signal);
         if (abort.signal.aborted) { link?.remove(); return; }
+        if (abort.signal.aborted) return;
+        const root = content.current;
+        if (!root) throw new Error('Experience frame unavailable');
+        const deadline = performance.now() + 5000;
+        while (!root.querySelector('[data-openpane-essential]') && (!candidate || performance.now() < deadline) && !abort.signal.aborted) await visibleFrame();
+        if (abort.signal.aborted) return;
         if ((candidate || structure(prior) !== structure(candidate)) && composing.current) {
           setPhase('composition-deferred'); setNotice(transport.localBuiltin ? 'Restore waiting for text input to finish' : 'Appearance waiting for text input to finish');
           while (composing.current && !abort.signal.aborted) {
@@ -175,11 +226,6 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
           }
         }
         if (abort.signal.aborted) return;
-        const root = content.current;
-        if (!root) throw new Error('Experience frame unavailable');
-        const deadline = performance.now() + 5000;
-        while (!root.querySelector('[data-openpane-essential]') && (!candidate || performance.now() < deadline) && !abort.signal.aborted) await visibleFrame();
-        if (abort.signal.aborted) return;
         setPhase('validating');
         const restoreFrame = captureFrame(content.current); restoreCandidateFrame = restoreFrame;
         if (link) link.media = 'all';
@@ -187,7 +233,10 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
           if (!initialized.current && candidate) setBootstrap({ kind: 'candidate', initial: 'experience' });
           setVisual(candidate);
         });
-        if (candidate) { essentialControls(root); validateHome(root, candidate); validateDestination(root, candidate, 'home'); validateDestination(root, candidate, 'chats'); }
+        if (candidate) {
+          essentialControls(root); validateHome(root, candidate);
+          for (const destination of ['home', 'chats', 'settings', 'extensions'] as const) validateDestination(root, candidate, destination);
+        }
         restoreFrame(); candidateFocus = document.activeElement;
         installedStylesheet.current?.remove(); installedStylesheet.current = link; link = null;
         validatedVisual.current = candidate; committed = true;

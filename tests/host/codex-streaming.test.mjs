@@ -427,3 +427,16 @@ test('UI integration text follows each exact scope through concurrent threads an
   assert.equal(resumed.params.input[0].text, '<openpane-ui version="1">' + JSON.stringify(scope) + '</openpane-ui>');
   assert.ok(f.log().some(message => message.method === 'thread/resume'));
 });
+
+test('UI context failure is a known non-dispatch outcome without leaking callback text', async t => {
+  let broken = true;
+  const f = fixture(t, 'ordinary', () => false, { uiContext() { if (broken) throw new Error('PRIVATE_CONTEXT_MARKER'); return 'context recovered'; } });
+  const result = await f.port.submit(command('context-failed'));
+  assert.deepEqual(result.receipt.state, { kind: 'not-dispatched', reason: 'UI context could not be prepared. Try again with a new command.' });
+  assert.equal(f.log().filter(message => message.method === 'turn/start').length, 0);
+  assert.deepEqual(f.document().domain.messages, []);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_CONTEXT_MARKER/);
+  broken = false;
+  assert.equal((await f.port.submit(command('context-recovered'))).receipt.state.kind, 'completed');
+  assert.equal(f.log().filter(message => message.method === 'turn/start').length, 1);
+});

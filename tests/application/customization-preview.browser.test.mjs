@@ -125,7 +125,7 @@ test('the template workspace uses a namespaced conformance provider and leaves h
   await workspace.getByRole('button', { name: 'Approve', exact: true }).click();
   await wait(() => service.answers()[0] === 'approve', 'ordinary host approval');
   service.reply('Unresolved decision: should we ship?');
-  await workspace.getByRole('heading', { name: 'Unresolved decisions' }).waitFor();
+  await workspace.getByRole('heading', { name: 'Review notes' }).waitFor();
   await workspace.getByRole('listitem').filter({ hasText: 'Unresolved decision: should we ship?' }).waitFor();
   await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Chats', exact: true }).click();
   assert.equal(await page.locator('#message').count(), 1);

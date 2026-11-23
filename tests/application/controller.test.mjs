@@ -6,6 +6,21 @@ import { ServiceConnectionLost } from '@openpane/client/service';
 import { CLAUDE_SDK_RUNTIMES, CODEX_RUNTIME, CODEX_SDK_RUNTIME, PI_RUNTIME, RECORDED_RUNTIME } from '@openpane/contracts/compatibility';
 import { applicationEnabled } from '../../apps/desktop/dist/application/application-controller.js';
 import { scope, empty, deferred, fixture } from './controller-fixture.mjs';
+import { WindowCoordinator } from '../../apps/desktop/dist/application/window-coordinator.js';
+
+test('a refused assigned child creation retries its original scope without delegating another chat', async t => {
+  const commands = [];
+  const placement = new WindowCoordinator({ context: { role: 'chat', viewId: 'original-view', reservation: { scope } }, async request(command) { commands.push(command); throw new Error('Assigned creation must stay in its child'); } });
+  const f = fixture({ placement, fixedScope: scope }); t.after(() => f.app.dispose());
+  await f.app.start();
+  f.behavior.create = async () => { throw new ServiceError('create-rejected', 'Creation refused'); };
+  await f.app.createReserved(scope, 'default');
+  assert.deepEqual(f.created, [scope]);
+  f.behavior.create = async () => {};
+  assert.equal((await f.app.createReserved(scope, 'default')).kind, 'inline');
+  assert.deepEqual(f.created, [scope, scope]);
+  assert.deepEqual(commands, []);
+});
 
 test('background search leaves active state usable and rejects stale, foreign and nonadvancing pages', async t => {
   const f = fixture(); t.after(() => f.app.dispose());
@@ -1157,7 +1172,7 @@ test('recovery and visible install share one writer and gain eligibility from th
   const held = deferred(), entered = deferred();
   f.drafts.set('original-view/host/conversation', journalRecord(scope));
   const actual = { ...f.descriptor('actual'), frontendOffers: 'ag-ui-capture-and-bind' };
-  f.behavior.agents = [f.descriptor(), actual]; f.behavior.agentLookup = () => actual;
+  f.behavior.agents = [f.descriptor()]; f.behavior.agentLookup = () => actual;
   f.behavior.binding = async request => { entered.resolve(); await held.promise; return { kind: 'unavailable', id: request.id, reason: 'closures-unavailable' }; };
   const source = await createFrontendToolGeneration({ namespace: 'fixture', generation: 'new', platform: 'desktop', capture: () => undefined,
     activate({ frontendTools }) { frontendTools.add({ definition: { name: 'echo', description: 'New' }, decodeInput: x => x, async execute() { throw new Error('No execution'); } }); return { dispose() {} }; } });
@@ -1682,7 +1697,7 @@ test('a catalog route owned by another document leaves the connected catalog usa
   assert.equal((await f.app.create()).kind, 'inline');
 });
 
-test('creation retains its pending reservation until the created editor finishes placement', async t => {
+test('confirmed creation releases its reservation even when final placement detaches', async t => {
   let f, pendingAtPlacement;
   const placement = { async acquire(request, owner) {
     if (!request.creation && request.scope.conversationId.startsWith('id-')) {
@@ -1693,8 +1708,9 @@ test('creation retains its pending reservation until the created editor finishes
   } };
   f = fixture({ placement }); t.after(() => f.app.dispose()); await f.app.start();
   const result = await f.app.create(); assert.equal(result.kind, 'detached');
-  assert.deepEqual(pendingAtPlacement.scope, result.scope); assert.deepEqual(f.app.getSnapshot().saved.pendingCreation.scope, result.scope);
+  assert.equal(pendingAtPlacement, null); assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
   assert.equal(f.app.getSnapshot().saved.route, null); assert.equal(f.created.length, 1);
+  assert.equal((await f.app.create()).kind, 'detached'); assert.equal(f.created.length, 2);
 });
 
 test('a navigation failure after durable pending creation reports its same reserved scope for recovery', async t => {
@@ -1752,4 +1768,242 @@ test('an inline editor acquired after disposal is released instead of stranding 
   t.after(() => f.app.dispose()); await f.app.start(); moving = true;
   const opening = f.app.openReserved(scope); await entered.promise; await f.app.dispose(); release.resolve(); await opening;
   assert.equal(acquired.closed, true); assert.deepEqual(f.submitted, []);
+});
+
+test('an unreadable acquired inline editor preserves the working source and its restart route', async t => {
+  let moving = false;
+  const f = fixture({ placement: { async acquire(_request, owner) {
+    if (!moving) return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+    const storage = await f.storage.reopen('unreadable-view', () => {});
+    storage.readView = async () => { throw new Error('Unsupported destination view'); };
+    return { kind: 'inline', view: { kind: 'acquired', storage } };
+  } } });
+  t.after(() => f.app.dispose()); f.storage.catalogViewId = 'original-view';
+  f.views.set('original-view/host', { ...empty(), route: scope }); await f.app.start();
+  const source = f.app.getSnapshot().active; await source.store.setDraft('Keep the working draft'); moving = true;
+  assert.equal((await f.app.openReserved({ ...scope, conversationId: 'different' })).kind, 'refused');
+  assert.equal(f.app.getSnapshot().active, source); assert.equal(f.app.getSnapshot().storageFailure, '');
+  await source.store.setDraft('Still writable'); assert.equal(f.drafts.get('original-view/host/conversation').draft, 'Still writable');
+  assert.deepEqual(f.views.get('original-view/host').route, scope);
+  await eventually(() => f.leases.find(lease => lease.viewId === 'unreadable-view').closed);
+});
+
+test('a released source is restored when an inline owned result names an unavailable lease', async t => {
+  let moving = false;
+  const f = fixture({ placement: { async acquire(_request, owner) {
+    if (moving) { await owner.release(); return { kind: 'inline', view: { kind: 'owned', viewId: 'unknown-view' } }; }
+    return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+  } } });
+  t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), route: scope }); await f.app.start();
+  await f.app.getSnapshot().active.store.setDraft('Restore after release'); moving = true;
+  assert.equal((await f.app.openReserved(scope)).kind, 'refused');
+  assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft, 'Restore after release');
+  assert.equal(f.app.getSnapshot().storageFailure, ''); moving = false; await f.app.reconnect();
+  assert.equal(f.app.getSnapshot().host.kind, 'ready');
+});
+
+for (const kind of ['refused', 'pending']) test(`saved route restoration publishes its ${kind} placement outcome`, async t => {
+  const f = fixture({ placement: { async acquire(request) { return kind === 'refused' ? { kind, reason: 'Restore refused explicitly' } : { kind, scope: request.scope, reason: 'Restore still waiting' }; } } });
+  t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), route: scope }); await f.app.start();
+  assert.equal(f.app.getSnapshot().lastPlacement.kind, kind); assert.equal(f.app.getSnapshot().host.kind, 'ready');
+  if (kind === 'refused') assert.equal(f.app.getSnapshot().error, 'Restore refused explicitly');
+  else assert.equal(f.app.settlePlacement(f.app.getSnapshot().lastPlacement, { kind: 'refused', reason: 'Restore eventually declined' }), true);
+});
+
+test('same-store reconnect restores preview and permission subscriptions', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), route: scope });
+  f.behavior.catalog = async () => [scope]; await f.app.start(); await deliver(f);
+  const store = f.app.getSnapshot().active.store; f.connectionLost(new ServiceConnectionLost('Disconnected'));
+  await f.app.reconnect(); assert.equal(f.app.getSnapshot().active.store, store);
+  await deliver(f, { messages: [{ messageId: 'updated', revision: 1, role: 'user', text: 'New preview after reconnect', complete: true }], currentRun: null });
+  assert.equal(f.app.getSnapshot().catalog.items[0].preview, 'New preview after reconnect');
+  await eventually(() => f.app.getSnapshot().permissionState.kind === 'fresh');
+  f.feeds.at(-1).finish({ kind: 'closed', cursor: 1, reason: 'Feed closed' });
+  await eventually(() => f.app.getSnapshot().permissionState.kind === 'stale');
+});
+
+test('saved pending creation reopens its original editor before checking conversation availability', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); const pendingCreation = { scope, agentId: 'default' };
+  f.storage.readLegacyDraft = async () => ({ kind: 'bound', viewId: 'pending-view', scope, text: 'Unsent pending draft', pendingCreation });
+  f.views.set('pending-view/host', { ...empty(), pendingCreation }); f.drafts.set('pending-view/host/conversation', { version: 3, scope, draft: 'Unsent pending draft', draftRevision: 1, image: null, outbox: [], frontendSends: [] });
+  f.behavior.agentLookup = async () => null; await f.app.start(); await f.app.reopenView('pending-view');
+  assert.deepEqual(f.app.getSnapshot().saved.pendingCreation, pendingCreation); assert.equal(f.app.getSnapshot().savedDraftRecovery, null);
+  f.behavior.agentLookup = async () => f.descriptor(); await f.app.recoverCreation();
+  assert.deepEqual(f.created, [scope]); assert.equal(f.app.getSnapshot().active.viewId, 'pending-view');
+  assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft, 'Unsent pending draft'); assert.deepEqual(f.submitted, []);
+});
+
+test('a definitively refused empty creation preserves the previous route without advertising nonexistent draft text', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); await f.app.start();
+  f.behavior.create = async () => { throw new ServiceError('create-rejected', 'No creation accepted'); };
+  await f.app.create(); assert.equal(f.app.getSnapshot().saved.route, null); assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
+  assert.equal(f.app.getSnapshot().savedDraftRecovery, null);
+});
+
+test('empty placement errors remain valid native refusal results', async t => {
+  const { parseConversationOpenResult } = await import('@openpane/contracts');
+  const f = fixture({ placement: { async acquire() { throw new Error(); } } }); t.after(() => f.app.dispose()); await f.app.start();
+  assert.deepEqual(parseConversationOpenResult(await f.app.openReserved(scope)).kind, 'refused');
+});
+
+test('metadata incompatibility observed during an operation blocks commands and completes its delayed handshake', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); await f.app.start(); const entered = deferred(), release = deferred();
+  f.behavior.catalog = async () => { entered.resolve(); await release.promise; return []; };
+  const reading = f.app.refreshCatalog(); await entered.promise; f.behavior.wireVersion = 'incompatible-wire';
+  await f.app.refreshMetadata(); assert.equal(f.app.getSnapshot().host.kind, 'loading');
+  assert.equal((await f.app.create()).kind, 'refused'); release.resolve(); await reading;
+  await eventually(() => f.app.getSnapshot().host.kind === 'incompatible'); assert.equal(f.created.length, 0);
+});
+
+test('closed capture recovery releases editor locks before waiting on the host and retries only affected views', async t => {
+  const f = fixture(), reply = deferred(), entered = deferred(), requests = [];
+  t.after(async () => { reply.resolve(); await f.app.dispose(); });
+  f.storage.recoverClosedView = f.storage.reopen;
+  f.behavior.listing = async () => ({ ids: ['closed-capture', 'unrelated-empty'], unreadable: 0, after: null });
+  f.drafts.set('closed-capture/host/conversation', journalRecord(scope));
+  f.behavior.binding = async request => {
+    requests.push(request);
+    assert.ok(f.leases.filter(lease => lease.viewId === 'closed-capture').every(lease => lease.closed), 'closed editor has no lease during the host wait');
+    entered.resolve(); await reply.promise; throw new Error('Host reply unavailable');
+  };
+  await f.app.start(); await entered.promise;
+  assert.equal(f.app.getSnapshot().host.kind, 'ready'); reply.resolve();
+  await eventually(() => f.leases.some(lease => lease.viewId === 'unrelated-empty' && lease.closed));
+  await new Promise(resolve => setTimeout(resolve, 2_100));
+  assert.ok(requests.length >= 2); assert.equal(f.leases.filter(lease => lease.viewId === 'unrelated-empty').length, 1);
+  assert.equal(f.drafts.get('closed-capture/host/conversation').frontendSends[0].state, 'unavailable-pending');
+});
+
+test('release of an inactive capture wakes recovery for its original view without reopening it visibly', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); f.storage.recoverClosedView = f.storage.reopen;
+  f.views.set('original-view/host', { ...empty(), route: scope }); f.behavior.frontendOffers = 'ag-ui-capture-and-bind';
+  const source = await createFrontendToolGeneration({ namespace: 'fixture', generation: 'wake', platform: 'desktop', capture: () => undefined,
+    activate({ frontendTools }) { frontendTools.add({ definition: { name: 'echo', description: 'Retained' }, decodeInput: x => x, async execute() {} }); return { dispose() {} }; } });
+  const token = {}; f.app.frontendGenerations.begin(token); f.app.frontendGenerations.publish(token, { kind: 'ready', generations: [source.generation] });
+  t.after(() => source.generation.retire()); await f.app.start();
+  await assert.rejects(f.app.getSnapshot().active.store.send('Retained send'), /Reply lost/); const key = f.app.getSnapshot().capturedSends[0].key;
+  await f.app.reopenView('other-view'); await new Promise(resolve => setImmediate(resolve));
+  const requests = []; f.behavior.binding = async request => { requests.push(request); return { kind: 'unavailable', id: request.id, reason: 'closures-unavailable' }; };
+  await f.app.releaseCapturedSend(key);
+  await eventually(() => f.drafts.get('original-view/host/conversation').frontendSends[0].state === 'unavailable-confirmed');
+  assert.equal(requests[0].action, 'unavailable'); assert.equal(f.app.getSnapshot().active, null); assert.equal(f.submitted.length, 1);
+});
+
+test('a refused quiesce preserves the original captured tools and their journal', async t => {
+  let moving = false;
+  const f = fixture({ placement: { async acquire(_request, owner) {
+    if (moving) { await owner.quiesce(); return { kind: 'refused', reason: 'Destination refused' }; }
+    return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+  } } });
+  t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), route: scope }); f.behavior.frontendOffers = 'ag-ui-capture-and-bind';
+  const source = await createFrontendToolGeneration({ namespace: 'fixture', generation: 'quiesce', platform: 'desktop', capture: () => undefined,
+    activate({ frontendTools }) { frontendTools.add({ definition: { name: 'echo', description: 'Original' }, decodeInput: x => x, async execute() {} }); return { dispose() {} }; } });
+  const token = {}; f.app.frontendGenerations.begin(token); f.app.frontendGenerations.publish(token, { kind: 'ready', generations: [source.generation] });
+  t.after(() => source.generation.retire()); await f.app.start(); const store = f.app.getSnapshot().active.store;
+  await assert.rejects(store.send('Captured'), /Reply lost/); const row = f.app.getSnapshot().capturedSends[0]; moving = true;
+  assert.equal((await f.app.openReserved(scope)).kind, 'refused'); assert.equal(f.app.getSnapshot().active.store, store);
+  assert.equal(f.app.getSnapshot().capturedSends[0], row); assert.equal(f.drafts.get('original-view/host/conversation').frontendSends[0].state, 'retained');
+  await assert.rejects(store.retry(row.command.clientCommandId), /Reply lost/); assert.equal(f.submitted.length, 2);
+});
+
+test('creation recovery publishes a refusal from placing the confirmed editor', async t => {
+  const f = fixture({ placement: { async acquire(request, owner) {
+    return request.creation ? { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } } : { kind: 'refused', reason: 'Confirmed editor refused' };
+  } } });
+  t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), pendingCreation: { scope, agentId: 'default' } }); await f.app.start();
+  await f.app.recoverCreation(); assert.equal(f.app.getSnapshot().lastPlacement.kind, 'refused'); assert.equal(f.app.getSnapshot().error, 'Confirmed editor refused');
+  assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
+});
+
+test('an old pending refusal cannot add an error while a newer open is waiting', async t => {
+  let first = true; const gate = deferred(), entered = deferred();
+  const f = fixture({ placement: { async acquire(request, owner) {
+    if (first) { first = false; return { kind: 'pending', scope: request.scope, reason: 'First placement waiting' }; }
+    entered.resolve(); await gate.promise; return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+  } } });
+  t.after(() => f.app.dispose()); await f.app.start(); const old = await f.app.openReserved(scope);
+  const newer = f.app.openReserved({ ...scope, conversationId: 'newer' }); await entered.promise;
+  f.app.settlePlacement(old, { kind: 'refused', reason: 'Old placement refused' }); assert.equal(f.app.getSnapshot().error, '');
+  gate.resolve(); assert.equal((await newer).kind, 'inline'); assert.equal(f.app.getSnapshot().error, '');
+});
+
+test('global catalog pages preserve provider order and keep workspace entries beyond a refreshed first page', async t => {
+  const f = fixture(); t.after(() => f.app.dispose());
+  const entry = id => ({ scope: { ...scope, conversationId: id }, preview: null, provider: { namespace: 'ledger', installationId: 'books', providerAgentId: 'desk' } });
+  const first = Array.from({ length: 100 }, (_, index) => index === 0 ? entry('newer') : { ...entry(`native-${index}`), provider: null });
+  f.behavior.catalogEntries = async after => after === null ? first : [entry('older')];
+  f.behavior.workspaceCatalog = async () => [entry('newer'), entry('older'), entry('oldest')];
+  await f.app.start(); await f.app.loadWorkspace('ledger'); await f.app.moreConversations();
+  assert.equal(f.app.getSnapshot().catalog.items[0].scope.conversationId, 'newer');
+  assert.deepEqual(f.app.getSnapshot().workspaces.ledger.entries.map(row => row.scope.conversationId), ['newer', 'older', 'oldest']);
+  await f.app.refreshCatalog();
+  assert.deepEqual(f.app.getSnapshot().workspaces.ledger.entries.map(row => row.scope.conversationId), ['newer', 'older', 'oldest']);
+});
+
+test('a valid constructor provider namespace creates before its workspace has loaded', async t => {
+  const f = fixture(); t.after(() => f.app.dispose());
+  const agent = { ...f.descriptor('provider-agent'), kind: 'provider', namespace: 'constructor', installationId: 'books', providerAgentId: 'desk' };
+  f.behavior.agents = [agent]; f.behavior.defaultId = agent.id; f.behavior.agentLookup = async () => agent;
+  await f.app.start(); assert.equal((await f.app.create()).kind, 'inline'); assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
+  assert.equal(Object.hasOwn(f.app.getSnapshot().workspaces, 'constructor'), false);
+  f.behavior.workspaceCatalog = async () => []; await f.app.loadWorkspace('constructor');
+  assert.equal(Object.hasOwn(f.app.getSnapshot().workspaces, 'constructor'), true);
+});
+
+test('a late missing-conversation draft lookup cannot publish a notice into a restarted session', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); await f.app.start();
+  const gate = deferred(), entered = deferred(); f.behavior.agentLookup = async () => null;
+  f.storage.locate = async () => { entered.resolve(); return gate.promise; };
+  const opening = f.app.openReserved(scope); await entered.promise;
+  await f.app.dispose(); f.storage.locate = async () => null; await f.app.start(); const replacement = f.app.getSnapshot();
+  gate.resolve(null); await opening;
+  assert.equal(f.app.getSnapshot(), replacement); assert.equal(f.app.getSnapshot().savedViewNotice, '');
+});
+
+test('a destination draft that cannot hydrate does not replace the catalog restart route', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); f.storage.catalogViewId = 'original-view';
+  f.views.set('original-view/host', { ...empty(), route: scope }); await f.app.start();
+  const unreadable = { ...scope, conversationId: 'unsupported-draft' };
+  f.behavior.load = async selected => { if (selected.conversationId === unreadable.conversationId) throw new Error('Unsupported saved draft'); };
+  assert.equal((await f.app.openReserved(unreadable)).kind, 'refused'); assert.deepEqual(f.views.get('original-view/host').route, scope);
+});
+
+test('Start a new chat passes its unsent source to separate placement', async t => {
+  let separate = false; const requests = [];
+  const f = fixture({ placement: { async acquire(request, owner) {
+    requests.push(request); return separate ? { kind: 'pending', scope: request.scope, reason: 'Opening separate chat' } : { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+  } } });
+  t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), route: scope }); await f.app.start();
+  const active = f.app.getSnapshot().active; await active.store.setDraft('Carry this text'); separate = true;
+  await f.app.conversationActions(active).startNewChat();
+  assert.deepEqual(requests.at(-1).carryFrom, scope); assert.equal(f.app.getSnapshot().lastPlacement.kind, 'pending'); assert.deepEqual(f.submitted, []);
+});
+
+for (const kind of ['independent', 'unavailable']) test(`reopening ${kind} saved text returns false even with a pre-existing active editor`, async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), route: scope }); await f.app.start();
+  const original = f.app.getSnapshot().active, selected = { ...scope, conversationId: 'closed-saved-text' };
+  f.storage.readLegacyDraft = async () => ({ kind: kind === 'independent' ? 'independent' : 'bound', viewId: 'closed-view', scope: selected, text: 'Saved text to inspect' });
+  f.behavior.agentLookup = async selected => selected.conversationId === scope.conversationId ? f.descriptor() : null;
+  assert.equal(await f.app.reopenView('closed-view'), false); assert.equal(f.app.getSnapshot().active, original);
+  assert.equal(f.app.getSnapshot().savedDraftRecovery.viewId, 'closed-view'); assert.equal(f.leases.length, 1);
+});
+
+test('reopenView returns true only after this request installs its requested inline editor', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), route: scope });
+  f.views.set('requested-view/host', { ...empty(), route: scope }); await f.app.start();
+  assert.equal(await f.app.reopenView('requested-view'), true); assert.equal(f.app.getSnapshot().active.viewId, 'requested-view');
+  assert.equal(await f.app.reopenView('requested-view'), true);
+  const gate = deferred(), entered = deferred(); f.behavior.catalog = async () => { entered.resolve(); await gate.promise; return []; };
+  const reading = f.app.refreshCatalog(); await entered.promise; assert.equal(await f.app.reopenView('requested-view'), false);
+  gate.resolve(); await reading;
+  f.views.set('empty-view/host', empty()); assert.equal(await f.app.reopenView('empty-view'), false); assert.equal(f.app.getSnapshot().active, null);
+});
+
+test('pending creation placement preserves the connection-loss guidance until an explicit reconnect', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); await f.app.start();
+  const changed = new ServiceConnectionLost('A different OpenPane host answered. Reconnect explicitly to use it.');
+  f.behavior.create = async () => { f.connectionLost(changed); throw changed; };
+  assert.equal((await f.app.create()).kind, 'pending'); assert.equal(f.app.getSnapshot().host.kind, 'unavailable');
+  assert.match(f.app.getSnapshot().error, /different OpenPane host.*Reconnect/);
+  assert.equal((await f.app.create()).kind, 'refused'); assert.equal(f.created.length, 1);
 });

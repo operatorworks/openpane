@@ -22,6 +22,7 @@ export interface UiTransport {
   refreshCards(): void;
 }
 export interface NativeUiRelayPort {
+  liveChildren?(main: WindowContext): Promise<readonly string[]>;
   publish(snapshot: UiClientSnapshot, main: WindowContext, post: (request: unknown) => Promise<unknown>): Promise<boolean>;
   close(): void;
 }
@@ -60,6 +61,7 @@ export class UiConnection {
   private lastContext: UiContextV1 | null = null;
   private recoveryFloor: number | null = null;
   private restorationRequests = 0;
+  private recoveryRequest: { readonly originator: RecoveryOriginator; readonly promise: Promise<boolean> } | null = null;
   constructor(private readonly relay: NativeUiRelayPort = noChildUiRelay,
     private readonly identify?: (context: UiContextV1) => Promise<WindowContext>, private readonly nativePlacement = false) {
     try {
@@ -111,6 +113,7 @@ export class UiConnection {
         }
         if (this.recovery?.kind === 'reserved') await this.finishRecovery();
         const state = parseUiClientSnapshot(await this.post({ op: 'state', context: this.window, presenceSequence: await this.nextPresenceSequence(),
+          ...(this.relay.liveChildren ? { liveChildren: await this.relay.liveChildren(this.window) } : {}),
           visible: document.visibilityState === 'visible', nativePlacement: this.nativePlacement, display: this.cards.subscription(), after: this.snapshot.state?.change ?? null, waitMs: this.cards.needsPaging() || this.relayPaging ? 50 : 2000 }));
         if (this.context) this.lastContext = { ...this.context, revision: state.selection.revision, selection: state.selection };
         if (!this.recovery && this.restorationRequests === 0 && (state.selection.selected.kind === 'builtin' || this.recoveryFloor !== null && state.selection.deliveryGeneration >= this.recoveryFloor)) this.update({ localBuiltin: false });
@@ -136,7 +139,8 @@ export class UiConnection {
   }
   async reservePlacement(transition: PlacementTransition, target: NativePlacementTarget): Promise<void> {
     if (!this.window) throw new Error('UI source is not registered');
-    await this.post({ op: 'placement-reserve', session: this.window.documentIncarnation, envelope: transition.envelope, transitionId: transition.slot.transitionId, target });
+    const result = record(await this.post({ op: 'placement-reserve', session: this.window.documentIncarnation, envelope: transition.envelope, transitionId: transition.slot.transitionId, target }), ['receipt', 'outcome']);
+    if (result.outcome === 'superseded') { this.update({ confirmedGeneration: null }); throw new Error('Appearance placement was superseded'); }
     const state = this.snapshot.state;
     if (state && state.selection.deliveryGeneration === transition.envelope.deliveryGeneration && state.selection.revision === transition.envelope.selectionRevision && (state.bundle?.digest ?? null) === transition.envelope.digest) this.update({ state: { ...state, transitions: state.transitions.map(item => item.slot.transitionId === transition.slot.transitionId ? { ...item, slot: { ...item.slot, target } } : item) } });
   }
@@ -195,7 +199,14 @@ export class UiConnection {
     catch { this.update({ diagnostic: 'Builtin appearance is active locally; recovery could not be saved across reloads.' }); }
   }
   async restore(): Promise<void> { await this.requestRecovery({ kind: 'browser' }); }
-  protected async requestRecovery(originator: RecoveryOriginator): Promise<boolean> {
+  protected requestRecovery(originator: RecoveryOriginator): Promise<boolean> {
+    const pending = this.recoveryRequest;
+    if (pending) return sameRecoveryOriginator(pending.originator, originator) ? pending.promise : pending.promise.then(() => this.requestRecovery(originator));
+    const promise = this.performRecovery(originator).finally(() => { if (this.recoveryRequest?.promise === promise) this.recoveryRequest = null; });
+    this.recoveryRequest = { originator, promise };
+    return promise;
+  }
+  private async performRecovery(originator: RecoveryOriginator): Promise<boolean> {
     this.restorationRequests++;
     this.update({ localBuiltin: true, diagnostic: 'Saving builtin appearance selection…' });
     try {
@@ -223,6 +234,10 @@ export class UiConnection {
       if (this.context && (this.context.hostId !== recovery.hostId || this.context.profileId !== recovery.profileId)) throw new UiServiceError('conflict', 'Appearance recovery belongs to a previous host profile');
       const result = record(await this.post(recovery.request), ['receipt', 'outcome']), receipt = parseApplyReceipt(result.receipt);
       if (receipt.requestId !== recovery.request.requestId || receipt.digest !== null) throw new Error('Invalid builtin recovery receipt');
+      const advance = (context: UiContextV1 | null): UiContextV1 | null => context && context.hostId === recovery.hostId && context.profileId === recovery.profileId
+        ? { ...context, recoveryGeneration: recovery.request.expectedRecoveryGeneration + 1, revision: receipt.selectionRevision,
+          selection: { ...context.selection, revision: receipt.selectionRevision, deliveryGeneration: receipt.deliveryGeneration, selected: { kind: 'builtin' } } } : context;
+      this.context = advance(this.context); this.lastContext = advance(this.lastContext);
       if (this.recovery === recovery) { this.recoveryFloor = receipt.deliveryGeneration; await this.recovered(recovery.originator); if (this.recovery === recovery) this.saveRecovery(null); }
     } catch (error) {
       if (this.recovery === recovery && error instanceof UiServiceError && ['stale-revision', 'expired', 'conflict', 'invalid-input'].includes(error.code)) {

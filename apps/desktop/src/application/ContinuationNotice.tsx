@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 import type { ConversationActions, ConversationContinuation } from './application-controller.js';
 import { AssistantReply } from './AssistantReply.js';
+import { useExperience } from './experience-state.js';
 import { BEFORE_CONTINUE, NEW_CHAT_NOTE, boundaryNote, continuationNotice, earlierLabel, type ContinuationChoice } from './continuation-copy.js';
 
 /** The choices under a closed conversation's notice. Nothing starts until one of them is clicked. */
@@ -27,6 +28,7 @@ export function ContinuationChoices({ continuation, actions, enabled }: {
 export function ContinuationHistory({ continuation, actions, enabled, assistant }: {
   readonly continuation: ConversationContinuation; readonly actions: ConversationActions; readonly enabled: boolean; readonly assistant: string;
 }) {
+  const experience = useExperience();
   if (!continuation.boundary) return null;
   const earlier = earlierLabel(continuation);
   return <div className="continuation-history">
@@ -35,10 +37,10 @@ export function ContinuationHistory({ continuation, actions, enabled, assistant 
     {continuation.earlierError && <p role="alert">{continuation.earlierError}</p>}
     {continuation.earlier.map(segment => <Fragment key={segment.scope.conversationId}>
       {segment.boundary && <p className="continuation-boundary" role="note">{boundaryNote(segment.boundary)}</p>}
-      <section className="transcript earlier-segment" aria-label="Earlier messages">
-        {segment.messages.map(message => <article className={`message message-${message.role}`} key={message.messageId}>
-          <strong>{message.role === 'user' ? 'You' : assistant}</strong>
-          {message.role === 'assistant' ? <AssistantReply text={message.text} /> : message.text && <p>{message.text}</p>}
+      <section className="transcript earlier-segment" data-openpane-part="transcript" aria-label="Earlier messages">
+        {segment.messages.map(message => <article data-openpane-part="transcript-row" data-openpane-state={message.role === 'user' ? 'local' : 'remote'} className={`message message-${message.role}`} key={message.messageId}>
+          <strong data-openpane-part="message-author" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.role === 'user' ? 'You' : assistant}{experience?.manifest.presentation.transcript === 'lines' ? ': ' : ''}</strong>
+          <div data-openpane-part="message-body" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.role === 'assistant' ? <AssistantReply text={message.text} /> : message.text && <p data-openpane-part="message-text">{message.text}</p>}</div>
           {!message.complete && <span className="progress-label">Did not finish</span>}
         </article>)}
       </section>

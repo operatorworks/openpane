@@ -22,7 +22,11 @@ async function request(path, value) {
 }
 const route = name => document.querySelector(`[aria-label="Workspace views"] button[aria-label="${name}"]`);
 const visiblePanes = () => [...document.querySelectorAll('[data-home-pane]')].filter(node => !node.closest('[hidden]') && node.getBoundingClientRect().height > 0).map(node => node.dataset.homePane);
-const checkPanes = expected => assert(JSON.stringify(visiblePanes()) === JSON.stringify(expected), `Unexpected visible panes: ${JSON.stringify(visiblePanes())}`);
+const checkPanes = expected => {
+  assert(JSON.stringify(visiblePanes()) === JSON.stringify(expected), `Unexpected visible panes: ${JSON.stringify(visiblePanes())}`);
+  const boxes = expected.map(kind => document.querySelector(`[data-home-pane="${kind}"]`).getBoundingClientRect());
+  for (let i = 1; i < boxes.length; i++) assert(boxes[i - 1].left < boxes[i].left - 1 || Math.abs(boxes[i - 1].left - boxes[i].left) <= 1 && boxes[i - 1].top < boxes[i].top - 1, 'Pane visual order differs from its declared order');
+};
 const field = () => document.querySelector('textarea#message');
 function edit(node, text) {
   Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(node, text);

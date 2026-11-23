@@ -109,21 +109,7 @@ impl ChatWindows {
                     return Err("main-unavailable");
                 }
                 let intent = broker.storage.mutate(&self.origin, |profile| {
-                    let count = profile.pending_intents(&source.host_id).count();
-                    let intent = profile
-                        .intents
-                        .get_mut(&crate::chat_window_records::Profile::intent_key(
-                            &source,
-                            &request_id,
-                        ))
-                        .ok_or("unknown-intent")?;
-                    if intent.result.is_some()
-                        && count >= crate::chat_window_records::MAX_PENDING_INTENTS
-                    {
-                        return Err("native-intent-capacity");
-                    }
-                    intent.result = None;
-                    Ok(intent.clone())
+                    profile.retry_intent(&source, &request_id)
                 })?;
                 let _ = app.emit_to("main", "openpane-placement-intent", ());
                 Ok(json!(intent))
@@ -207,7 +193,7 @@ impl ChatWindows {
             } => {
                 self.require_main(broker, label, &incarnation)?;
                 self.require_host(broker, &scope)?;
-                self.retire_window_history(broker)?;
+                self.retire_window_history(broker, &scope)?;
                 // Allocation and assignment are flushed in the same native-file transaction.
                 let reservation = Reservation {
                     scope,

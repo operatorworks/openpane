@@ -10,6 +10,83 @@ const page = (subscription, sequence) => ({ kind: 'page', page: { kind: 'snapsho
   snapshotId: 'snapshot', highWater: sequence, publications: [], next: { kind: 'live', epoch: 1, sequence } } });
 async function wait(predicate) { for (let n = 0; n < 100; n++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('Native cache did not settle'); }
 
+test('a native close requested before listener installation replays after installation', async () => {
+  const { WindowRuntime } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  let install; const held = new Promise(resolve => { install = resolve; }), commands = [], runtime = Object.create(WindowRuntime.prototype);
+  Object.assign(runtime, { context: { role: 'main' }, started: false, closed: false, cleanups: [], snapshot: { closing: false }, listeners: new Set(),
+    configurePlacementTracking() {}, uiChanged() {}, async drive() {}, recoveryWake: async () => {},
+    ui: { subscribe: () => () => {}, start() {}, getSnapshot: () => ({ state: {}, diagnostic: null }) },
+    controller: { subscribe: () => () => {}, async start() {}, getSnapshot: () => ({ lastPlacement: null }), async prepareClose() { commands.push('saved'); }, async dispose() { commands.push('disposed'); } },
+    port: { async listen(event) { if (event === 'openpane-close-requested') await held; return () => {}; }, async request(command) { if (command.kind === 'read-close') return { pending: true }; commands.push(command.kind); return {}; } } });
+  runtime.start(); await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(commands, []);
+  install(); await wait(() => commands.includes('close-ready'));
+  assert.deepEqual(commands, ['saved', 'disposed', 'close-ready']);
+});
+
+test('main retries failed-placement reporting before settling an assigned native refusal', async () => {
+  const { WindowRuntime } = await import('../../apps/desktop/dist/application/window-runtime.js'), { UiConnection } = await import('../../apps/desktop/dist/application/ui-connection.js');
+  const pending = { kind: 'pending', scope, reason: 'Opening' }, digest = 'a'.repeat(64), transition = { envelope: { requestId: '1:request', deliveryGeneration: 2, selectionRevision: 1, digest }, slot: { transitionId: 'transition', target: { scope } } };
+  const ui = Object.create(UiConnection.prototype); let attempts = 0, settled = null;
+  ui.getSnapshot = () => ({ state: { selection: { deliveryGeneration: 2, revision: 1 }, bundle: { digest }, transitions: [transition] }, localBuiltin: false, deliveryContext: 'document', confirmedGeneration: 2,
+    validatedVisual: { kind: 'delivery', context: 'document', generation: 2, revision: 1, digest } });
+  ui.failPlacement = async () => { attempts++; if (attempts === 1) throw new Error('Lost failure acknowledgement'); };
+  const runtime = Object.create(WindowRuntime.prototype);
+  Object.assign(runtime, { context: { role: 'main' }, ui, policyDelivery: JSON.stringify(['document', 2, 1, digest]), policyScope: scope, snapshot: {}, listeners: new Set(),
+    controller: { getSnapshot: () => ({ host: { kind: 'ready', metadata: { hostId: 'host' } }, lastPlacement: pending }), settlePlacement(expected, result) { assert.equal(expected, pending); settled = result; return true; } },
+    port: { async request(command) { return command.kind === 'reservations' ? [] : { kind: 'opening', reservation: { scope, viewId: 'view', label: 'child', transitionId: 'native', creationAgentId: 'agent', phase: 'failed', bindingRevision: null, writerGeneration: null } }; } } });
+  await assert.rejects(runtime.refreshRecovery(), /Lost failure acknowledgement/); assert.equal(settled, null);
+  await runtime.refreshRecovery(); assert.equal(attempts, 2); assert.equal(settled.kind, 'refused');
+});
+
+test('a hidden child retires reports from superseded appearances', async () => {
+  const main = { ...context, role: 'main', label: 'main', documentIncarnation: 'main' }; delete main.scope;
+  const commands = [];
+  const relay = new NativeMainUiRelay({ async request(command) {
+    commands.push(command);
+    if (command.kind === 'drain-ui') return { children: [{ context, display: null, visible: false, presenceSequence: 1, placement: null }],
+      reports: [{ id: 'stale', context, report: { kind: 'rendered', deliveryGeneration: 0, selectionRevision: 0, digest: null, envelope: null, reason: null } }], localBuiltin: false };
+    return { ok: true };
+  } });
+  const selected = state(null); selected.selection.deliveryGeneration = 1;
+  await relay.publish(selected, main, async () => ({ children: [{ incarnation: 'child', envelope: null, display: null }] }));
+  assert.deepEqual(commands.filter(command => command.kind === 'confirm-ui').flatMap(command => command.ids), ['stale']);
+});
+
+test('overlapping child presence changes retry the latest subscription after a failed update', async t => {
+  const previous = globalThis.document; globalThis.document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  let release, failed = false; const held = new Promise(resolve => { release = resolve; }), attempts = [];
+  const child = new ChildUiConnection({ context: native, async request(command) {
+    if (command.kind === 'read-ui') return { state: state(null), localBuiltin: false, context: null };
+    if (command.kind === 'presence') {
+      attempts.push(command.display);
+      if (attempts.length === 1) await held;
+      else if (!failed) { failed = true; throw new Error('Latest update failed'); }
+    }
+    return { ok: true };
+  } });
+  t.after(() => { release(); child.close(); globalThis.document = previous; });
+  child.selectScope(scope); child.refreshCards();
+  assert.equal(attempts.length, 1, 'presence updates are serialized');
+  release(); await wait(() => failed);
+  child.refresh(); await wait(() => attempts.length === 3);
+  assert.notEqual(attempts[0].subscriptionId, attempts[1].subscriptionId);
+  assert.deepEqual(attempts[2], attempts[1]);
+});
+
+for (const healthy of [false, true]) test(`assigned readiness requires healthy creation storage and tolerates carry recovery failure: ${healthy}`, async t => {
+  const { WindowRuntime } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  const previous = globalThis.document; globalThis.document = { visibilityState: 'visible' }; t.after(() => { globalThis.document = previous; });
+  const commands = [], runtime = Object.create(WindowRuntime.prototype);
+  let current = { busy: false, host: { kind: 'ready' }, storageFailure: null, saved: { pendingCreation: { scope } }, active: null, error: null };
+  Object.assign(runtime, { closed: false, processing: false, childReady: false, childRefusalReported: false, recoveryDirty: false,
+    context: { ...native, reservation: { scope, creationAgentId: 'agent' } }, childOwner: { editorBinding: () => ({ revision: 1 }) },
+    controller: { getSnapshot: () => current, async recoverCreation() { current = { ...current, active: { scope }, saved: { pendingCreation: null }, storageFailure: healthy ? null : 'Saving creation failed' }; } },
+    async syncDraftCarries() { throw new Error('Unreadable carry'); }, port: { async request(command) { commands.push(command.kind); } },
+    ui: {}, snapshot: {}, listeners: new Set() });
+  await runtime.drive();
+  assert.deepEqual(commands, healthy ? ['ready'] : []);
+});
+
 test('a native child advances only its scoped cache cursor, reports presence and ignores an old cached page', async t => {
   const originalDocument = globalThis.document, originalFetch = globalThis.fetch;
   globalThis.document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
@@ -195,7 +272,7 @@ test('main reconciles a native restore already pending before its wake listener 
   const runtime = Object.create(WindowRuntime.prototype);
   Object.assign(runtime, { context: { role: 'main' }, started: false, closed: false, cleanups: [], recoveryDirty: false, nativeRecoverySeen: null, nativeRecoveryTask: null,
     configurePlacementTracking() {}, uiChanged() {}, async drive() {}, ui, controller: { subscribe() { return () => {}; }, async start() {}, getSnapshot: () => ({ lastPlacement: null }) },
-    port: { async listen(event) { if (event === 'openpane-ui-wakeup') await installed; return () => {}; }, async request(command) { assert.equal(command.kind, 'read-recovery'); reads++; return { pending, sequence: 3 }; } } });
+    port: { async listen(event) { if (event === 'openpane-ui-wakeup') await installed; return () => {}; }, async request(command) { if (command.kind === 'read-close') return { pending: false }; assert.equal(command.kind, 'read-recovery'); reads++; return { pending, sequence: 3 }; } } });
   runtime.start(); await new Promise(resolve => setImmediate(resolve)); assert.equal(reads, 0);
   install(); await wait(() => restored.length === 1);
   assert.deepEqual(restored, [3]); assert.equal(pending, false); assert.equal(reads, 2);
@@ -250,7 +327,7 @@ test('a definitive assigned creation refusal settles main and exposes same-scope
   await runtime.retryAssignedCreation(); assert.deepEqual(retries, [{ scope, agent: 'agent' }]);
   const pending = { kind: 'pending', scope, reason: 'Waiting for assigned editor' }; let settled;
   const main = Object.create(WindowRuntime.prototype);
-  Object.assign(main, { context: { role: 'main' }, controller: { getSnapshot: () => ({ host: { kind: 'ready', metadata: { hostId: 'host' } }, lastPlacement: pending }), settlePlacement(expected, result) { assert.equal(expected, pending); settled = result; return true; } },
+  Object.assign(main, { context: { role: 'main' }, ui: { getSnapshot: () => ({ state: null }) }, controller: { getSnapshot: () => ({ host: { kind: 'ready', metadata: { hostId: 'host' } }, lastPlacement: pending }), settlePlacement(expected, result) { assert.equal(expected, pending); settled = result; return true; } },
     port: { async request(command) { return command.kind === 'reservations' ? [] : { kind: 'opening', reservation }; } }, snapshot: { recovery: { kind: 'none' } }, listeners: new Set() });
   await main.refreshRecovery(); assert.equal(settled.kind, 'refused'); assert.match(settled.reason, /unsent draft is preserved/);
 });
