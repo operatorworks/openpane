@@ -555,3 +555,25 @@ test('draft capture observes an edit already submitted without awaiting its save
   assert.deepEqual(capture, { text: 'latest submitted edit', revision: 1 });
   await store.dispose();
 });
+
+
+test('a send captures the current draft before a following synchronous edit', async () => {
+  const { store, port } = fixture();
+  await store.setDraft('first');
+  port.submit = async command => { port.submitted.push(structuredClone(command)); return { kind: 'receipt', receipt: receipt(command, 'accepted') }; };
+  const sending = store.send(), editing = store.setDraft('next');
+  await Promise.all([sending, editing]);
+  assert.equal(port.submitted[0].body.text, 'first');
+  assert.equal(store.getSnapshot().draft, 'next');
+});
+
+test('Remove after image selection starts wins even while its durable save and upload are delayed', async () => {
+  const images = uploads({ auto: false }), { store, drafts, port } = fixture({ images }); await store.ready;
+  const entered = deferred(), release = deferred(), save = drafts.save.bind(drafts); let held = false;
+  drafts.save = async (records, image) => { if (records.image && !held) { held = true; entered.resolve(); await release.promise; } await save(records, image); };
+  const selecting = store.selectImage({ name: 'remove-me.png', bytes: png(1) }); await entered.promise;
+  const removing = store.removeImage(); release.resolve(); await removing;
+  assert.equal(store.getSnapshot().image, null); images.calls[0].reply.resolve(images.calls[0].attachment); await selecting;
+  assert.equal(store.getSnapshot().image, null); await store.send('Text after removal');
+  assert.deepEqual(port.submitted[0].body, { kind: 'send', text: 'Text after removal' }); await store.dispose();
+});

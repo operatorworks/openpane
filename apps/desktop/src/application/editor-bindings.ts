@@ -143,7 +143,7 @@ export interface EditorRecoveryGrant {
   readonly creationAgentId: string | null;
 }
 /** Only main receives this grant from the broker after the native target is closed. */
-export function recoverEditor(db: IDBDatabase, grant: EditorRecoveryGrant): Promise<EditorBinding> {
+export function recoverEditor(db: IDBDatabase, grant: Omit<EditorRecoveryGrant, 'targetLabel'> & { readonly targetLabel: string }): Promise<EditorBinding> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction('records', 'readwrite'), store = tx.objectStore('records');
     const binding = store.get(editorBindingKey(grant.scope)), view = store.get(['view', grant.viewId, grant.scope.hostId]), marker = store.get(editorViewKey(grant.viewId));

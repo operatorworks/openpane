@@ -6,7 +6,7 @@ import { identifier, record } from '@openpane/contracts/decode';
 export interface SavedView {
   readonly version: 2;
   readonly route: ConversationScope | null;
-  readonly pendingCreation: { readonly scope: ConversationScope; readonly agentId: string | null } | null;
+  readonly pendingCreation: { readonly scope: ConversationScope; readonly agentId: string | null; readonly carryFrom?: ConversationScope } | null;
 }
 export interface OwnedViewStorage {
   readonly viewId: string;
@@ -22,9 +22,10 @@ export interface OwnedViewStorage {
   drafts(onFailure: (error: unknown) => void): DraftStoragePort;
   close(): void | Promise<void>;
 }
-export interface SavedDraftRecovery { readonly viewId: string; readonly scope: ConversationScope; readonly text: string }
+export interface SavedDraftRecovery { readonly kind: 'independent' | 'bound' | 'continued'; readonly viewId: string; readonly scope: ConversationScope; readonly text: string }
 export interface ViewStorageFactory {
-  readLegacyDraft?(viewId: string, hostId: string): Promise<SavedDraftRecovery | null>;
+  readLegacyDraft?(viewId: string, hostId: string, selectedScope?: ConversationScope): Promise<SavedDraftRecovery | null>;
+  openRemainingWork?(viewId: string, hostId: string): Promise<void>;
   recoverClosedView?(viewId: string, onFailure: (error: unknown) => void): Promise<OwnedViewStorage | null>;
   locate?(scope: ConversationScope): Promise<string | null>;
   readonly catalogViewId?: string | undefined;
@@ -41,9 +42,10 @@ export function decodeView(value: unknown, hostId: string): SavedView {
   } catch { throw new Error('Unsupported saved view. Local records were preserved.'); }
   const route = input.route === null ? null : parseScope(input.route);
   const pending = input.pendingCreation === null ? null : input.version === 1
-    ? { scope: input.pendingCreation, agentId: null } : record(input.pendingCreation, ['scope', 'agentId']);
-  const pendingCreation = pending === null ? null : { scope: parseScope(pending.scope),
+    ? { scope: input.pendingCreation, agentId: null } : record(input.pendingCreation);
+  if (pending) record(pending, Object.hasOwn(pending, 'carryFrom') ? ['scope', 'agentId', 'carryFrom'] : ['scope', 'agentId']);
+  const pendingCreation = pending === null ? null : { ...(pending.carryFrom === undefined ? {} : { carryFrom: parseScope(pending.carryFrom) }), scope: parseScope(pending.scope),
     agentId: pending.agentId === null ? null : identifier(pending.agentId) };
-  if ([route, pendingCreation?.scope].some(scope => scope && scope.hostId !== hostId)) throw new Error('Saved view belongs to another host.');
+  if ([route, pendingCreation?.scope, pendingCreation?.carryFrom].some(scope => scope && scope.hostId !== hostId)) throw new Error('Saved view belongs to another host.');
   return { version: 2, route, pendingCreation };
 }

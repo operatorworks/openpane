@@ -14,7 +14,7 @@ export async function runPup(executable: string, args: readonly string[], option
     const chunks: Buffer[] = [];
     let failure: DisplayQueryFailure | null = null, bytes = 0;
     const start = () => spawn(process.execPath, ['-e', PUP_GUARDIAN, JSON.stringify({ executable, args, deadlineMs, stdoutBytes })], {
-      stdio: ['pipe', 'pipe', 'pipe'], env: options.env ?? process.env,
+      stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', env: options.env ?? process.env,
     });
     let guardian: ReturnType<typeof start>;
     try { guardian = start(); } catch { resolve({ kind: 'failed', reason: 'pup-unavailable' }); return; }

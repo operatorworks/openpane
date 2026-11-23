@@ -1,4 +1,4 @@
-import { EXPERIENCE_COLOR_ROLES, EXPERIENCE_SPACE_ROLES, EXPERIENCE_RADIUS_ROLES, EXPERIENCE_TEXT_ROLES, EXPERIENCE_CHART_ROLES } from './experience.js';
+import { LOCAL_FONT_STACK_PATTERN, EXPERIENCE_COLOR_ROLES, EXPERIENCE_SPACE_ROLES, EXPERIENCE_RADIUS_ROLES, EXPERIENCE_TEXT_ROLES, EXPERIENCE_CHART_ROLES } from './experience.js';
 const number = (minimum: number, maximum: number) => ({ type: 'number', minimum, maximum });
 const integer = (minimum: number, maximum: number) => ({ type: 'integer', minimum, maximum });
 const text = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength });
@@ -8,7 +8,7 @@ const color = { type: 'string', pattern: '^#[a-fA-F0-9]{6}$' };
 const tokens = object({
   colors: roles(EXPERIENCE_COLOR_ROLES, color), spacing: roles(EXPERIENCE_SPACE_ROLES, number(0, 64)), radius: roles(EXPERIENCE_RADIUS_ROLES, number(0, 32)),
   typography: roles(EXPERIENCE_TEXT_ROLES, object({ size: number(10, 48), lineHeight: number(1, 2), weight: { enum: [100, 200, 300, 400, 500, 600, 700, 800, 900] } })),
-  fonts: roles(['body', 'code'], { ...text(256), pattern: `^[a-zA-Z0-9 ,"'-]+$`, allOf: [{ pattern: '[a-zA-Z]' }] }),
+  fonts: roles(['body', 'code'], { ...text(256), pattern: LOCAL_FONT_STACK_PATTERN }),
   treatments: object({ borderWidth: number(0, 4), shadow: { enum: ['none', 'soft', 'bevel'] } }), chart: roles(EXPERIENCE_CHART_ROLES, color),
 });
 export const experienceSchema = {

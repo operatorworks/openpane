@@ -126,6 +126,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const choices = metadata?.agents ?? [];
   const pi = choices.find(agent => 'runtime' in agent && agent.runtime.engine === 'pi');
   const [launchNotice, setLaunchNotice] = useState('');
+  useEffect(() => setLaunchNotice(''), [app.active?.scope.hostId, app.active?.scope.conversationId]);
   const setupPi = () => setSelectedView('settings');
   /** Starts a conversation from the new-conversation screen, carrying its text over as the draft or the first message. */
   async function startConversation(agentId: string | undefined, send: boolean): Promise<void> {
@@ -134,7 +135,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     openingGuard.current = true;
     const text = launchText, before = controller.getSnapshot().active;
     let opened = false, carried = !text;
-    setOpening(true);
+    setLaunchNotice(''); setOpening(true);
     try {
       const result = await controller.create(agentId, text || undefined);
       if (result.kind !== 'inline') {
@@ -220,7 +221,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const hostAlerts = <>
     {launchNotice && <p role="status">{launchNotice}</p>}
     {catalogOnly && launchText && !opening && <details><summary>Unsent launch text</summary><textarea readOnly aria-label="Unsent launch text" value={launchText} /></details>}
-    {app.savedDraftRecovery && <SavedDraftRecovery key={`${app.savedDraftRecovery.viewId}/${app.savedDraftRecovery.scope.conversationId}`} recovery={app.savedDraftRecovery} onOpen={() => { if (app.savedDraftRecovery) void controller.open(app.savedDraftRecovery.scope); }} onDismiss={() => { if (app.savedDraftRecovery) controller.dismissSavedDraftRecovery(app.savedDraftRecovery); }} />}
+    {app.savedDraftRecovery && <SavedDraftRecovery key={`${app.savedDraftRecovery.viewId}/${app.savedDraftRecovery.scope.conversationId}`} recovery={app.savedDraftRecovery} onOpen={() => { if (app.savedDraftRecovery) void (app.savedDraftRecovery.kind === 'bound' ? controller.create() : controller.open(app.savedDraftRecovery.scope)); }} onRemainingWork={() => { if (app.savedDraftRecovery) void controller.openRemainingSavedWork(app.savedDraftRecovery); }} onDismiss={() => { if (app.savedDraftRecovery) controller.dismissSavedDraftRecovery(app.savedDraftRecovery); }} />}
     {app.storageFailure && <div className="application-alert" role="alert"><strong>Local storage unavailable. Commands are blocked.</strong><p>{app.storageFailure}</p><p>Existing records have not been discarded. Restore browser storage access, then reload.</p></div>}
     {app.error && <p className="application-alert" role="alert">{app.error}</p>}
     {!placementNotice && app.lastPlacement?.kind === 'pending' && <p role="status">{app.lastPlacement.reason}</p>}

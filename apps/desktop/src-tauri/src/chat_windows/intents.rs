@@ -13,10 +13,7 @@ impl ChatWindows {
                 incarnation,
                 retire_after,
             } => {
-                self.document(broker, label, &incarnation)?
-                    .scope
-                    .as_ref()
-                    .ok_or("child-only")?;
+                self.document(broker, label, &incarnation)?;
                 let profile = broker.storage.profile(&self.origin)?;
                 if profile.intents.len() >= crate::chat_window_records::MAX_INTENTS
                     || retire_after == Some(profile.intent_epoch)
@@ -25,7 +22,14 @@ impl ChatWindows {
                         profile.compact_terminal_intents(retire_after)
                     })?;
                 }
-                Ok(json!({"epoch":broker.storage.profile(&self.origin)?.intent_epoch}))
+                let profile = broker.storage.profile(&self.origin)?;
+                let pending: Vec<_> = profile
+                    .intents
+                    .values()
+                    .filter(|intent| intent.result.is_none())
+                    .map(|intent| &intent.request_id)
+                    .collect();
+                Ok(json!({"epoch":profile.intent_epoch,"pendingCarryRequests":pending}))
             }
             Command::PlacementIntent {
                 incarnation,
@@ -181,7 +185,6 @@ impl ChatWindows {
                             .host
                             .as_ref()
                             .is_some_and(|host| host.0 == reservation.scope.host_id)
-                            && !reservation.transition_id.starts_with("inline:")
                             && !matches!(reservation.phase, Phase::TargetReady)
                             && !broker.opening.contains_key(&reservation.label)
                     })
@@ -207,7 +210,7 @@ impl ChatWindows {
                 creation_agent_id,
             } => {
                 self.require_main(broker, label, &incarnation)?;
-                self.admit_child(broker, &scope)?;
+                self.require_host(broker, &scope)?;
                 self.retire_window_history(broker)?;
                 // Allocation and assignment are flushed in the same native-file transaction.
                 let reservation = Reservation {

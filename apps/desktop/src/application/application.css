@@ -366,10 +366,10 @@
 
 .conversation-approvals { display: contents; }
 .application-chat-window .conversation-approvals { display: block; flex: 0 1 auto; min-height: 0; max-height: min(34dvh, 260px); overflow: auto; overscroll-behavior: contain; }
-.application-chat-window .conversation-approvals .decision-card { display: flex; flex-direction: column; box-sizing: border-box; min-height: 0; max-height: min(30dvh, 240px); margin: 8px 0; padding: 12px; }
+.application-chat-window .conversation-approvals .decision-card { display: flex; flex-direction: column; box-sizing: border-box; min-height: 0; max-height: none; margin: 8px 0; padding: 12px; }
 .application-chat-window .conversation-approvals .decision-card h2, .application-chat-window .conversation-approvals .action-row { flex: none; }
 .application-chat-window .conversation-approvals .decision-card h2 { margin-bottom: 4px; }
-.application-chat-window .conversation-approvals .decision-card p { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 4px 0 8px; overscroll-behavior: contain; }
+.application-chat-window .conversation-approvals .decision-card p { flex: 0 1 auto; min-height: 48px; max-height: min(20dvh, 160px); overflow: auto; margin: 4px 0 8px; overscroll-behavior: contain; }
 .application-chat-window .conversation-panel:has(.conversation-approvals) .conversation-content { min-height: 0; }
 
 .saved-draft-recovery { flex: none; max-height: 40vh; overflow: auto; padding: 12px; border: 1px solid var(--aui-color-border); }

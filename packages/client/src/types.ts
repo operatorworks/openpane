@@ -41,8 +41,10 @@ export interface DraftImageChange {
   readonly put?: { readonly selectionId: string; readonly bytes: Uint8Array };
   readonly remove?: readonly string[];
 }
-export interface DraftTransfer { readonly source: ConversationScope; readonly requestId: string; readonly kind: 'receive' | 'release' }
-export interface DraftTransferCommit { readonly source: ConversationScope; readonly requestId: string; readonly outcome: 'received' | 'cleared' | 'changed' }
+export type DraftTransfer = { readonly source: ConversationScope; readonly requestId: string; readonly kind: 'receive' | 'release' }
+  | { readonly kind: 'release-copy'; readonly target: ConversationScope; readonly targetViewId: string };
+export type DraftTransferCommit = { readonly source: ConversationScope; readonly requestId: string; readonly outcome: 'received' | 'cleared' | 'changed' }
+  | { readonly outcome: 'copy-cleared'; readonly target: ConversationScope; readonly targetViewId: string; readonly text: string };
 /** Image bytes are stored once beside the records and must change in the same transaction as them. */
 export interface DraftStoragePort {
   /** Use one port per store: loading claims the conversation, and saves from a port replaced by a later loader reject without writing. */

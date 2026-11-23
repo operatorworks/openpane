@@ -60,14 +60,14 @@ export async function publishDatadog(command: DatadogCommand): Promise<{ readonl
     if (action.kind === 'retry') {
       request = { op: 'display-query-retry', scope, publicationId, expectedAttempt: action.expectedAttempt };
     } else {
-      const configured = action.pup ?? (process.env.OPENPANE_PUP || null), executableHint = configured ?? 'PATH:pup', siteHint = process.env.DD_SITE || 'configured';
-      if (configured !== null && !isAbsolute(configured)) throw new Error('Configure an absolute --pup executable path');
       let input: DisplayQueryInput;
       if (status.mode === 'query') {
         if (action.pup !== null && action.pup !== status.input.executableHint && action.pup !== status.input.executable) throw new UiRefusal('conflict', 'Query publication ID has a different explicit pup executable');
         input = { ...status.input, query: action.query, title: action.title, from: action.from, to: action.to };
       }
       else {
+        const configured = action.pup ?? (process.env.OPENPANE_PUP || null), executableHint = configured ?? 'PATH:pup', siteHint = process.env.DD_SITE || 'configured';
+        if (configured !== null && !isAbsolute(configured)) throw new Error('Configure an absolute --pup executable path');
         const context = parseUiContext(await requestUi(socket, { op: 'context' }));
         if (!new RegExp(`^${context.requestEpoch}:[\\da-f]{8}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{12}$`, 'i').test(publicationId)) throw new UiRefusal('expired', 'Use an EPOCH:UUID publication ID from the current ui context');
         const path = await executable(executableHint), version = await pupVersion(path, controller.signal), site = await pupSite(path, controller.signal);

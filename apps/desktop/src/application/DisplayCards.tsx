@@ -15,13 +15,17 @@ export function useDisplayCards(scope: ConversationScope) {
     if (!(scroll instanceof HTMLElement)) return;
     const track = () => { bottom.current = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 48; if (bottom.current) { unseen.current.clear(); setNewCount(0); } };
     track(); scroll.addEventListener('scroll', track, { passive: true });
-    return () => scroll.removeEventListener('scroll', track);
+    const resize = new ResizeObserver(track); resize.observe(scroll);
+    return () => { scroll.removeEventListener('scroll', track); resize.disconnect(); };
   }, [scope.hostId, scope.conversationId]);
   useLayoutEffect(() => {
     if (!publications || view.kind === 'loading') return;
     const known = previous.current, current = new Set(publications.map(publication => publication.publicationId));
     previous.current = current;
-    if (!known) return;
+    if (!known) {
+      if (bottom.current) { const scroll = root.current?.closest('.conversation-content'); if (scroll instanceof HTMLElement) scroll.scrollTop = scroll.scrollHeight; }
+      return;
+    }
     unseen.current = new Set([...unseen.current].filter(id => current.has(id)));
     const additions = [...current].filter(id => !known.has(id)), added = additions.length;
     if (!added) { setNewCount(unseen.current.size); return; }
@@ -38,7 +42,7 @@ export function useDisplayCards(scope: ConversationScope) {
 type Cards = ReturnType<typeof useDisplayCards>;
 export function DisplayCards({ cards }: { readonly cards: Cards }) {
   return <div ref={cards.root} className="display-cards" aria-label="Saved display cards">
-    {cards.view.kind === 'unavailable' && <div role="status"><p>{cards.view.reason} Saved cards remain visible.</p><button type="button" onClick={cards.refresh}>Refresh cards</button></div>}
+    {cards.view.kind === 'unavailable' && <div role="status"><p>{cards.view.reason}{cards.view.publications.length > 0 ? ' Saved cards remain visible.' : ''}</p><button type="button" onClick={cards.refresh}>Refresh cards</button></div>}
     {cards.view.kind !== 'none' && cards.view.publications.map(publication => <MetricsCard key={publication.publicationId} publication={publication} />)}
   </div>;
 }

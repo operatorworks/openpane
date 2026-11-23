@@ -142,14 +142,16 @@ export async function startBrowserHost(options: BrowserHostOptions) {
             return host?.drained;
           }),
         ])];
+        if (!drainFailed && results.at(-1)?.status === 'fulfilled') {
+          try { uiStore?.close(); } catch (reason) { results.push({ status: 'rejected', reason }); }
+          database.database.close();
+          owner.close();
+        }
         const failure = results.find(result => result.status === 'rejected');
         if (failure?.status === 'rejected') throw new Error('Host shutdown failed', { cause: failure.reason });
       } finally {
         clearTimeout(deadline);
       }
-      uiStore?.close();
-      database.database.close();
-      owner.close();
     })().finally(() => observability.close());
     return closePromise;
   }

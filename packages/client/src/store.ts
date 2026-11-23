@@ -213,7 +213,7 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
     } finally { inFlight.delete(id); publish(); }
   }
   async function submit(body: CommandBody | null): Promise<SubmitResult> {
-    await ready;
+    if (closed) await ready;
     const entry = await enqueue(async () => {
       requireCompatible();
       const id = createCommandId(), intent = body ?? composerBody();
@@ -265,9 +265,13 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
     }),
     transferDraft: (expected, text, transfer) => enqueue(async () => {
       const matches = local.draft === expected.text && local.draftRevision === expected.revision;
-      if (!matches && transfer.kind === 'receive') return 'changed';
+      if (!matches && (transfer.kind === 'receive' || transfer.kind === 'release-copy')) return 'changed';
       if (!drafts.commitTransfer) throw new Error('This storage cannot atomically transfer a draft');
       const next = matches && text !== local.draft ? revised({ draft: text }) : local;
+      if (transfer.kind === 'release-copy') {
+        if (!await drafts.commitTransfer(next, { outcome: 'copy-cleared', target: transfer.target, targetViewId: transfer.targetViewId, text: expected.text })) return 'cancelled';
+        local = next; publish(); return 'committed';
+      }
       const outcome = transfer.kind === 'receive' ? 'received' : matches ? 'cleared' : 'changed';
       if (!await drafts.commitTransfer(next, { source: transfer.source, requestId: transfer.requestId, outcome })) return 'cancelled';
       local = next; publish(); return matches ? 'committed' : 'changed';

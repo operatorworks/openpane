@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import Ajv from 'ajv';
-import { parseExperience, experienceSchema, parseMetricsCard, metricsCardSchema, parseWindowContext, parseUiSelection, METRICS_EVENT_NAME } from '@openpane/contracts';
+import { parseApplyReceipt, parseExperience, experienceSchema, parseMetricsCard, metricsCardSchema, parseWindowContext, parseUiSelection, parseUiContext, parseUiClientSnapshot, METRICS_EVENT_NAME } from '@openpane/contracts';
 import { EventSchema } from '@openpane/protocol';
 
 export const experience = () => ({ schemaVersion: 1, id: 'messenger-2002', label: 'Messenger',
@@ -75,4 +75,38 @@ test('human text limits agree with JSON Schema for astral Unicode characters', (
   card.title += '😀'; assert.equal(validateMetrics(card), false); assert.throws(() => parseMetricsCard(card));
   const visual = experience(); visual.label = '😀'.repeat(200);
   assert.ok(validateExperience(visual)); assert.doesNotThrow(() => parseExperience(visual));
+});
+
+
+test('a rendered transition receipt names the exact child document that painted', () => {
+  const source = { role: 'main', hostId: 'host', profileId: 'profile', brokerInstance: 'broker', label: 'main', documentIncarnation: 'main-document', viewId: 'catalog' };
+  const scope = { hostId: 'host', conversationId: 'chat' }, target = { scope, label: 'child', viewId: 'editor', nativeTransitionId: 'native', bindingRevision: 1 };
+  const participant = { slot: { kind: 'transition', transitionId: 'transition', source, target, resolved: null }, visual: { kind: 'rendered' }, placement: { kind: 'ready', transitionId: 'transition', bindingRevision: 1 } };
+  const receipt = { requestId: '1:11111111-1111-4111-8111-111111111111', deliveryGeneration: 1, selectionRevision: 1, digest: 'a'.repeat(64), requestDigest: 'b'.repeat(64), participants: [participant] };
+  assert.throws(() => parseApplyReceipt(receipt), /no painted document/);
+  participant.slot.resolved = { ...source, role: 'chat', label: 'child', documentIncarnation: 'child-document', viewId: 'editor', scope };
+  assert.equal(parseApplyReceipt(receipt).participants[0].visual.kind, 'rendered');
+  participant.slot.target = null; participant.slot.resolved = null; participant.placement = { kind: 'unchanged' };
+  assert.equal(parseApplyReceipt(receipt).participants[0].visual.kind, 'rendered');
+});
+
+
+test('local font stacks reject empty families and unbalanced quotes in schema and runtime', () => {
+  for (const body of ['Tahoma,,sans-serif', ',Tahoma', 'Tahoma,', '"Tahoma', "'Tahoma", "Tahoma's font", '""', '123', '-', 'Tahoma, -']) {
+    const value = experience(); value.theme.light = { fonts: { body } };
+    assert.equal(validateExperience(value), false, body); assert.throws(() => parseExperience(value), undefined, body);
+  }
+  for (const body of ['Tahoma, Verdana, sans-serif', '"Segoe UI", sans-serif', "'SF Mono', ui-monospace", '-apple-system, BlinkMacSystemFont, sans-serif']) {
+    const value = experience(); value.theme.light = { fonts: { body } };
+    assert.equal(validateExperience(value), true, body); assert.equal(parseExperience(value).theme.light.fonts.body, body);
+  }
+});
+
+
+test('UI context and snapshot faults have a bounded human-readable size',()=>{
+  const selection={revision:0,deliveryGeneration:0,selected:{kind:'builtin'},previousHealthy:{kind:'builtin'}};
+  const context={version:1,hostId:'host',profileId:'profile',requestEpoch:1,recoveryGeneration:1,revision:0,selection,capabilities:[],fault:'x'.repeat(500)};
+  const snapshot={version:1,change:0,selection,bundle:null,envelope:null,transitions:[],display:null,fault:context.fault};
+  assert.equal(parseUiContext(context).fault.length,500);assert.equal(parseUiClientSnapshot(snapshot).fault.length,500);
+  assert.throws(()=>parseUiContext({...context,fault:'x'.repeat(501)}));assert.throws(()=>parseUiClientSnapshot({...snapshot,fault:'x'.repeat(501)}));
 });

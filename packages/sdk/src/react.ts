@@ -76,7 +76,7 @@ export interface WorkspaceViewProps {
   readonly selected: ConversationScope | null;
   /** The host-rendered conversation, composer and approvals for `selected`; `null` when nothing is selected. Render it once. */
   readonly conversation: ReactNode;
-  /** Opens this namespace's conversation and reports its actual placement. Only a foreign namespace rejects. */
+  /** Opens a loaded or selected conversation in this namespace and reports its actual placement. Other scopes reject. */
   open(scope: ConversationScope): Promise<ConversationOpenResult>;
   /** Creates with this namespace's agent. Detached and pending outcomes do not select an inline editor. */
   create(agentId: string): Promise<ConversationOpenResult>;

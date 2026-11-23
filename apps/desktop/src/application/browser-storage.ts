@@ -1,5 +1,5 @@
 import { initializeDraft } from './initial-draft.js';
-import { commitCarriedDraft } from './draft-carry-records.js';
+import { commitCarriedDraft, commitCopiedDraft } from './draft-carry-records.js';
 import type { ConversationScope, EditorBinding } from '@openpane/contracts';
 import { parseEditorBinding, parseScope, sameScope } from '@openpane/contracts';
 import { identifier, record } from '@openpane/contracts/decode';
@@ -89,27 +89,42 @@ export class BrowserViewStorage implements OwnedViewStorage {
     } catch (error) { db?.close(); release(); throw error; }
   }
 
-  static async readLegacyDraft(viewId: string, hostId: string): Promise<SavedDraftRecovery | null> {
+  static async readLegacyDraft(viewId: string, hostId: string, selectedScope?: ConversationScope): Promise<SavedDraftRecovery | null> {
     const db = await openViewDatabase(); let release: (() => void) | null = null;
     const read = (key: IDBValidKey): Promise<unknown> => new Promise((resolve, reject) => {
       const tx = db.transaction('records'), request = tx.objectStore('records').get(key);
       tx.oncomplete = () => resolve(request.result); tx.onabort = () => reject(tx.error ?? new Error('Saved draft recovery interrupted'));
     });
     try {
-      if (await read(editorViewKey(viewId)) !== undefined) return null;
       release = await claim(viewId);
-      if (!release) throw new Error('This saved view is open. Recover its draft in that window before copying.');
-      if (await read(editorViewKey(viewId)) !== undefined) return null;
-      const saved = decodeView(await read(['view', viewId, hostId]), hostId), scope = saved.route ?? saved.pendingCreation?.scope;
-      if (!scope) return null;
-      const binding = await readEditorBinding(db, scope);
-      if (!binding || binding.viewId === viewId) return null;
-      const value = await read(['draft', viewId, hostId, scope.conversationId]);
-      if (value === undefined) return null;
-      const draft = record(value);
-      if (typeof draft.draft !== 'string' || !sameScope(parseScope(draft.scope), scope)) throw new Error('Unsupported saved draft. Its original records are preserved.');
-      return { viewId, scope, text: draft.draft };
+      if (!release) return null;
+      const bound = await read(editorViewKey(viewId));
+      const saved = decodeView(await read(['view', viewId, hostId]), hostId);
+      for (const scope of bound === undefined ? [selectedScope, saved.route ?? saved.pendingCreation?.scope] : [parseScope(bound)]) {
+        if (!scope) continue;
+        if (scope.hostId !== hostId) throw new Error('Saved draft recovery belongs to another host');
+        const binding = await readEditorBinding(db, scope);
+        if (!binding) continue;
+        const value = await read(['draft', viewId, hostId, scope.conversationId]);
+        if (value === undefined) continue;
+        const draft = record(value);
+        if (typeof draft.draft !== 'string' || !sameScope(parseScope(draft.scope), scope)) throw new Error('Unsupported saved draft. Its original records are preserved.');
+        return { kind: binding.viewId === viewId ? 'bound' : 'independent', viewId, scope, text: draft.draft };
+      }
+      return null;
     } finally { db.close(); release?.(); }
+  }
+
+  static async openRemainingWork(viewId: string, hostId: string): Promise<void> {
+    const owner = await this.reopen(viewId, () => {});
+    try {
+      const saved = await owner.readView(hostId);
+      if (!saved.route) return;
+      const binding = await readEditorBinding(owner.db, saved.route);
+      if (binding && binding.viewId !== viewId) {
+        await owner.transaction('readwrite', store => store.put({ ...saved, route: null }, ['view', viewId, hostId]));
+      }
+    } finally { await owner.close(); }
   }
 
   static async bindingForView(viewId: string): Promise<EditorBinding | null> {
@@ -127,7 +142,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
     } finally { db.close(); }
   }
 
-  static async locateEditor(scope: ConversationScope): Promise<{ readonly binding: EditorBinding | null; readonly legacyViewIds: readonly string[] }> {
+  static async locateEditor(scope: ConversationScope, preferredViewId?: string): Promise<{ readonly binding: EditorBinding | null; readonly legacyViewIds: readonly string[] }> {
     const db = await openViewDatabase();
     try {
       const binding = await readEditorBinding(db, scope);
@@ -138,6 +153,18 @@ export class BrowserViewStorage implements OwnedViewStorage {
       const legacyViewIds = await new Promise<readonly string[]>((resolve, reject) => {
         const transaction = db.transaction('records'), request = transaction.objectStore('records').openCursor();
         const found = new Set<string>(); let scanned = 0, failure: unknown;
+        if (preferredViewId) {
+          const store = transaction.objectStore('records'), draft = store.getKey(['draft', preferredViewId, scope.hostId, scope.conversationId]);
+          const imagePrefix = ['draft-image', preferredViewId, scope.hostId, scope.conversationId];
+          const image = store.getKey(IDBKeyRange.bound(imagePrefix, [...imagePrefix, []], false, true));
+          const view = store.get(['view', preferredViewId, scope.hostId]);
+          draft.onsuccess = () => { if (draft.result !== undefined) found.add(preferredViewId); };
+          image.onsuccess = () => { if (image.result !== undefined) found.add(preferredViewId); };
+          view.onsuccess = () => {
+            try { const saved = decodeView(view.result, scope.hostId); if (saved.route && sameScope(saved.route, scope) || saved.pendingCreation && sameScope(saved.pendingCreation.scope, scope)) found.add(preferredViewId); }
+            catch (error) { failure = error; transaction.abort(); }
+          };
+        }
         request.onsuccess = () => {
           const cursor = request.result;
           if (!cursor) return;
@@ -222,6 +249,48 @@ export class BrowserViewStorage implements OwnedViewStorage {
       db = await openViewDatabase();
       return await transferEditor(db, plan);
     } finally { db?.close(); for (const release of releases.reverse()) release(); releaseConversation(); }
+  }
+
+  static async recoverBrowserHandoff(binding: Extract<EditorBinding, { readonly kind: 'handoff-reserved' }>, label: string): Promise<EditorBinding> {
+    if (!binding.targetLabel.startsWith('browser:') || !label.startsWith('browser:')) throw new Error('Only a closed browser handoff can be recovered here.');
+    const releaseCatalog = await claim(binding.targetLabel.slice('browser:'.length));
+    if (!releaseCatalog) throw new Error('The original browser tab still owns this handoff.');
+    let releaseConversation: (() => void) | null = null, releaseView: (() => void) | null = null, db: IDBDatabase | undefined;
+    try {
+      releaseConversation = await conversationLock(binding.scope);
+      if (!releaseConversation) throw new Error('The original conversation editor is still open.');
+      releaseView = await claim(binding.viewId);
+      if (!releaseView) throw new Error('The saved handoff view is still open.');
+      db = await openViewDatabase();
+      const current = await readEditorBinding(db, binding.scope);
+      if (!current || current.kind !== 'handoff-reserved' || current.transitionId !== binding.transitionId || current.targetLabel !== binding.targetLabel) throw new Error('The browser handoff changed. Retry opening the chat.');
+      return await recoverEditor(db, { scope: binding.scope, viewId: binding.viewId, nativeLabel: binding.targetLabel,
+        fromTransitionId: binding.transitionId, transitionId: crypto.randomUUID(), targetLabel: label, creationAgentId: null });
+    } finally { db?.close(); releaseView?.(); releaseConversation?.(); releaseCatalog(); }
+  }
+
+  static async reopenForRecovery(viewId: string, onFailure: (error: unknown) => void): Promise<BrowserViewStorage | null> {
+    const binding = await this.bindingForView(viewId);
+    if (!binding) {
+      const release = await claim(viewId);
+      if (!release) return null;
+      try { return new BrowserViewStorage(viewId, await openViewDatabase(), release, onFailure); }
+      catch (error) { release(); throw error; }
+    }
+    if (binding.kind !== 'editing') return null;
+    const releaseConversation = await conversationLock(binding.scope);
+    if (!releaseConversation) return null;
+    let releaseView: (() => void) | null = null, db: IDBDatabase | undefined;
+    try {
+      releaseView = await claim(viewId);
+      if (!releaseView) { releaseConversation(); return null; }
+      db = await openViewDatabase();
+      const current = await readEditorBinding(db, binding.scope);
+      if (!current || current.kind !== 'editing' || current.viewId !== viewId) { db.close(); releaseView(); releaseConversation(); return null; }
+      const release = releaseView, owner = new BrowserViewStorage(viewId, db, () => { release(); releaseConversation(); }, onFailure);
+      owner.editor = current;
+      return owner;
+    } catch (error) { db?.close(); releaseView?.(); releaseConversation(); throw error; }
   }
 
   static async recoverClosed(grant: EditorRecoveryGrant): Promise<EditorBinding> {
@@ -460,7 +529,8 @@ export class BrowserViewStorage implements OwnedViewStorage {
       commitTransfer: async (records, transfer) => {
         current(records.scope);
         return protect(() => this.fenced<boolean>(records.scope, 'readwrite', generation(records.scope), (store, result, fail) => {
-          commitCarriedDraft(store, this.viewId, records, transfer, result, fail);
+          if (transfer.outcome === 'copy-cleared') commitCopiedDraft(store, this.viewId, records, transfer, result, fail);
+          else commitCarriedDraft(store, this.viewId, records, transfer, result, fail);
         }));
       },
       loadImage: async (scope, selectionId) => {

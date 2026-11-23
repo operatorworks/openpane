@@ -26,7 +26,7 @@ test('CSS AST scopes every selector and recursively scopes allowed at-rules', ()
   assert.ok(scoped.includes(value.digest));
   assert.doesNotThrow(() => bundle('[data-openpane-part="butto\\6e"] { color: #123456; }'));
   for (const css of ['body { color: #000000; }', '[data-openpane-part="button"] { position: fixed; }',
-    '[data-openpane-part="button"] { display: none; }', '[data-openpane-part="button"] { opacity: 0; }',
+    '[data-openpane-part="button"] { display: none; }', '[data-openpane-part="button"] { opacity: 0; }', '[data-openpane-part="composer"] { filter: opacity(0); }', '[data-openpane-part="main"] { opacity: 0; }',
     '[data-openpane-part="button"] { pointer-events: none; }', '[data-openpane-part="button"] { color: red !important; }',
     '[data-openpane-part="button"] { padding: 65px; }', '[data-openpane-part="button"] { font-size: 9px; }',
     '[data-openpane-part="button"] { background-image: url("https://example.com/a.png"); }',
@@ -96,4 +96,12 @@ test('directory ingestion rejects a named pipe without waiting for a writer', { 
   const source = `import { readExperienceDirectory } from ${JSON.stringify(module)}; try { await readExperienceDirectory(process.argv[1]); process.exitCode=1; } catch(error) { console.log(error.message); }`;
   const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', source, directory], { timeout: 1000, killSignal: 'SIGKILL' });
   assert.match(stdout, /regular file/);
+});
+
+
+test('semantic CSS accepts only CSS hex lengths and valid local font lists',()=>{
+  for(const color of ['#abc','#abcd','#abcdef','#abcdef12'])assert.doesNotThrow(()=>bundle(`[data-openpane-part="button"] { color: ${color}; }`));
+  for(const color of ['#ab','#abcde','#abcdef1','#abcdef123'])assert.throws(()=>bundle(`[data-openpane-part="button"] { color: ${color}; }`));
+  assert.doesNotThrow(()=>bundle('[data-openpane-part="button"] { font-family: "Segoe UI", sans-serif; }'));
+  assert.throws(()=>bundle('[data-openpane-part="button"] { font-family: Tahoma,,sans-serif; }'));
 });

@@ -178,8 +178,11 @@ remove a card to release its slot:
 Removal emits a tombstone. Removing a failed or interrupted query explicitly
 abandons that attempt and its retry option; it never creates a card. Running
 queries must settle before removal. Replaying the old publication does not resurrect it.
-Administrative `maintenance compact --expected-epoch EPOCH` abandons old UI
-receipts and replay history while keeping active cards and all non-abandoned query
-attempts. Unknown retries from older epochs are rejected. Use it only after
-checking outstanding work. `experience prune --keep N --request-id EPOCH:UUID`
+Administrative `maintenance compact --expected-epoch EPOCH` retires completed UI
+receipts and replay history while keeping active cards, drafts, native intents,
+non-abandoned query attempts and the reserved builtin recovery replay. Pending
+normal deliveries refuse compaction; use `--abandon-waits` to explicitly retire
+unconfirmed waits. Abandonment never counts as rendering. Exact replay of the
+latest compaction returns its saved result; changing its abandonment choice
+conflicts. Other unknown retries from older epochs are rejected. `experience prune --keep N --request-id EPOCH:UUID`
 reclaims unselected, unreferenced bundles; it does not erase drafts or cards.

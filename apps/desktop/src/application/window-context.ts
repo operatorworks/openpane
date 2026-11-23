@@ -11,7 +11,7 @@ export interface NativeReservation {
   readonly label: string;
   readonly transitionId: string;
   readonly creationAgentId: string | null;
-  readonly phase: 'requested' | 'source-saved' | 'transfer-committed' | 'source-released' | 'target-ready' | 'failed';
+  readonly phase: 'assigned' | 'requested' | 'source-saved' | 'transfer-committed' | 'source-released' | 'target-ready' | 'failed';
   readonly bindingRevision: number | null;
   readonly writerGeneration: number | null;
 }
@@ -24,7 +24,7 @@ export type DesktopWindowContext =
 export function parseNativeReservation(value: unknown): NativeReservation {
   const input = record(value, ['scope', 'viewId', 'label', 'transitionId', 'creationAgentId', 'phase', 'bindingRevision', 'writerGeneration']);
   const phase = input.phase;
-  if (phase !== 'requested' && phase !== 'source-saved' && phase !== 'transfer-committed' && phase !== 'source-released' && phase !== 'target-ready' && phase !== 'failed') throw new Error('Invalid native reservation phase');
+  if (phase !== 'assigned' && phase !== 'requested' && phase !== 'source-saved' && phase !== 'transfer-committed' && phase !== 'source-released' && phase !== 'target-ready' && phase !== 'failed') throw new Error('Invalid native reservation phase');
   function generation(value: unknown): number | null {
     if (value === null) return null;
     if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) throw new Error('Invalid native binding generation');
@@ -82,4 +82,11 @@ export function parseEditorRecoveryGrant(value: unknown): EditorRecoveryGrant {
   return { scope: parseScope(input.scope), viewId: identifier(input.viewId, 200), nativeLabel: identifier(input.nativeLabel, 200),
     fromTransitionId: identifier(input.fromTransitionId, 200), transitionId: identifier(input.transitionId, 200), targetLabel: input.targetLabel,
     creationAgentId: input.creationAgentId === null ? null : identifier(input.creationAgentId) };
+}
+
+
+export function childPlacementResult(result: Exclude<ConversationOpenResult, { readonly kind: 'pending' }>): Exclude<ConversationOpenResult, { readonly kind: 'pending' | 'inline' }>;
+export function childPlacementResult(result: ConversationOpenResult): Exclude<ConversationOpenResult, { readonly kind: 'inline' }>;
+export function childPlacementResult(result: ConversationOpenResult): Exclude<ConversationOpenResult, { readonly kind: 'inline' }> {
+  return result.kind === 'inline' ? { kind: 'detached', scope: result.scope, label: 'main' } : result;
 }

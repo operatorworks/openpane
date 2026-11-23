@@ -124,3 +124,10 @@ test('an expired execution grant cannot start a late pup process', async t => {
   assert.deepEqual(await runPup(f.path, [ready], { signal: new AbortController().signal, deadlineMs: Date.now() - 1 }), { kind: 'failed', reason: 'pup-timeout' });
   await assert.rejects(access(ready), { code: 'ENOENT' });
 });
+
+
+test('grouped metrics retain their distinct scopes beside the metric display name',()=>{
+  const raw=structuredClone(source);raw.series=['host:a','host:b'].map(scope=>({...structuredClone(source.series[0]),display_name:'system.cpu.user',scope}));
+  assert.deepEqual(normalize(raw).series.map(series=>series.label),['system.cpu.user {host:a}','system.cpu.user {host:b}']);
+  assert.deepEqual(normalize(raw).series.map(series=>series.points),[source.series[0].pointlist,source.series[0].pointlist]);
+});

@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
-import { chmodSync } from 'node:fs';
+import { chmodSync, lstatSync, openSync, closeSync, constants, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ApplyReceipt, NativePlacementTarget, UiClientSnapshot, ExperienceBundle, UiAppearance, UiSelection, WindowContext } from '@openpane/contracts';
 import { canonicalJson, experienceSchema, parseUiAppearance, parseUiSelection, parseApplyReceipt, DISPLAY_PAGE_LIMITS } from '@openpane/contracts';
@@ -13,8 +14,10 @@ import type { ConversationScope, DisplayDelivery, DeliveryEnvelope, DisplaySubsc
 
 const MAX_BUNDLES = 16, MAX_BUNDLE_BYTES = 32 * 1024 * 1024, MAX_RECEIPTS = 4096, MAX_METADATA_BYTES = 32 * 1024 * 1024;
 const PRESENCE_MS = 15000;
+interface Compaction { readonly fromEpoch: number; readonly toEpoch: number; readonly abandonWaits: boolean }
 interface StoreState {
   readonly version: 1; readonly profileId: string; readonly epoch: number; readonly recoveryGeneration: number;
+  readonly compaction: Compaction | null;
   readonly selection: UiSelection; readonly healthy: UiAppearance;
   readonly recovery: { readonly requestId: string; readonly requestDigest: string; readonly result: ApplyReceipt } | null;
 }
@@ -27,15 +30,18 @@ function departedParticipant(participant: ApplyReceipt['participants'][number]):
 }
 const receiptEnvelope = (receipt: ApplyReceipt) => ({ requestId: receipt.requestId, deliveryGeneration: receipt.deliveryGeneration, selectionRevision: receipt.selectionRevision, digest: receipt.digest });
 function parseState(value: unknown): StoreState {
-  const input = record(value, ['version', 'profileId', 'epoch', 'recoveryGeneration', 'selection', 'healthy', 'recovery']);
+  const input = record(value);
+  record(input, Object.hasOwn(input, 'compaction') ? ['version', 'profileId', 'epoch', 'recoveryGeneration', 'selection', 'healthy', 'recovery', 'compaction'] : ['version', 'profileId', 'epoch', 'recoveryGeneration', 'selection', 'healthy', 'recovery']);
   if (input.version !== 1) throw new Error('Unsupported UI database version');
   const recovery = input.recovery === null ? null : record(input.recovery, ['requestId', 'requestDigest', 'result']);
-  return { version: 1, profileId: identifier(input.profileId, 200), epoch: count(input.epoch), recoveryGeneration: count(input.recoveryGeneration),
+  const compact = input.compaction === undefined || input.compaction === null ? null : record(input.compaction, ['fromEpoch', 'toEpoch', 'abandonWaits']);
+  if (compact && (typeof compact.abandonWaits !== 'boolean' || count(compact.toEpoch) !== count(compact.fromEpoch) + 1 || compact.toEpoch !== input.epoch)) throw new Error('Invalid UI compaction replay');
+  return { compaction: compact === null ? null : { fromEpoch: count(compact.fromEpoch), toEpoch: count(compact.toEpoch), abandonWaits: compact.abandonWaits === true }, version: 1, profileId: identifier(input.profileId, 200), epoch: count(input.epoch), recoveryGeneration: count(input.recoveryGeneration),
     selection: parseUiSelection(input.selection), healthy: parseUiAppearance(input.healthy),
     recovery: recovery === null ? null : { requestId: identifier(recovery.requestId, 128), requestDigest: identifier(recovery.requestDigest, 64), result: parseReceipt(recovery.result) } };
 }
 function initial(): StoreState {
-  return { version: 1, profileId: randomUUID(), epoch: 1, recoveryGeneration: 1, selection: { revision: 0, deliveryGeneration: 0, selected: { kind: 'builtin' }, previousHealthy: { kind: 'builtin' } }, healthy: { kind: 'builtin' }, recovery: null };
+  return { compaction: null, version: 1, profileId: randomUUID(), epoch: 1, recoveryGeneration: 1, selection: { revision: 0, deliveryGeneration: 0, selected: { kind: 'builtin' }, previousHealthy: { kind: 'builtin' } }, healthy: { kind: 'builtin' }, recovery: null };
 }
 function next(value: number): number { if (value >= Number.MAX_SAFE_INTEGER) throw new UiRefusal('capacity', 'UI generation exhausted'); return value + 1; }
 const participantSession = (slot: ApplyReceipt['participants'][number]['slot']) => slot.kind === 'document' ? slot.context.documentIncarnation : slot.resolved?.documentIncarnation ?? null;
@@ -54,13 +60,26 @@ export class UiStore {
   private readonly display: UiDisplayStore;
   private state: StoreState;
   private readonly sessions = new Map<string, Session>();
+  private readonly highestPresence = new Map<string, number>();
   private readonly manifests = new Map<string, ExperienceBundle['manifest']>();
   private readonly relayPositions = new Map<string, number>();
   private readonly listeners = new Set<() => void>();
   private change = 0;
   private closed = false;
-  readonly recoveryReason: string | null;
+  recoveryReason: string | null;
   constructor(path: string, readonly hostId: string, private readonly targets: (after: string | null) => unknown = () => { throw new UiRefusal('unavailable', 'Conversation catalog unavailable'); }, checkScope: (scope: ConversationScope) => boolean = () => false) {
+    let file;
+    try { file = lstatSync(path); }
+    catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+      const descriptor = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600); closeSync(descriptor);
+      file = lstatSync(path);
+    }
+    if (!file.isFile() || file.nlink !== 1 || process.getuid && file.uid !== process.getuid()) throw new Error('UI database must be an independent regular file owned by this user');
+    let conversationFile;
+    try { conversationFile = statSync(join(dirname(path), 'host.sqlite')); }
+    catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error; }
+    if (conversationFile && conversationFile.dev === file.dev && conversationFile.ino === file.ino) throw new Error('UI database must be separate from the conversation database');
     this.db = new DatabaseSync(path);
     try {
       chmodSync(path, 0o600);
@@ -98,13 +117,13 @@ export class UiStore {
   }
   private transaction<T>(run: () => T): T {
     if (this.closed) throw new UiRefusal('unavailable', 'UI store is closed');
-    const before = this.state, sessions = new Map(this.sessions);
+    const before = this.state, sessions = new Map(this.sessions), highestPresence = new Map(this.highestPresence), recoveryReason = this.recoveryReason;
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const result = run();
       this.db.prepare('INSERT OR REPLACE INTO ui_state(id,value) VALUES (1,?)').run(canonicalJson(this.state));
       this.db.exec('COMMIT'); return result;
-    } catch (error) { this.db.exec('ROLLBACK'); this.state = before; this.manifests.clear(); this.sessions.clear(); for (const [id, session] of sessions) this.sessions.set(id, session); throw error; }
+    } catch (error) { this.db.exec('ROLLBACK'); this.state = before; this.recoveryReason = recoveryReason; this.highestPresence.clear(); for (const [key, sequence] of highestPresence) this.highestPresence.set(key, sequence); this.manifests.clear(); this.sessions.clear(); for (const [id, session] of sessions) this.sessions.set(id, session); throw error; }
   }
   private notify(): void { this.change = next(this.change); for (const listener of this.listeners) listener(); }
   context(): object {
@@ -127,6 +146,7 @@ export class UiStore {
     return row ? parseReceipt(JSON.parse(text(row.result))) : null;
   }
   private writeReceipt(receipt: ApplyReceipt): void {
+    if (receipt.deliveryGeneration === this.state.selection.deliveryGeneration && receiptStatus(receipt) === 'all-rendered') this.state = { ...this.state, healthy: this.state.selection.selected };
     if (receipt.requestId === this.state.recovery?.requestId) { this.state = { ...this.state, recovery: { ...this.state.recovery, result: receipt } }; return; }
     const value = canonicalJson(receipt);
     this.db.prepare(`INSERT INTO ui_receipts(id,request_digest,result,generation,reserved_bytes) VALUES (?,?,?,?,?)
@@ -203,7 +223,7 @@ export class UiStore {
     if (participants.length > cohortLimit) throw new UiRefusal('capacity', `Windows and pending native transitions exceed the ${cohortLimit}-slot cohort limit`);
     const receipt: ApplyReceipt = { requestId: request.requestId, requestDigest, deliveryGeneration: selection.deliveryGeneration, selectionRevision: selection.revision, digest: digestOf(selected), participants };
     if (request.op !== 'restore') this.capacity(this.receiptBytes(receipt));
-    this.state = { ...this.state, selection };
+    this.state = { ...this.state, selection }; this.recoveryReason = null;
     if (request.op === 'restore') this.state = { ...this.state, recoveryGeneration: next(this.state.recoveryGeneration), recovery: { requestId: request.requestId, requestDigest, result: receipt } };
     else this.writeReceipt(receipt);
     return receipt;
@@ -219,9 +239,12 @@ export class UiStore {
     if (context.hostId !== this.hostId || context.profileId !== this.state.profileId) throw new UiRefusal('conflict', 'UI window belongs to another profile');
     const previous = this.sessions.get(context.documentIncarnation);
     if (previous && (canonicalJson(previous.context) !== canonicalJson(context) || request.presenceSequence <= previous.sequence)) throw new UiRefusal('conflict', 'Stale or conflicting window presence');
-    for (const session of this.sessions.values()) if (session.context.brokerInstance === context.brokerInstance && session.context.label === context.label && request.presenceSequence <= session.sequence) throw new UiRefusal('conflict', 'Stale logical window presence');
+    const logicalWindow = canonicalJson([context.brokerInstance, context.label]), highest = this.highestPresence.get(logicalWindow);
+    if (highest !== undefined && request.presenceSequence <= highest) throw new UiRefusal('conflict', 'Stale logical window presence');
+    if (highest === undefined && this.highestPresence.size >= 4096) throw new UiRefusal('capacity', 'UI presence history is full; restart the host before opening more windows');
     for (const [id, session] of this.sessions) if (id !== context.documentIncarnation && session.context.brokerInstance === context.brokerInstance && session.context.label === context.label) { this.depart(id); this.sessions.delete(id); }
     if (!previous && this.sessions.size >= 64) throw new UiRefusal('capacity', 'Too many UI sessions; close windows');
+    this.highestPresence.set(logicalWindow, request.presenceSequence);
     this.sessions.set(context.documentIncarnation, { context, visible: request.visible, seen: Date.now(), sequence: request.presenceSequence, digest: previous?.digest ?? null, stagedDigest: previous?.stagedDigest ?? null, initialized: previous?.initialized ?? false, nativePlacement: request.nativePlacement === true, paintedGeneration: previous?.paintedGeneration ?? null });
   }
   private snapshot(session: string): UiClientSnapshot {
@@ -273,8 +296,8 @@ export class UiStore {
       const participants = receipt.participants.map(participant => {
         const slot = participant.slot;
         if (slot.kind !== 'transition' || !slot.target || participant.placement.kind !== 'pending' || slot.target.nativeTransitionId !== target.nativeTransitionId) return participant;
-        if (slot.source.brokerInstance !== context.brokerInstance || slot.target.scope.hostId !== context.scope.hostId || slot.target.scope.conversationId !== context.scope.conversationId || slot.target.label !== context.label || slot.target.viewId !== context.viewId || slot.target.bindingRevision !== target.bindingRevision) throw new UiRefusal('conflict', 'Ready child does not match the fixed placement target');
-        if (slot.resolved && canonicalJson(slot.resolved) !== canonicalJson(context)) throw new UiRefusal('conflict', 'Transition already resolved to another incarnation');
+        if (slot.source.brokerInstance !== context.brokerInstance || slot.target.scope.hostId !== context.scope.hostId || slot.target.scope.conversationId !== context.scope.conversationId || slot.target.label !== context.label || slot.target.viewId !== context.viewId || slot.target.bindingRevision !== target.bindingRevision) return participant;
+        if (slot.resolved && canonicalJson(slot.resolved) !== canonicalJson(context)) return participant;
         changed = true;
         return { ...participant, slot: { ...slot, resolved: context }, placement: { kind: 'ready', transitionId: slot.transitionId, bindingRevision: target.bindingRevision } as const };
       });
@@ -335,13 +358,32 @@ export class UiStore {
       }
       case 'status': return this.transaction(() => { this.expire(); return this.status(request.requestId); });
       case 'compact': {
+        let compacted = false;
         const result = this.transaction(() => {
+        const abandonWaits = request.abandonWaits === true, previous = this.state.compaction;
+        const result = (compact: Compaction) => ({ previousEpoch: compact.fromEpoch, epoch: compact.toEpoch, abandonedWaits: compact.abandonWaits,
+          retained: 'Drafts, active cards, native intents, non-abandoned query attempts and the reserved recovery replay are retained' });
+        if (previous?.fromEpoch === request.expectedEpoch) {
+          if (previous.abandonWaits !== abandonWaits) throw new UiRefusal('conflict', 'Compaction replay changed abandon-waits');
+          return result(previous);
+        }
         if (request.expectedEpoch !== this.state.epoch) throw new UiRefusal('expired', 'Request epoch already advanced');
-        this.display.compactInTransaction();
-        this.db.exec('DELETE FROM ui_receipts; DELETE FROM ui_operations;'); this.state = { ...this.state, epoch: next(this.state.epoch) };
-        return { epoch: this.state.epoch, abandoned: 'Unconfirmed visual deliveries and retired publication history expire; drafts, active cards and non-abandoned query attempts are retained' };
+        this.expire();
+        const normal = this.db.prepare('SELECT result FROM ui_receipts').all().map(row => parseReceipt(JSON.parse(text(row.result))));
+        if (!abandonWaits && normal.some(receipt => receiptStatus(receipt) === 'pending')) throw new UiRefusal('conflict', 'Visual deliveries are pending. Wait for confirmation or explicitly use --abandon-waits.');
+        if (abandonWaits && this.state.recovery) {
+          const receipt = this.state.recovery.result;
+          this.writeReceipt({ ...receipt, participants: receipt.participants.map(participant => ({ ...participant,
+            visual: participant.visual.kind === 'pending' ? { kind: 'departed' } : participant.visual,
+            placement: participant.placement.kind === 'pending' ? { kind: 'failed', transitionId: participant.placement.transitionId, reason: 'Compaction explicitly abandoned this unconfirmed placement' } : participant.placement })) });
+        }
+        this.display.compactInTransaction(); compacted = true;
+        const compact: Compaction = { fromEpoch: this.state.epoch, toEpoch: next(this.state.epoch), abandonWaits };
+        this.db.exec('DELETE FROM ui_receipts; DELETE FROM ui_operations;'); this.state = { ...this.state, epoch: compact.toEpoch, compaction: compact };
+        return result(compact);
         });
-        this.display.compacted(); this.notify(); return result;
+        if (compacted) { this.display.compacted(); this.notify(); }
+        return result;
       }
       case 'prune': return this.transaction(() => {
         this.checkEpoch(request.requestId);
@@ -392,8 +434,7 @@ export class UiStore {
           });
           if (!found || !session.visible) throw new UiRefusal('conflict', 'Window is not a visible participant');
           const updated = { ...receipt, participants }; this.writeReceipt(updated);
-          this.sessions.set(request.session, { ...session, digest: receipt.digest, stagedDigest: null });
-          if (receiptStatus(updated) === 'all-rendered') this.state = { ...this.state, healthy: this.state.selection.selected };
+          this.sessions.set(request.session, { ...session, digest: request.result.kind === 'rendered' ? receipt.digest : session.digest, stagedDigest: null });
           return this.status(receipt.requestId);
         });
         this.notify(); return result;

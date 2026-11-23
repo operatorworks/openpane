@@ -149,3 +149,23 @@ test('an open application picker does not fail a visual delivery or builtin reco
   await requestUi(socket, restored); assert.equal((await completed(socket, restored.requestId)).outcome, 'all-rendered');
   assert.equal(await page.locator('.experience-content').getAttribute('data-openpane-experience'), null);
 });
+
+test('a retried painted acknowledgement clears the waiting notice for that exact delivery', { timeout: 45000 }, async t => {
+  const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  let dropped = 0, release; const gate = new Promise(resolve => { release = resolve; }); t.after(() => release());
+  await page.route('**/api/ui/v1', async route => {
+    const request = route.request().postDataJSON();
+    if (request.op === 'paint' && request.deliveryGeneration > 0) {
+      if (!dropped++) return route.abort('connectionfailed');
+      await gate;
+    }
+    return route.continue();
+  });
+  const context = await requestUi(socket, { op: 'context' }), command = { op: 'apply', requestId: `${context.requestEpoch}:${randomUUID()}`, expectedRevision: 0, bundle: experience('#3355aa') };
+  await requestUi(socket, command);
+  await page.getByText('Appearance is visible locally; waiting for host confirmation.', { exact: true }).waitFor();
+  release();
+  assert.equal((await completed(socket, command.requestId)).outcome, 'all-rendered'); assert.ok(dropped >= 2);
+  await wait(async () => await page.getByText('Appearance is visible locally; waiting for host confirmation.', { exact: true }).count() === 0, 'cleared confirmation notice');
+});

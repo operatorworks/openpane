@@ -6,13 +6,14 @@ import { join, sep } from 'node:path';
 import postcss from 'postcss';
 import type { Container, Document } from 'postcss';
 import selectorParser from 'postcss-selector-parser';
-import { canonicalJson, EXPERIENCE_LIMITS, parseExperience } from '@openpane/contracts';
+import { canonicalJson, EXPERIENCE_LIMITS, LOCAL_FONT_STACK_PATTERN, parseExperience } from '@openpane/contracts';
 import type { ExperienceBundle, ExperienceV1 } from '@openpane/contracts';
 import { hex, identifier, record } from '@openpane/contracts/decode';
 
 export const EXPERIENCE_PARTS = ['main', 'page-rail', 'page', 'chat-directory', 'chat-window', 'header', 'transcript', 'transcript-row', 'message-text',
   'toolbar', 'composer', 'button', 'card', 'card-title', 'card-toolbar', 'card-summary', 'plot-frame', 'plot', 'plot-axis', 'plot-grid', 'plot-trace', 'plot-legend', 'card-empty', 'query-details', 'data-table'] as const;
 export const sha256 = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex');
+const localFontStack = new RegExp(LOCAL_FONT_STACK_PATTERN);
 const visualProperties = new Set(['color', 'background-color', 'border-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'fill', 'stroke']);
 const spacingProperties = new Set(['gap', 'row-gap', 'column-gap', 'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left']);
 const borderProperties = new Set(['border', 'border-top', 'border-right', 'border-bottom', 'border-left']);
@@ -21,7 +22,7 @@ const lengths = (text: string, maximum: number, count = 1) => {
   return values.length >= 1 && values.length <= count && values.every(value => value === '0' || (/^\d+(?:\.\d+)?px$/.test(value) && parseFloat(value) <= maximum));
 };
 function visualColor(text: string): boolean {
-  return /^#[\da-f]{3}(?:[\da-f]{3})?(?:[\da-f]{2})?$/i.test(text) || /^(transparent|currentColor|inherit)$/.test(text)
+  return /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i.test(text) || /^(transparent|currentColor|inherit)$/.test(text)
     || /^var\(--aui-(?:color-(?:canvas|surface|raised|text|muted|border|control-border|accent|on-accent|danger|on-danger|focus)|chart-(?:background|grid|axis|trace[1-8]))\)$/.test(text);
 }
 function declaration(property: string, value: string, assets: ReadonlySet<string>): void {
@@ -30,7 +31,7 @@ function declaration(property: string, value: string, assets: ReadonlySet<string
   if (property === 'font-size' && lengths(value, 48) && parseFloat(value) >= 10) return;
   if (property === 'line-height' && /^(1(?:\.\d+)?|2(?:\.0+)?)$/.test(value)) return;
   if (property === 'font-weight' && /^[1-9]00$/.test(value)) return;
-  if (property === 'font-family' && /^[a-zA-Z0-9 ,"'-]{1,256}$/.test(value) && /[a-zA-Z]/.test(value)) return;
+  if (property === 'font-family' && value.length <= 256 && localFontStack.test(value)) return;
   if (property === 'border-radius' && lengths(value, 32, 4)) return;
   if ((property === 'border-width' || property === 'stroke-width') && lengths(value, 4, property === 'border-width' ? 4 : 1)) return;
   if (property === 'border-style' && /^(solid|dashed|dotted|double|inset|outset|none)$/.test(value)) return;

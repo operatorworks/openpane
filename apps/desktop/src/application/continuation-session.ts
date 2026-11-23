@@ -1,3 +1,4 @@
+import { carriedDraftText, copiedDraftPresent } from './draft-carry-records.js';
 import { ServiceError } from '@openpane/contracts/service';
 import { sameScope } from '@openpane/contracts';
 import type { ConversationOpenResult, ConversationScope } from '@openpane/contracts';
@@ -41,7 +42,7 @@ interface ContinuationPort<Owner extends ContinuationOwner> {
   owner(): Owner | null;
   active(): OpenConversation | null;
   busy(): boolean;
-  publish(update: Partial<Pick<ApplicationSnapshot, 'continuation' | 'catalog' | 'workspaces' | 'lastPlacement' | 'error'>>): void;
+  publish(update: Partial<Pick<ApplicationSnapshot, 'continuation' | 'catalog' | 'workspaces' | 'lastPlacement' | 'error' | 'savedDraftRecovery'>>): void;
   current<T>(owner: Owner, operation: Promise<T>): Promise<T>;
   recoverDraft(owner: Owner, scope: ConversationScope): Promise<StoreBorrow | null>;
   install(owner: Owner, scope: ConversationScope, arrived?: ConversationContinuation['arrived']): Promise<ConversationOpenResult>;
@@ -157,7 +158,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     void refreshContinuation(record);
   }
   /** Moves the unsent draft of a chat that is no longer open into the open composer. It is never sent. */
-  async function moveDraft(owner: Owner, earlier: ConversationScope): Promise<void> {
+  async function moveDraft(owner: Owner, earlier: ConversationScope, onlyWhenEmpty = false): Promise<void> {
     const lease = owner.view?.borrow, next = port.active();
     if (port.owner() !== owner || !lease || !next || sameScope(next.scope, earlier)) return;
     // The earlier store closed when the open chat replaced it, after its queued saves landed, so this loads the last text typed there.
@@ -167,10 +168,17 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
       const captured = await held.store.captureDraft(), text = captured.text;
       if (!text || port.owner() !== owner || port.active()?.store !== next.store) return;
       const typed = next.store.getSnapshot().draft;
-      const merged = !typed || typed.includes(text) ? (typed || text) : `${text}${typed}`;
+      const recoverText = async () => {
+        const saved = await held.store.captureDraft();
+        if (port.owner() === owner && saved.text) port.publish({ savedDraftRecovery: { kind: 'continued', viewId: held.storage.viewId, scope: earlier, text: saved.text } });
+      };
+      if (onlyWhenEmpty && typed && !copiedDraftPresent(text, typed)) { await recoverText(); return; }
+      const merged = copiedDraftPresent(text, typed) ? typed : carriedDraftText(text, typed);
       if (merged !== typed) await next.store.setDraft(merged);
-      const visible = next.store.getSnapshot().draft;
-      if (port.owner() === owner && port.active()?.store === next.store && visible.includes(text)) await held.store.replaceDraft(captured, '');
+      if (port.owner() === owner && port.active()?.store === next.store) {
+        const released = await held.store.transferDraft(captured, '', { kind: 'release-copy', target: next.scope, targetViewId: next.viewId });
+        if (released !== 'committed') await recoverText();
+      }
     } finally { held.release(); }
   }
   /** Provider from a loaded catalog or workspace row, or `undefined` when that scope is not loaded. An explicit `null` stays `null`. */
@@ -292,13 +300,13 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
       }
     }
   }
-  function settlePlacement(expected: Extract<ConversationOpenResult, { readonly kind: 'pending' }>, result: Exclude<ConversationOpenResult, { readonly kind: 'pending' }>): void {
+  function settlePlacement(expected: Extract<ConversationOpenResult, { readonly kind: 'pending' }>, result: Exclude<ConversationOpenResult, { readonly kind: 'pending' }>): boolean {
     const record = continuation;
-    if (!record || record.placement !== expected || !liveContinuation(record)) return;
+    if (!record || record.placement !== expected || !liveContinuation(record)) return false;
     record.placement = null;
     record.stopped = result.kind !== 'refused';
     record.error = result.kind === 'refused' ? result.reason : 'Continuation opened in its assigned editor.';
-    publishContinuation(record);
+    publishContinuation(record); return true;
   }
   return { stop, watch, newestSegment, moveDraft, act, readEarlier, settlePlacement };
 }

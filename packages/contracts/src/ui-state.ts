@@ -1,7 +1,7 @@
 import { parseExperience } from './experience.js';
 import type { ConversationScope } from './index.js';
 import type { MetricsCardV1, METRICS_EVENT_NAME } from './metrics-card.js';
-import { count, hex, identifier, record } from './decode.js';
+import { boundedText, count, hex, identifier, record } from './decode.js';
 import { parseScope } from './durable.js';
 import { parsePlacementTransition } from './ui-receipt.js';
 import { parseDisplayDelivery } from './display.js';
@@ -143,7 +143,7 @@ export function parseUiContext(value: unknown): UiContextV1 {
   if (input.version !== 1 || !Array.isArray(input.capabilities) || input.capabilities.length > 32) throw new Error('Unsupported UI context');
   if (input.fault !== null && typeof input.fault !== 'string') throw new Error('Invalid UI fault');
   return { version: 1, hostId: identifier(input.hostId), profileId: identifier(input.profileId, 200), requestEpoch: count(input.requestEpoch), recoveryGeneration: count(input.recoveryGeneration),
-    revision: count(input.revision), selection: parseUiSelection(input.selection), capabilities: input.capabilities.map(value => identifier(value, 100)), fault: input.fault };
+    revision: count(input.revision), selection: parseUiSelection(input.selection), capabilities: input.capabilities.map(value => identifier(value, 100)), fault: input.fault === null ? null : boundedText(input.fault, 500) };
 }
 
 export function parseUiClientSnapshot(value: unknown): UiClientSnapshot {
@@ -158,5 +158,5 @@ export function parseUiClientSnapshot(value: unknown): UiClientSnapshot {
   if (!Array.isArray(input.transitions) || input.transitions.length > 32) throw new Error('Invalid placement transition list');
   const transitions = input.transitions.map(parsePlacementTransition);
   if (transitions.some(item => item.envelope.deliveryGeneration !== selection.deliveryGeneration || item.envelope.selectionRevision !== selection.revision || item.envelope.digest !== (bundle?.digest ?? null))) throw new Error('Placement transition generation mismatch');
-  return { version: 1, change: count(input.change), selection, bundle, envelope, fault: input.fault, transitions, display: input.display === null ? null : parseDisplayDelivery(input.display) };
+  return { version: 1, change: count(input.change), selection, bundle, envelope, fault: input.fault === null ? null : boundedText(input.fault, 500), transitions, display: input.display === null ? null : parseDisplayDelivery(input.display) };
 }

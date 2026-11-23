@@ -163,7 +163,7 @@ export function ExtensionWorkspace({ contentPalette = palettes, row, metadata, w
     selected,
     conversation: selected ? conversation : null,
     async open(scope: ConversationScope) {
-      if (!entries.some(entry => sameScope(entry.scope, scope)) && !(selected && sameScope(selected, scope))) throw new Error('This conversation is not in this extension.');
+      if (!entries.some(entry => sameScope(entry.scope, scope)) && !(selected && sameScope(selected, scope))) throw new Error('Open requires a loaded or selected conversation in this extension. Load its catalog page first.');
       return controller.open(scope);
     },
     async create(agentId: string) {

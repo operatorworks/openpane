@@ -97,16 +97,18 @@ export function CrewWorkspace(props: WorkspaceViewProps) {
   const palette = SIDEBAR[theme.appearance];
   const sidebarId = `crew-members-${installation?.installationId ?? 'none'}`;
   /** open and create reject only outside this namespace; any other failure is in the host status strip. */
-  const opening = useRef(false);
+  const opening = useRef<object | null>(null);
+  useEffect(() => { opening.current = null; setNotice(''); }, [choiceKey, activeMember, adding, available]);
   function attempt(action: () => ReturnType<WorkspaceViewProps['open']>) {
     if (opening.current) return;
-    opening.current = true;
+    const token = {}; opening.current = token;
     setNotice('');
     void action().then(result => {
+      if (opening.current !== token) return;
       if (result.kind === 'inline') setNotice('');
       if (result.kind === 'detached') setNotice('Conversation opened in its own window.');
       else if (result.kind !== 'inline') setNotice(result.reason);
-    }).catch(() => setNotice('That conversation could not be opened. Refresh and try again.')).finally(() => { opening.current = false; });
+    }).catch(() => { if (opening.current === token) setNotice('That conversation could not be opened. Refresh and try again.'); }).finally(() => { if (opening.current === token) opening.current = null; });
   }
 
   if (!installation) {

@@ -400,3 +400,65 @@ for (const action of ['continueConversation', 'startNewChat']) test(`${action} r
   assert.equal(f.app.getSnapshot().error, 'Destination could not open');
   if (action === 'continueConversation') assert.equal(f.app.getSnapshot().continuation.error, 'Destination could not open');
 });
+
+test('an older continuation settles without replacing a newer pending chat request',async t=>{
+  let separate=false,started=false;const pending=[];
+  const f=opened(fixture({placement:{async acquire(request,owner){if(!separate)return{kind:'inline',view:{kind:'owned',viewId:owner.storage.viewId}};const result={kind:'pending',scope:request.scope,reason:'Waiting for main'};pending.push(result);return result;}}}));t.after(()=>f.app.dispose());
+  const successor=segment('successor');f.behavior.observation=async()=>({kind:'concluded',cause:'cancelled'});
+  f.behavior.continuation=async input=>{if(input.action==='start')started=true;return input.scope.conversationId===scope.conversationId?{...none,closure:'cancelled',successor:started?{kind:'confirmed',scope:successor}:null}:none;};
+  await f.app.start();await eventually(()=>Boolean(f.app.getSnapshot().continuation?.view));const original=f.app.getSnapshot().active;separate=true;
+  await f.app.conversationActions(original).continueConversation();await f.app.conversationActions(original).startNewChat();assert.equal(pending.length,2);
+  assert.equal(f.app.settlePlacement(pending[0],{kind:'refused',reason:'First destination refused'}),true);assert.equal(f.app.getSnapshot().lastPlacement,pending[1]);assert.equal(f.app.getSnapshot().continuation.error,'First destination refused');
+  await f.app.conversationActions(original).continueConversation();assert.equal(pending.length,3);assert.deepEqual(f.created,[]);
+});
+
+for(const removed of [false,true])test(`inline continuation copies a whole phrase and ${removed?'retains the source if its copy is removed':'clears only after the copy is saved'}`,async t=>{
+  const f=opened(fixture());t.after(()=>f.app.dispose());const successor=segment('successor');let started=false;
+  f.behavior.continuation=async input=>{if(input.action==='start')started=true;return input.scope.conversationId===scope.conversationId?{...none,closure:'cancelled',successor:started?{kind:'confirmed',scope:successor}:null}:none;};
+  f.behavior.observation=async()=>({kind:'concluded',cause:'cancelled'});await f.app.start();await eventually(()=>Boolean(f.app.getSnapshot().continuation?.view));
+  const original=f.app.getSnapshot().active;await original.store.setDraft('note');f.drafts.set('original-view/host/successor',{version:3,scope:successor,draft:'notebook',draftRevision:1,outbox:[],frontendSends:[],image:null});
+  let changed=false;f.behavior.write=async()=>{const active=f.app.getSnapshot().active;if(removed&&!changed&&active&&active.scope.conversationId==='successor'&&active.store.getSnapshot().draft==='note\n\nnotebook'){changed=true;await active.store.setDraft('');}};
+  await f.app.conversationActions(original).continueConversation();
+  assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft,removed?'':'note\n\nnotebook');assert.equal(f.drafts.get('original-view/host/conversation').draft,removed?'note':'');assert.deepEqual(f.submitted,[]);
+});
+
+test('restart after the destination copy commits resumes its predecessor route without duplicating the draft',async t=>{
+  const f=opened(fixture());f.storage.catalogViewId='original-view';t.after(()=>f.app.dispose());const successor=segment('successor');let started=false;
+  const continuation=async input=>{if(input.action==='start')started=true;return input.scope.conversationId===scope.conversationId?{...none,closure:'cancelled',successor:started?{kind:'confirmed',scope:successor}:null}:none;};
+  f.behavior.continuation=continuation;f.behavior.observation=async()=>({kind:'concluded',cause:'cancelled'});await f.app.start();await eventually(()=>Boolean(f.app.getSnapshot().continuation?.view));
+  const original=f.app.getSnapshot().active;await original.store.setDraft('note');f.drafts.set('original-view/host/successor',{version:3,scope:successor,draft:'notebook',draftRevision:1,outbox:[],frontendSends:[],image:null});
+  const entered=Promise.withResolvers(),release=Promise.withResolvers();let held=false;
+  f.behavior.write=async()=>{const active=f.app.getSnapshot().active;if(!held&&active?.scope.conversationId==='successor'&&active.store.getSnapshot().draft==='note\n\nnotebook'){held=true;entered.resolve();await release.promise;}};
+  const moving=f.app.conversationActions(original).continueConversation();
+  try{
+    await entered.promise;assert.equal(f.views.get('original-view/host').route.conversationId,'conversation');
+    const restarted=fixture();restarted.storage.catalogViewId='original-view';t.after(()=>restarted.app.dispose());for(const[key,value]of f.views)restarted.views.set(key,structuredClone(value));for(const[key,value]of f.drafts)restarted.drafts.set(key,structuredClone(value));restarted.behavior.continuation=continuation;
+    await restarted.app.start();assert.equal(restarted.app.getSnapshot().active.scope.conversationId,'successor');assert.equal(restarted.app.getSnapshot().active.store.getSnapshot().draft,'note\n\nnotebook');assert.equal(restarted.drafts.get('original-view/host/conversation').draft,'');assert.deepEqual(restarted.submitted,[]);
+  }finally{release.resolve();await moving;}
+});
+
+test('a replacement creation with a lost reply retains its source draft reference across controller restart', async t => {
+  const f = opened(fixture()); await f.app.start();
+  const before = f.app.getSnapshot().active; await before.store.setDraft('Carry after the lost create reply');
+  f.behavior.create = async () => { throw new Error('Creation reply lost'); };
+  await f.app.conversationActions(before).startNewChat();
+  const saved = f.app.getSnapshot().saved;
+  assert.deepEqual(saved.pendingCreation.carryFrom, scope); assert.equal(saved.route.conversationId, scope.conversationId);
+  const views = [...f.views], drafts = [...f.drafts]; await f.app.dispose();
+  const restored = fixture(); for (const entry of views) restored.views.set(...entry); for (const entry of drafts) restored.drafts.set(...entry);
+  t.after(() => restored.app.dispose()); await restored.app.start(); await restored.app.recoverCreation();
+  assert.equal(restored.app.getSnapshot().active.scope.conversationId, saved.pendingCreation.scope.conversationId);
+  assert.equal(restored.app.getSnapshot().active.store.getSnapshot().draft, 'Carry after the lost create reply');
+  assert.equal(restored.drafts.get(`original-view/host/${scope.conversationId}`).draft, '');
+  assert.equal(restored.app.getSnapshot().active.store.getSnapshot().outbox.length, 0);
+  assert.equal(restored.app.getSnapshot().saved.pendingCreation, null);
+});
+
+test('opening a predecessor leaves its unsent text in place when the newest composer already contains other text', async t => {
+  const f = opened(fixture()); t.after(() => f.app.dispose()); let follow = false; const successor = segment('occupied-successor');
+  f.behavior.continuation = async input => input.scope.conversationId === scope.conversationId && follow ? { ...none, successor: { kind: 'confirmed', scope: successor } } : none;
+  await f.app.start(); await f.app.getSnapshot().active.store.setDraft('note');
+  f.drafts.set('original-view/host/occupied-successor', { version: 3, scope: successor, draft: 'notebook', draftRevision: 1, outbox: [], frontendSends: [], image: null });
+  follow = true; const placement = await f.app.open(scope); assert.equal(placement.kind, 'inline');
+  assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft, 'notebook'); assert.equal(f.drafts.get('original-view/host/conversation').draft, 'note'); assert.equal(f.app.getSnapshot().savedDraftRecovery.kind, 'continued'); assert.equal(f.app.getSnapshot().savedDraftRecovery.text, 'note'); assert.deepEqual(f.submitted, []);
+});

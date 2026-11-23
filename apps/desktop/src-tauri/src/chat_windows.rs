@@ -32,9 +32,92 @@ struct Broker {
     reports: BTreeMap<String, Value>,
     child_snapshots: BTreeMap<String, Value>,
     local_builtin: bool,
+    recovery_sequence: u64,
     main_closing: bool,
+    main_close_requested: bool,
+}
+#[derive(Debug, PartialEq, Eq)]
+enum CloseProgress {
+    Idle,
+    RequestMain,
+    Quit,
+}
+fn apply_close_progress(app: &tauri::AppHandle, progress: CloseProgress) {
+    match progress {
+        CloseProgress::Idle => {}
+        CloseProgress::RequestMain => {
+            let _ = app.emit_to("main", "openpane-close-requested", ());
+        }
+        CloseProgress::Quit => app.exit(0),
+    }
 }
 impl Broker {
+    fn request_restore(&mut self) -> Result<(), &'static str> {
+        self.recovery_sequence = self
+            .recovery_sequence
+            .checked_add(1)
+            .ok_or("recovery-sequence-exhausted")?;
+        self.local_builtin = true;
+        Ok(())
+    }
+    fn confirm_restore(&mut self, sequence: u64) {
+        if self.recovery_sequence == sequence {
+            self.local_builtin = false;
+        }
+    }
+
+    fn children_open(&self) -> bool {
+        !self.opening.is_empty() || self.documents.keys().any(|label| label != "main")
+    }
+    fn close_progress(&mut self) -> CloseProgress {
+        if !self.main_closing || self.children_open() {
+            return CloseProgress::Idle;
+        }
+        if self.documents.is_empty() {
+            return CloseProgress::Quit;
+        }
+        if self.main_close_requested {
+            return CloseProgress::Idle;
+        }
+        self.main_close_requested = true;
+        CloseProgress::RequestMain
+    }
+    fn begin_close(&mut self, label: &str) -> Vec<String> {
+        if label != "main" {
+            return vec![label.into()];
+        }
+        self.main_closing = true;
+        let labels: std::collections::BTreeSet<_> = self
+            .documents
+            .keys()
+            .chain(self.opening.keys())
+            .filter(|label| label.as_str() != "main")
+            .cloned()
+            .collect();
+        if labels.is_empty() {
+            if self.main_close_requested {
+                return Vec::new();
+            }
+            self.main_close_requested = true;
+            return vec!["main".into()];
+        }
+        labels.into_iter().collect()
+    }
+    fn cancel_close(&mut self) {
+        self.main_closing = false;
+        self.main_close_requested = false;
+    }
+    fn finish_close(&mut self, label: &str) -> Result<CloseProgress, &'static str> {
+        if label == "main" && self.children_open() {
+            return Err("children-still-saving");
+        }
+        self.documents.remove(label);
+        self.opening.remove(label);
+        if label == "main" {
+            self.main_closing = true;
+        }
+        Ok(self.close_progress())
+    }
     fn advance_presence(&mut self, label: &str) -> Result<u64, &'static str> {
         if self.presence_clock >= 9_007_199_254_740_991 {
             return Err("presence-sequence-exhausted");
@@ -75,7 +158,9 @@ impl ChatWindows {
                     reports: BTreeMap::new(),
                     child_snapshots: BTreeMap::new(),
                     local_builtin: false,
+                    recovery_sequence: 0,
                     main_closing: false,
+                    main_close_requested: false,
                 })
             })
         };
@@ -147,7 +232,10 @@ impl ChatWindows {
                 .values()
                 .filter(|entry| {
                     entry.scope.host_id == scope.host_id
-                        && !matches!(entry.phase, Phase::TargetReady | Phase::Failed)
+                        && !matches!(
+                            entry.phase,
+                            Phase::Assigned | Phase::TargetReady | Phase::Failed
+                        )
                 })
                 .map(|entry| entry.scope.key()),
         );
@@ -216,7 +304,7 @@ impl ChatWindows {
             .lock()
             .map_err(|_| "native-broker-unavailable")?;
         let broker = guard.as_mut().map_err(|error| *error)?;
-        broker.local_builtin = true;
+        broker.request_restore()?;
         for label in broker.documents.keys() {
             let _ = app.emit_to(label, "openpane-ui-wakeup", ());
         }
@@ -225,15 +313,8 @@ impl ChatWindows {
     pub fn close_requested(&self, app: &tauri::AppHandle, label: &str) -> bool {
         if let Ok(mut guard) = self.broker.lock() {
             if let Ok(broker) = guard.as_mut() {
-                if label == "main" {
-                    broker.main_closing = true;
-                }
-                let labels: Vec<_> = if label == "main" {
-                    broker.documents.keys().cloned().collect()
-                } else {
-                    vec![label.into()]
-                };
-                if broker.main_closing && broker.documents.is_empty() {
+                let labels = broker.begin_close(label);
+                if broker.main_closing && broker.documents.is_empty() && broker.opening.is_empty() {
                     drop(guard);
                     app.exit(0);
                     return true;
@@ -253,9 +334,32 @@ impl ChatWindows {
         }
         false
     }
+    pub fn close_chat_without_saving(&self, app: &tauri::AppHandle, label: &str) {
+        if label == "main" {
+            return;
+        }
+        let progress = if let Ok(mut guard) = self.broker.lock() {
+            if let Ok(broker) = guard.as_mut() {
+                broker.documents.remove(label);
+                broker.opening.remove(label);
+                broker.close_progress()
+            } else {
+                CloseProgress::Idle
+            }
+        } else {
+            CloseProgress::Idle
+        };
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.destroy();
+        }
+        apply_close_progress(app, progress);
+    }
     pub fn navigating(&self, app: &tauri::AppHandle, label: &str) {
         if let Ok(mut guard) = self.broker.lock() {
             if let Ok(broker) = guard.as_mut() {
+                if label == "main" {
+                    broker.cancel_close();
+                }
                 if let Some(old) = broker.documents.remove(label) {
                     broker.child_snapshots.remove(&old.incarnation);
                     broker.reports.retain(|_, report| {
@@ -275,9 +379,9 @@ impl ChatWindows {
                 broker.documents.remove(label);
                 broker.opening.remove(label);
                 let _ = app.emit_to("main", "openpane-ui-wakeup", ());
-                if broker.main_closing && broker.documents.is_empty() {
-                    app.exit(0);
-                }
+                let progress = broker.close_progress();
+                drop(guard);
+                apply_close_progress(app, progress);
             }
         }
     }
@@ -405,7 +509,10 @@ impl ChatWindows {
                     if entry.scope != scope || entry.transition_id != transition_id {
                         return Err("stale-transition");
                     }
-                    let allowed = (phase == Phase::SourceSaved && may_restart)
+                    let allowed = (entry.transition_id.starts_with("inline:")
+                        && entry.phase == Phase::Failed
+                        && phase == Phase::TargetReady)
+                        || (phase == Phase::SourceSaved && may_restart)
                         || entry.phase == phase
                         || phase == Phase::Failed
                         || matches!(
@@ -435,12 +542,7 @@ impl ChatWindows {
                     .profile(&self.origin)?
                     .windows
                     .get(&scope.key())
-                    .filter(|entry| {
-                        entry.scope == scope
-                            && (entry.transition_id == expected_transition_id
-                                || entry.transition_id
-                                    == format!("inline:{}", expected_transition_id))
-                    })
+                    .filter(|entry| entry.scope == scope)
                     .ok_or("stale-recovery-reservation")?
                     .clone();
                 if broker.opening.contains_key(&reservation.label)
@@ -448,8 +550,8 @@ impl ChatWindows {
                 {
                     return Err("target-still-open");
                 }
-                let transition_id = format!("inline:{}", expected_transition_id);
-                identifier(&transition_id, 200)?;
+                let recovery = reservation.inline_recovery(&expected_transition_id)?;
+                let transition_id = recovery.transition_id;
                 broker.storage.mutate(&self.origin, |profile| {
                     let entry = profile
                         .windows
@@ -460,7 +562,7 @@ impl ChatWindows {
                     Ok(())
                 })?;
                 Ok(
-                    json!({"scope":scope,"viewId":reservation.view_id,"nativeLabel":reservation.label,"fromTransitionId":expected_transition_id,
+                    json!({"scope":scope,"viewId":reservation.view_id,"nativeLabel":reservation.label,"fromTransitionId":recovery.from_transition_id,
                     "transitionId":transition_id,"targetLabel":"main","creationAgentId":reservation.creation_agent_id}),
                 )
             }
@@ -495,6 +597,9 @@ impl ChatWindows {
                     .clone();
                 if reservation.transition_id.starts_with("inline:") {
                     return Err("inline-recovery-reserved");
+                }
+                if reservation.phase == Phase::Assigned {
+                    return Err("native-window-not-reserved");
                 }
                 self.admit_child(broker, &scope)?;
                 if let Some(child) = app.get_webview_window(&reservation.label) {
@@ -627,6 +732,9 @@ impl ChatWindows {
                 document.visible = visible;
                 broker.advance_presence(label)?;
                 let _ = app.emit_to("main", "openpane-ui-wakeup", ());
+                if broker.main_closing {
+                    let _ = app.emit_to(label, "openpane-close-requested", ());
+                }
                 let _ = app.emit_to(label, "openpane-ui-wakeup", ());
                 Ok(json!({"ok":true}))
             }
@@ -649,26 +757,37 @@ impl ChatWindows {
             | Command::CompleteIntent { .. }) => self.run_intent(app, broker, label, command),
             Command::RestoreBuiltin { incarnation } => {
                 self.document(broker, label, &incarnation)?;
-                broker.local_builtin = true;
+                broker.request_restore()?;
                 for target in broker.documents.keys() {
                     let _ = app.emit_to(target, "openpane-ui-wakeup", ());
                 }
+                Ok(json!({"sequence":broker.recovery_sequence}))
+            }
+            Command::ReadRecovery { incarnation } => {
+                self.require_main(broker, label, &incarnation)?;
+                Ok(json!({"pending":broker.local_builtin,"sequence":broker.recovery_sequence}))
+            }
+            Command::ConfirmRecovery {
+                incarnation,
+                sequence,
+            } => {
+                self.require_main(broker, label, &incarnation)?;
+                broker.confirm_restore(sequence);
+                Ok(json!({"ok":true}))
+            }
+            Command::CloseCancelled { incarnation } => {
+                self.document(broker, label, &incarnation)?;
+                broker.cancel_close();
                 Ok(json!({"ok":true}))
             }
             Command::CloseReady { incarnation } => {
                 self.document(broker, label, &incarnation)?;
-                broker.documents.remove(label);
-                broker.opening.remove(label);
-                if label == "main" {
-                    broker.main_closing = true;
-                }
-                let quit = broker.main_closing && broker.documents.is_empty();
+                let progress = broker.finish_close(label)?;
                 drop(guard);
-                if quit {
-                    app.exit(0);
-                } else if label != "main" {
+                if label != "main" {
                     window.destroy().map_err(|_| "window-close-failed")?;
                 }
+                apply_close_progress(app, progress);
                 Ok(json!({"ok":true}))
             }
         }
@@ -745,11 +864,42 @@ pub fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
             Some("CmdOrCtrl+Q"),
         )?)?;
     }
+    let force_chat = MenuItem::with_id(
+        app,
+        "openpane-close-unsaved-chat",
+        "Close Chat Without Saving",
+        true,
+        None::<&str>,
+    )?;
+    let force_quit = MenuItem::with_id(
+        app,
+        "openpane-quit-unsaved",
+        "Quit Without Saving",
+        true,
+        None::<&str>,
+    )?;
+    menu.append(&Submenu::with_items(
+        app,
+        "Recovery",
+        true,
+        &[&force_chat, &force_quit],
+    )?)?;
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| match event.id().as_ref() {
         "openpane-restore" => {
             let _ = app.state::<ChatWindows>().restore_builtin(app);
         }
+        "openpane-close-unsaved-chat" => {
+            if let Some((label, _)) = app
+                .webview_windows()
+                .into_iter()
+                .find(|(label, window)| label != "main" && window.is_focused().unwrap_or(false))
+            {
+                app.state::<ChatWindows>()
+                    .close_chat_without_saving(app, &label);
+            }
+        }
+        "openpane-quit-unsaved" => app.exit(0),
         "openpane-quit" => {
             if !app.state::<ChatWindows>().close_requested(app, "main") {
                 app.exit(0);
@@ -806,6 +956,205 @@ pub async fn desktop_window(
 #[cfg(test)]
 mod admission_tests {
     use super::*;
+    #[test]
+    fn each_explicit_restore_survives_until_its_matching_confirmation() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-restore-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.request_restore().unwrap();
+            let first = broker.recovery_sequence;
+            broker.request_restore().unwrap();
+            let retry = broker.recovery_sequence;
+            assert!(retry > first);
+            broker.confirm_restore(first);
+            assert!(broker.local_builtin);
+            broker.confirm_restore(retry);
+            assert!(!broker.local_builtin);
+            broker.request_restore().unwrap();
+            assert!(broker.local_builtin);
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn quit_keeps_main_registered_until_children_finish_and_can_be_cancelled() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-close-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            for label in ["main", "first", "second"] {
+                broker.documents.insert(
+                    label.into(),
+                    Document {
+                        nonce: label.into(),
+                        incarnation: label.into(),
+                        scope: None,
+                        view_id: label.into(),
+                        visible: true,
+                        presence_sequence: 0,
+                        display: None,
+                        ready: true,
+                    },
+                );
+            }
+            assert_eq!(broker.begin_close("main"), vec!["first", "second"]);
+            assert!(broker.documents.contains_key("main"));
+            assert_eq!(
+                broker.finish_close("main").unwrap_err(),
+                "children-still-saving"
+            );
+            assert_eq!(broker.finish_close("first").unwrap(), CloseProgress::Idle);
+            broker.cancel_close();
+            assert!(!broker.main_closing);
+            assert_eq!(broker.finish_close("second").unwrap(), CloseProgress::Idle);
+            assert!(broker.documents.contains_key("main"));
+            broker.opening.insert(
+                "still-opening".into(),
+                Scope {
+                    host_id: "host".into(),
+                    conversation_id: "opening".into(),
+                },
+            );
+            assert_eq!(broker.begin_close("main"), vec!["still-opening"]);
+            assert_eq!(broker.close_progress(), CloseProgress::Idle);
+            broker.opening.clear();
+            assert_eq!(broker.close_progress(), CloseProgress::RequestMain);
+            assert_eq!(broker.close_progress(), CloseProgress::Idle);
+            assert!(broker.documents.contains_key("main"));
+            assert_eq!(broker.finish_close("main").unwrap(), CloseProgress::Quit);
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn inline_intents_at_the_child_limit_do_not_overadmit_detached_windows() {
+        for admitted in [31, 32] {
+            let directory =
+                std::env::temp_dir().join(format!("openpane-assigned-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&directory).unwrap();
+            let windows = ChatWindows::new(
+                Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+                &directory,
+                true,
+            );
+            {
+                let mut guard = windows.broker.lock().unwrap();
+                let broker = guard.as_mut().unwrap();
+                broker.host = Some(("host".into(), "profile".into()));
+                for n in 0..admitted {
+                    windows
+                        .reserve(
+                            broker,
+                            Scope {
+                                host_id: "host".into(),
+                                conversation_id: format!("native-{n}"),
+                            },
+                            format!("view-{n}"),
+                            None,
+                            false,
+                        )
+                        .unwrap();
+                }
+                let source = Scope {
+                    host_id: "host".into(),
+                    conversation_id: "source".into(),
+                };
+                let scope = Scope {
+                    host_id: "host".into(),
+                    conversation_id: "inline-or-detached".into(),
+                };
+                let target = broker
+                    .storage
+                    .mutate(&windows.origin, |profile| {
+                        profile.intent(
+                            source.clone(),
+                            "1:allocated".into(),
+                            Action::Create {
+                                agent_id: "agent".into(),
+                                carry: false,
+                            },
+                        )?;
+                        Ok(profile
+                            .assign_intent(
+                                &source,
+                                "1:allocated",
+                                Reservation {
+                                    scope: scope.clone(),
+                                    view_id: "allocated-view".into(),
+                                    label: "allocated-label".into(),
+                                    transition_id: "allocated-transition".into(),
+                                    creation_agent_id: Some("agent".into()),
+                                    phase: Phase::Assigned,
+                                    binding_revision: None,
+                                    writer_generation: None,
+                                },
+                            )?
+                            .target
+                            .unwrap())
+                    })
+                    .unwrap();
+                assert_eq!(target.phase, Phase::Assigned);
+                let reserved = windows.reserve(
+                    broker,
+                    scope.clone(),
+                    target.view_id.clone(),
+                    Some("agent".into()),
+                    false,
+                );
+                if admitted == 32 {
+                    assert!(matches!(reserved, Err("native-window-limit")));
+                    broker
+                        .storage
+                        .mutate(&windows.origin, |profile| {
+                            profile.complete_intent(
+                                &source,
+                                "1:allocated",
+                                json!({"kind":"inline","scope":scope}),
+                            )
+                        })
+                        .unwrap();
+                    assert_eq!(
+                        broker.storage.profile(&windows.origin).unwrap().windows[&scope.key()]
+                            .phase,
+                        Phase::TargetReady
+                    );
+                } else {
+                    assert_eq!(reserved.unwrap().phase, Phase::Requested);
+                }
+                assert!(matches!(
+                    windows.reserve(
+                        broker,
+                        Scope {
+                            host_id: "host".into(),
+                            conversation_id: "overflow".into()
+                        },
+                        "overflow-view".into(),
+                        None,
+                        false
+                    ),
+                    Err("native-window-limit")
+                ));
+            }
+            drop(windows);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
     #[test]
     fn overlapping_reservations_keep_the_committed_transition_and_enforce_live_capacity() {
         let directory = std::env::temp_dir().join(format!(

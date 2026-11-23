@@ -58,9 +58,12 @@ function color(value: unknown): string {
   if (typeof value !== 'string' || !/^#[a-fA-F0-9]{6}$/.test(value)) throw new Error('Expected #RRGGBB experience color');
   return value;
 }
+const fontFamily = String.raw`(?:-*[a-zA-Z][a-zA-Z0-9-]*(?: +-*[a-zA-Z][a-zA-Z0-9-]*)*|"[a-zA-Z0-9 '-]*[a-zA-Z][a-zA-Z0-9 '-]*"|'[a-zA-Z0-9 "-]*[a-zA-Z][a-zA-Z0-9 "-]*')`;
+export const LOCAL_FONT_STACK_PATTERN = `^ *${fontFamily}(?: *, *${fontFamily})* *$`;
+const localFontStack = new RegExp(LOCAL_FONT_STACK_PATTERN);
 function font(value: unknown): string {
   const text = identifier(value, 256);
-  if (!/^[a-zA-Z0-9 ,"'-]+$/.test(text) || !/[a-zA-Z]/.test(text)) throw new Error('Expected a local font stack');
+  if (!localFontStack.test(text)) throw new Error('Expected a local font stack');
   return text;
 }
 function fontWeight(value: unknown): TextMetrics['weight'] {

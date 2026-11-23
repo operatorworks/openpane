@@ -18,7 +18,7 @@ for (const viewport of [{ width: 640, height: 720 }, { width: 360, height: 480 }
     import './apps/desktop/src/shell/styles.css';
     const experience = ${JSON.stringify(experience)}, scope = {hostId:'host',conversationId:'approval'}, listeners = new Set();
     window.approved=[];
-    let view={draft:'Preserved unsent draft',outbox:[],submitting:[],cursor:1,connection:{kind:'connected'},document:{receipts:{},domain:{messages:[],currentRun:{kind:'running',runId:'run'}},decisions:{pending:{pendingId:'pending',prompt:'Run the explicitly scoped UI command: '+ 'exact argument and workspace details '.repeat(200)+' END OF REQUEST',choices:['accept','decline'],reserved:false}}}};
+    let view={draft:'Preserved unsent draft',outbox:[],submitting:[],cursor:1,connection:{kind:'connected'},document:{receipts:{},domain:{messages:[],currentRun:{kind:'running',runId:'run'}},decisions:{pending:{pendingId:'pending',prompt:'Run the explicitly scoped UI command: '+ 'exact argument and workspace details '.repeat(200)+' END OF REQUEST',choices:${JSON.stringify(viewport.width === 360 ? ['accept','decline','Allow for this particular workspace and command only','Deny and request a complete explanation of these arguments'] : ['accept','decline'])},reserved:false}}}};
     const store={getSnapshot:()=>view,subscribe(listener){listeners.add(listener);return()=>listeners.delete(listener);},
       async approve(id,choice){window.approved.push([id,choice]);view={...view,document:{...view.document,decisions:{}}};for(const listener of listeners)listener();},async setDraft(draft){view={...view,draft};for(const listener of listeners)listener();}};
     const active={scope,viewId:'view',store,agent:{label:'Codex',imageInput:{kind:'unsupported',reason:'Text-only verification'},commands:['send','approve','cancel'],availability:{kind:'ready'}}};
@@ -46,6 +46,9 @@ for (const viewport of [{ width: 640, height: 720 }, { width: 360, height: 480 }
   assert.ok(await details.evaluate(node => node.scrollHeight > node.clientHeight && node.clientHeight > 0), 'a long command has its own readable scroll area');
   await details.focus(); await details.press('End');
   await page.waitForFunction(() => document.querySelector('[aria-label="Approval request details"]').scrollTop > 0);
+  for (const action of await approval.getByRole('button').all()) {
+    await action.focus(); assert.ok(await action.evaluate(node => { const r = node.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }), 'every wrapped choice remains reachable');
+  }
   const allow = approval.getByRole('button', { name: 'Allow', exact: true }); await allow.focus();
   assert.ok(await allow.evaluate(node => { const r=node.getBoundingClientRect(); const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2); return r.top>=0&&r.bottom<=innerHeight&&(hit===node||node.contains(hit)); }), 'Allow is visible and receives pointer input after keyboard focus');
   const editor=page.getByRole('textbox',{name:'Message',exact:true}), original=await editor.elementHandle();

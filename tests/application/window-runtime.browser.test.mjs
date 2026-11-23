@@ -44,7 +44,10 @@ test('reopening a second independent legacy draft exposes read-only recovery wit
       image: { selectionId: 'legacy-image', uploadId: '22222222-2222-4222-8222-222222222222', name: 'image.png', byteLength: 2, attachment: null } };
     await new Promise((resolve, reject) => {
       const tx = db.transaction('records', 'readwrite'), store = tx.objectStore('records');
-      for (const id of ['legacy-first', 'legacy-second']) store.put({ version: 2, route: scope, pendingCreation: null }, ['view', id, scope.hostId]);
+      store.put({ version: 2, route: scope, pendingCreation: null }, ['view', 'legacy-first', scope.hostId]);
+      const elsewhere = { ...scope, conversationId: 'elsewhere' };
+      store.put({ version: 2, route: elsewhere, pendingCreation: null }, ['view', 'legacy-second', scope.hostId]);
+      store.put({ ...records('Unrelated saved draft'), scope: elsewhere }, ['draft','legacy-second',scope.hostId,elsewhere.conversationId]);
       store.put(records('Authoritative first draft'), ['draft','legacy-first',scope.hostId,scope.conversationId]);
       store.put(second, ['draft','legacy-second',scope.hostId,scope.conversationId]);
       store.put(new Uint8Array([7,8]), ['draft-image','legacy-second',scope.hostId,scope.conversationId,'legacy-image']);
@@ -89,4 +92,30 @@ test('the inline launch composer still sends its prepared text once in the new s
   assert.equal(command.body.kind, 'send'); assert.equal(command.body.text, 'First scoped message');
   assert.equal(command.scope.conversationId, await page.locator('.scope-label').textContent());
   await page.reload(); await connected(page); assert.equal((await host.entries()).length, 1);
+});
+
+test('a rejected first message remains copyable after reopening without recreating or submitting it', { timeout: 45000 }, async t => {
+  const host = await fixture(t), page = await host.page(); let creations = 0, submits = 0, rejectedScope;
+  await page.route('**/api/v1', async route => {
+    const request = route.request().postDataJSON();
+    if (request.op === 'create') {
+      creations++; rejectedScope = request.scope;
+      await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ ok: false, error: { kind: 'create-rejected', message: 'This provider refused creation.' } }) });
+    } else { if (request.op === 'submit') submits++; await route.continue(); }
+  });
+  await page.getByRole('textbox', { name: 'First message', exact: true }).fill('Unsent message after refusal');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  const recovered = page.getByRole('textbox', { name: 'Recovered unsent draft', exact: true }); await recovered.waitFor();
+  assert.equal(await recovered.inputValue(), 'Unsent message after refusal'); assert.equal(creations, 1); assert.equal(submits, 0);
+  const viewId = await page.evaluate(async scope => {
+    const opening = indexedDB.open('openpane-browser-views', 1), db = await new Promise(resolve => { opening.onsuccess = () => resolve(opening.result); });
+    const tx = db.transaction('records'), binding = tx.objectStore('records').get(['editor-binding', scope.hostId, scope.conversationId]);
+    await new Promise(resolve => { tx.oncomplete = resolve; }); db.close(); return binding.result.viewId;
+  }, rejectedScope);
+  await page.reload();
+  await wait(async () => await recovered.isVisible() || await page.getByRole('button', { name: `Reopen saved view ${viewId}`, exact: true }).isVisible(), 'saved refused creation');
+  if (!await recovered.isVisible()) await page.getByRole('button', { name: `Reopen saved view ${viewId}`, exact: true }).click();
+  await recovered.waitFor();
+  assert.equal(await recovered.inputValue(), 'Unsent message after refusal'); assert.equal(creations, 1); assert.equal(submits, 0);
+  assert.deepEqual(await host.entries(), []);
 });

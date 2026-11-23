@@ -18,7 +18,7 @@ async function transaction<T>(mode: IDBTransactionMode, operation: (store: IDBOb
     });
   } finally { db.close(); }
 }
-export async function pruneDraftCarryHistory(epoch: number): Promise<number> {
+export async function pruneDraftCarryHistory(epoch: number, pendingRequestIds: readonly string[] = []): Promise<number> {
   if (!Number.isSafeInteger(epoch) || epoch < 1) throw new Error('Invalid native request epoch');
   return transaction<number>('readwrite', (store, set, fail) => {
     const all = store.getAll(prefix(['draft-carry']), 1025), floor = store.get(carryEpochKey); let remaining = 2;
@@ -29,7 +29,7 @@ export async function pruneDraftCarryHistory(epoch: number): Promise<number> {
         let retained = all.result.length;
         for (const value of all.result) {
           const carry = parseCarry(value);
-          if ((carry.kind === 'settled' || carry.kind === 'cancelled') && carryRequestEpoch(carry.requestId) < epoch) {
+          if ((carry.kind === 'settled' || carry.kind === 'cancelled' || carry.kind === 'refused') && carryRequestEpoch(carry.requestId) < epoch && !pendingRequestIds.includes(carry.requestId)) {
             store.delete(key(carry.source, carry.requestId));
             if (carry.target) store.delete(targetKey(carry.source, carry.requestId, carry.target));
             retained--;
@@ -41,8 +41,8 @@ export async function pruneDraftCarryHistory(epoch: number): Promise<number> {
     for (const request of [all, floor]) request.onsuccess = () => { if (--remaining === 0) commit(); };
   });
 }
-export async function offerDraftCarry(input: { readonly source: ConversationScope; readonly sourceViewId: string; readonly requestId: string; readonly writerGeneration: number; readonly expected: { readonly text: string; readonly revision: number } }): Promise<void> {
-  const offered = parseCarry({ version: 1, kind: 'offered', source: input.source, sourceViewId: input.sourceViewId, requestId: input.requestId, expected: input.expected, target: null });
+export async function offerDraftCarry(input: { readonly source: ConversationScope; readonly sourceViewId: string; readonly requestId: string; readonly writerGeneration: number; readonly emptyOnly?: true; readonly expected: { readonly text: string; readonly revision: number } }): Promise<void> {
+  const offered = parseCarry({ ...(input.emptyOnly ? { emptyOnly: true } : {}), version: 1, kind: 'offered', source: input.source, sourceViewId: input.sourceViewId, requestId: input.requestId, expected: input.expected, target: null });
   await transaction<void>('readwrite', (store, set, fail) => {
     const binding = store.get(editorBindingKey(input.source)), existing = store.get(key(input.source, input.requestId));
     const prior = store.getAll(prefix(['draft-carry', input.source.hostId, input.source.conversationId]), 1025), total = store.count(prefix(['draft-carry'])), floor = store.get(carryEpochKey);
@@ -115,5 +115,42 @@ export async function cancelDraftCarry(carry: DraftCarry): Promise<boolean> {
         set(true);
       } catch (error) { fail(error); }
     };
+  });
+}
+
+export async function refuseDraftCarry(carry: DraftCarry): Promise<void> {
+  await transaction<void>('readwrite', (store, set, fail) => {
+    const request = store.get(key(carry.source, carry.requestId));
+    request.onsuccess = () => {
+      try {
+        const current = namedCarry(request.result, carry.source, carry.requestId);
+        if (current.kind === 'offered') {
+          store.put({ ...current, kind: 'refused' } satisfies DraftCarry, key(current.source, current.requestId));
+          if (current.target) store.delete(targetKey(current.source, current.requestId, current.target));
+        }
+        set(undefined);
+      } catch (error) { fail(error); }
+    };
+  });
+}
+export async function retryDraftCarry(source: ConversationScope, requestId: string, sourceViewId: string, writerGeneration: number): Promise<void> {
+  await transaction<void>('readwrite', (store, set, fail) => {
+    const request = store.get(key(source, requestId)), binding = store.get(editorBindingKey(source));
+    const prior = store.getAll(prefix(['draft-carry', source.hostId, source.conversationId]), 1025), floor = store.get(carryEpochKey);
+    let remaining = 4;
+    const commit = () => {
+      try {
+        const current = namedCarry(request.result, source, requestId), owned = parseEditorBinding(binding.result);
+        if (current.kind === 'cancelled') throw new Error('This draft was explicitly kept at its source. Copy it manually before retrying the chat.');
+        if (current.kind !== 'refused') { set(undefined); return; }
+        if (!sameScope(owned.scope, source) || owned.kind !== 'editing' || owned.viewId !== sourceViewId || current.sourceViewId !== sourceViewId || owned.writerGeneration !== writerGeneration) throw new Error('Only the current source editor may retry its draft carry');
+        if (carryRequestEpoch(requestId) < count(floor.result ?? 0)) throw new Error('Draft carry request epoch expired');
+        if (prior.result.length > 1024 || prior.result.map(parseCarry).some(item => item.kind === 'offered' || item.kind === 'applied')) throw new Error('Another draft carry remains unresolved. Finish it before retrying this one.');
+        store.put({ ...current, kind: 'offered' } satisfies DraftCarry, key(source, requestId));
+        if (current.target) store.put({ source, requestId }, targetKey(source, requestId, current.target));
+        set(undefined);
+      } catch (error) { fail(error); }
+    };
+    for (const item of [request, binding, prior, floor]) item.onsuccess = () => { if (--remaining === 0) commit(); };
   });
 }

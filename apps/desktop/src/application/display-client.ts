@@ -88,7 +88,7 @@ export class DisplayClient {
         this.backlog = page.next.sequence < page.highWater;
       }
     } catch {
-      this.stage = null; this.view = { kind: 'unavailable', scope: current.scope, publications: existing, reason: 'Card data changed unexpectedly. Refresh cards, or repair the affected UI data.' };
+      this.stage = null; this.view = { kind: 'unavailable', scope: current.scope, publications: existing, reason: 'Saved card identity changed. Reconnect after repairing the affected UI data.' };
     }
     return canonicalJson(previousCursor) !== canonicalJson(this.current?.cursor ?? null);
   }

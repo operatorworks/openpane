@@ -54,10 +54,12 @@ export class NativeMainUiRelay implements NativeUiRelayPort {
     this.previousChildren = live;
     if (!Array.isArray(drained.reports) || drained.reports.length > 64) throw new Error('Invalid child report queue');
     for (const value of drained.reports) {
-      const entry = record(value, ['id', 'context', 'report']), id = identifier(entry.id, 200), context = parseWindowContext(entry.context);
+      const entry = record(value, ['id', 'context', 'report']), id = identifier(entry.id, 200);
+      let context: WindowContext, report: ReturnType<typeof paintedReport>;
+      try { context = parseWindowContext(entry.context); report = paintedReport(entry.report); }
+      catch { await this.port.request({ kind: 'confirm-ui', ids: [id] }); continue; }
       if (!live.has(context.documentIncarnation)) { await this.port.request({ kind: 'confirm-ui', ids: [id] }); continue; }
       if (!children.some(child => child.context.documentIncarnation === context.documentIncarnation && child.visible)) continue;
-      const report = paintedReport(entry.report);
       // Old generations are explicitly retired, never counted as a paint of the current delivery.
       if (report.deliveryGeneration !== snapshot.selection.deliveryGeneration) { await this.port.request({ kind: 'confirm-ui', ids: [id] }); continue; }
       try {
@@ -74,7 +76,7 @@ export class NativeMainUiRelay implements NativeUiRelayPort {
     return children.some(child => {
       if (!child.visible || !child.display) return false;
       const delivery = scoped.find(value => value.incarnation === child.context.documentIncarnation)?.display;
-      if (!delivery) return child.display.cursor?.kind !== 'live';
+      if (!delivery) return true;
       if (delivery.kind === 'unavailable') return false;
       const page = delivery.page;
       return page.kind === 'reset' || page.kind === 'snapshot' && page.next.kind === 'snapshot' || page.kind === 'changes' && page.next.sequence < page.highWater;
@@ -85,7 +87,7 @@ export class NativeMainUiRelay implements NativeUiRelayPort {
 
 /** A child reads only its caller-checked native cache. Conversation traffic remains on its normal service connection. */
 export class ChildUiConnection implements UiTransport {
-  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, cards: NO_DISPLAY };
+  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, confirmedGeneration: null, cards: NO_DISPLAY };
   private readonly cards = new DisplayClient();
   private readonly listeners = new Set<() => void>();
   private readonly unlisten: (() => void)[] = [];
@@ -94,6 +96,7 @@ export class ChildUiConnection implements UiTransport {
   private reading = false;
   private requested = false;
   private confirmed: string | null = null;
+  private presencePending = false;
   private painted: UiClientSnapshot | null = null;
   private failure: { readonly state: UiClientSnapshot; readonly reason: string } | null = null;
   constructor(private readonly port: DesktopWindowPort) {
@@ -111,7 +114,11 @@ export class ChildUiConnection implements UiTransport {
     document.addEventListener('visibilitychange', this.visibility);
   }
   private visibility = (): void => { void this.presence().then(this.refresh, () => this.update({ diagnostic: 'Native presence could not be confirmed' })); };
-  private presence(): Promise<unknown> { return this.port.request({ kind: 'presence', visible: document.visibilityState === 'visible', display: this.cards.subscription() }); }
+  private async presence(): Promise<void> {
+    this.presencePending = true;
+    await this.port.request({ kind: 'presence', visible: document.visibilityState === 'visible', display: this.cards.subscription() });
+    this.presencePending = false;
+  }
   selectScope(scope: ConversationScope | null): void {
     if (scope && (this.port.context.role !== 'chat' || !sameScope(scope, this.port.context.reservation.scope))) throw new Error('A child may only read its assigned cards');
     if (this.cards.select(scope)) { this.update({ cards: this.cards.getSnapshot() }); this.visibility(); }
@@ -135,7 +142,7 @@ export class ChildUiConnection implements UiTransport {
           const state = value.state === null ? null : parseUiClientSnapshot(value.state);
           const advanced = this.cards.accept(state?.display ?? null);
           this.update({ state, cards: this.cards.getSnapshot(), localBuiltin: value.localBuiltin, diagnostic: state?.fault ?? null });
-          if (advanced) await this.presence();
+          if (advanced || this.presencePending) await this.presence();
           if (state && this.failure && this.failure.state.selection.deliveryGeneration !== state.selection.deliveryGeneration) this.failure = null;
           if (this.failure && document.visibilityState === 'visible') await this.reportFailure();
           if (state && this.painted?.selection.deliveryGeneration === state.selection.deliveryGeneration && document.visibilityState === 'visible') await this.rendered(state);
@@ -153,10 +160,10 @@ export class ChildUiConnection implements UiTransport {
     this.painted = state;
     const key = `${state.selection.deliveryGeneration}:${state.envelope?.requestId ?? ''}`;
     if (this.confirmed === key) return;
-    await this.report(state, null); this.confirmed = key;
+    await this.report(state, null); this.confirmed = key; this.update({ confirmedGeneration: state.selection.deliveryGeneration });
   }
   async failed(state: UiClientSnapshot, reason: string): Promise<void> {
-    this.painted = null; this.failure = { state, reason: reason.slice(0, 500) };
+    this.painted = null; this.failure = { state, reason: reason.slice(0, 500) || 'Appearance failed' };
     await this.reportFailure();
   }
   private async reportFailure(): Promise<void> {

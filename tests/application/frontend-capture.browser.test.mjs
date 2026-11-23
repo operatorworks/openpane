@@ -298,12 +298,15 @@ test('production browser switches recovery views and releases the old lock befor
         try { return await callback(lock); } finally { window.oldViewHeld--; }
       });
     };
-    const put = IDBObjectStore.prototype.put;
-    IDBObjectStore.prototype.put = function(value, key) {
+    const observe = (value, key) => {
       if (Array.isArray(key) && key[0] === 'draft' && key[1] === id) window.oldViewWrites.push({ held: window.oldViewHeld, value });
-      return put.call(this, value, key);
     };
-    window.releaseOldViewProbe();
+    for (const method of ['put', 'add']) {
+      const original = IDBObjectStore.prototype[method];
+      IDBObjectStore.prototype[method] = function(value, key) { observe(value, key); return original.call(this, value, key); };
+    }
+    const update = IDBCursor.prototype.update;
+    IDBCursor.prototype.update = function(value) { observe(value, this.primaryKey); return update.call(this, value); };
   }, oldView);
   const before = (await records(page)).flatMap(row => row.frontendSends ?? []);
   const oldResponse = page.waitForResponse(response => { const body = response.request().postDataJSON(); return body?.op === 'frontend-binding' && body?.action === 'unavailable' && body?.id === original.command.clientCommandId; });
@@ -311,16 +314,23 @@ test('production browser switches recovery views and releases the old lock befor
   await (await oldResponse).finished();
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await wait(() => f.inspect(db => db.prepare('SELECT state FROM frontend_send_owners WHERE command_id=?').get(original.command.clientCommandId).state) === 'unavailable', 'late original host response');
+  assert.deepEqual(await page.evaluate(() => window.oldViewWrites), [], 'the retired callback cannot write while a different physical owner holds its view lock');
+  await page.evaluate(() => window.releaseOldViewProbe());
   releaseNext();
   await wait(async () => (await records(page)).flatMap(row => row.frontendSends ?? []).find(row => row.command.clientCommandId === successor.command.clientCommandId).state === 'unavailable-confirmed', 'successor view acknowledgment');
   const after = (await records(page)).flatMap(row => row.frontendSends ?? []);
   const ownership = await page.evaluate(() => ({ owners: window.oldViewRecoveryOwners, writes: window.oldViewWrites }));
   assert.ok(ownership.writes.every(write => write.held > 0), 'only a newly acquired physical owner may advance the retired journal');
-  assert.ok(['unavailable-pending', 'unavailable-confirmed'].includes(after.find(row => row.command.clientCommandId === original.command.clientCommandId).state));
+  const originalState = after.find(row => row.command.clientCommandId === original.command.clientCommandId).state;
+  if (originalState === 'unavailable-confirmed') {
+    assert.ok(ownership.owners >= 1); assert.ok(ownership.writes.length >= 1);
+    assert.ok(ownership.writes.some(write => write.held > 0 && write.value.frontendSends?.some(row => row.command.clientCommandId === original.command.clientCommandId && row.state === 'unavailable-confirmed')));
+  } else { assert.equal(originalState, 'unavailable-pending'); assert.equal(ownership.writes.length, 0); }
   assert.deepEqual(after.map(({ command, ownerId }) => ({ command, ownerId })), before.map(({ command, ownerId }) => ({ command, ownerId })));
   const ids = [original.command.clientCommandId, successor.command.clientCommandId];
   assert.ok(requests.every(request => ids.includes(request.id)));
   for (const id of ids) assert.ok(requests.some(request => request.id === id));
+  assert.ok(requests.filter(request => request.id === ids[0]).length <= ownership.owners + 1, 'retired requests are bounded by actual recovery owners');
   t.diagnostic(`Unavailable recovery requests: original=${requests.filter(request => request.id === ids[0]).length}, successor=${requests.filter(request => request.id === ids[1]).length}; new original-view owners=${ownership.owners}`);
   assert.equal(f.operations.length, 2); assert.equal(f.translations(), 2); assert.equal(await page.evaluate(() => window.captureFixture.executions), 0);
   for (const table of ['frontend_events', 'frontend_receipts']) assert.equal(f.inspect(db => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n), 0);

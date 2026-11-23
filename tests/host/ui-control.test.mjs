@@ -67,3 +67,30 @@ test('an unavailable UI socket leaves the conversation host and builtin recovery
   const response = await fetch(`${host.origin}/api/ui/v1`, { method: 'POST', headers: { Origin: host.origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'context' }) });
   const result = await response.json(); assert.equal(result.ok, false); assert.match(result.error, /UI control socket unavailable/);
 });
+
+
+test('a UI interruption persistence fault still releases a drained host directory', {timeout:20000},async t=>{
+  const {startBrowserHost}=await import('../../apps/host/build/tsc/server.js'),{DatabaseSync}=await import('node:sqlite');
+  const {openUiQuerySession,requestUi}=await import('../../apps/host/build/tsc/ui-control.js');
+  const {randomUUID}=await import('node:crypto');
+  const directory=await mkdtemp('/tmp/op-ui-close-fault-'),options={directory,port:0,hostArtifactDirectory:join(root,'apps/host/dist'),hostSdkDirectory:join(root,'apps/host/dist'),assetsDirectory:join(root,'apps/desktop/web-dist-browser'),agentStartup:{kind:'recorded'}};
+  let host=await startBrowserHost(options),fault;
+  t.after(async()=>{await host?.close().catch(()=>{});fault?.close();await rm(directory,{recursive:true,force:true});});
+  const api=async request=>{const response=await fetch(`${host.origin}/api/v1`,{method:'POST',headers:{Origin:host.origin,'Content-Type':'application/json'},body:JSON.stringify(request)});const body=await response.json();assert.equal(body.ok,true,JSON.stringify(body));return body.value;};
+  const metadata=await api({op:'metadata'}),scope={hostId:metadata.hostId,conversationId:randomUUID()};await api({op:'create',scope,agentId:metadata.defaultAgentId});
+  const socket=join(directory,'ui.sock'),context=await requestUi(socket,{op:'context'}),publicationId=`${context.requestEpoch}:${randomUUID()}`;
+  const session=await openUiQuerySession(socket,{op:'display-query-reserve',scope,publicationId,input:{query:'avg:system.cpu.user{*}',title:'CPU',from:'1795374000',to:'1795377600',executable:'/fixture/pup',executableHint:'PATH:pup',version:'2.0.1',site:'us3.datadoghq.com',siteHint:'us3.datadoghq.com'}});assert.equal(session.first.granted,true);
+  fault=new DatabaseSync(join(directory,'ui.sqlite'));fault.exec("CREATE TRIGGER refuse_interrupt BEFORE INSERT ON ui_display_keys WHEN NEW.state='interrupted' BEGIN SELECT RAISE(ABORT,'injected interruption failure');END");session.close();
+  let observed=false;for(let n=0;n<100&&!observed;n++){try{await requestUi(socket,{op:'context'});}catch(error){observed=/Query recovery could not be saved/.test(String(error));}if(!observed)await new Promise(resolve=>setTimeout(resolve,10));}
+  assert.equal(observed,true);await assert.rejects(host.close(),/Host shutdown failed/);
+  fault.exec('DROP TRIGGER refuse_interrupt');fault.close();fault=null;
+  host=await startBrowserHost(options);assert.equal((await api({op:'metadata'})).hostId,metadata.hostId);
+});
+
+test('native relay rejects duplicate conversation or saved-view ownership',async()=>{
+  const {parseUiRequest}=await import('../../apps/host/build/tsc/ui-protocol.js');
+  const main={role:'main',hostId:'host',profileId:'profile',brokerInstance:'broker',label:'main',documentIncarnation:'main-doc',viewId:'catalog'};
+  const children=['a','b'].map(id=>({context:{...main,role:'chat',label:id,documentIncarnation:`doc-${id}`,viewId:`view-${id}`,scope:{hostId:'host',conversationId:id}},visible:true,presenceSequence:1}));
+  assert.equal(parseUiRequest({op:'relay',main,children,departed:[]}).children.length,2);
+  for(const key of ['scope','viewId']){const duplicate=structuredClone(children);duplicate[1].context[key]=duplicate[0].context[key];assert.throws(()=>parseUiRequest({op:'relay',main,children:duplicate,departed:[]}),/Duplicate relay child/);}
+});

@@ -16,7 +16,14 @@ function essentialControls(root: HTMLElement): void {
     if (control.closest('[hidden]')) continue;
     const bounds = control.getBoundingClientRect(), style = getComputedStyle(control);
     if (!bounds.width || !bounds.height || style.visibility !== 'visible' || style.display === 'none' || Number(style.opacity) === 0) throw new Error('An essential OpenPane control is hidden');
-    const x = Math.max(0, Math.min(innerWidth - 1, bounds.x + bounds.width / 2)), y = Math.max(0, Math.min(innerHeight - 1, bounds.y + bounds.height / 2));
+    let left = Math.max(0, bounds.left), top = Math.max(0, bounds.top), right = Math.min(innerWidth, bounds.right), bottom = Math.min(innerHeight, bounds.bottom);
+    for (let ancestor = control.parentElement; ancestor && ancestor !== root.parentElement; ancestor = ancestor.parentElement) {
+      const clip = ancestor.getBoundingClientRect(), css = getComputedStyle(ancestor);
+      if (css.overflowX !== 'visible') { left = Math.max(left, clip.left + ancestor.clientLeft); right = Math.min(right, clip.left + ancestor.clientLeft + ancestor.clientWidth); }
+      if (css.overflowY !== 'visible') { top = Math.max(top, clip.top + ancestor.clientTop); bottom = Math.min(bottom, clip.top + ancestor.clientTop + ancestor.clientHeight); }
+    }
+    if (left >= right || top >= bottom) continue;
+    const x = (left + right) / 2, y = (top + bottom) / 2;
     const hit = document.elementFromPoint(x, y);
     if (!hit || !control.contains(hit) && !hit.contains(control) && !hit.closest('[data-openpane-transient-overlay]')) throw new Error('An essential OpenPane control is covered');
   }
@@ -76,7 +83,7 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
         const root = document.querySelector<HTMLElement>('.experience-content');
         if (!root) throw new Error('Experience frame unavailable');
         const deadline = performance.now() + 5000;
-        while (state.bundle && !transport.localBuiltin && !root.querySelector('[data-openpane-essential]') && performance.now() < deadline && !abort.signal.aborted) await visibleFrame();
+        while (!root.querySelector('[data-openpane-essential]') && (!state.bundle || transport.localBuiltin || performance.now() < deadline) && !abort.signal.aborted) await visibleFrame();
         if (abort.signal.aborted) return;
         if (state.bundle && !transport.localBuiltin) essentialControls(root);
         installedStylesheet.current?.remove(); installedStylesheet.current = link; link = null;
@@ -93,14 +100,15 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
     return () => { abort.abort(); link?.remove(); if (!committed) setVisual(validatedVisual.current); };
     // Appearance delivery is keyed by its envelope, never the editor/controller or poll response object.
   }, [connection, state?.selection.deliveryGeneration, transport.localBuiltin, visible]);
+  const waitingNotice = notice === 'Appearance is visible locally; waiting for host confirmation.' && transport.confirmedGeneration === state?.selection.deliveryGeneration ? null : notice;
   const applied = transport.localBuiltin ? null : visual;
   return <div className="experience-frame">
     <div className="experience-content" data-openpane-experience={applied?.digest} data-openpane-navigation={applied?.manifest.presentation.navigation}>
       <DisplayTransportContext value={connection}><UiActionsContext value={{ restore: () => connection.restore() }}><VisualContext value={applied}>{children}</VisualContext></UiActionsContext></DisplayTransportContext>
     </div>
-    {(applied || transport.localBuiltin || notice || transport.diagnostic) && <ThemeScope className="experience-recovery" aria-label="Appearance recovery">
+    {(applied || transport.localBuiltin || waitingNotice || transport.diagnostic) && <ThemeScope className="experience-recovery" aria-label="Appearance recovery">
       <button type="button" onClick={() => void connection.restore()}>Restore OpenPane appearance</button>
-      {(notice || transport.diagnostic) && <p role="status">{notice ?? transport.diagnostic}</p>}
+      {(waitingNotice || transport.diagnostic) && <p role="status">{waitingNotice ?? transport.diagnostic}</p>}
     </ThemeScope>}
   </div>;
 }

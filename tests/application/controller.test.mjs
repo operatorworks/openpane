@@ -1681,3 +1681,30 @@ test('a catalog route owned by another document leaves the connected catalog usa
   assert.equal(f.app.getSnapshot().active, null); assert.match(f.app.getSnapshot().error, /already open/);
   assert.equal((await f.app.create()).kind, 'inline');
 });
+
+test('creation retains its pending reservation until the created editor finishes placement', async t => {
+  let f, pendingAtPlacement;
+  const placement = { async acquire(request, owner) {
+    if (!request.creation && request.scope.conversationId.startsWith('id-')) {
+      pendingAtPlacement = f.app.getSnapshot().saved.pendingCreation;
+      return { kind: 'detached', scope: request.scope, label: 'created-child' };
+    }
+    return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+  } };
+  f = fixture({ placement }); t.after(() => f.app.dispose()); await f.app.start();
+  const result = await f.app.create(); assert.equal(result.kind, 'detached');
+  assert.deepEqual(pendingAtPlacement.scope, result.scope); assert.deepEqual(f.app.getSnapshot().saved.pendingCreation.scope, result.scope);
+  assert.equal(f.app.getSnapshot().saved.route, null); assert.equal(f.created.length, 1);
+});
+
+test('a navigation failure after durable pending creation reports its same reserved scope for recovery', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); f.storage.catalogViewId = 'original-view';
+  f.views.set('original-view/host', { ...empty(), route: scope }); await f.app.start();
+  f.behavior.navigation = async () => { if (f.app.getSnapshot().saved.pendingCreation) throw new Error('Catalog navigation write failed'); };
+  const result = await f.app.create(); assert.equal(result.kind, 'pending'); assert.deepEqual(result.scope, f.app.getSnapshot().saved.pendingCreation.scope);
+  assert.equal(f.created.length, 0); assert.match(f.app.getSnapshot().storageFailure, /Catalog navigation/);
+  const saved = [...f.views]; await f.app.dispose();
+  const restored = fixture(); for (const entry of saved) restored.views.set(...entry); t.after(() => restored.app.dispose());
+  await restored.app.start(); await restored.app.recoverCreation();
+  assert.deepEqual(restored.created, [result.scope]); assert.deepEqual(restored.app.getSnapshot().active.scope, result.scope); assert.equal(restored.app.getSnapshot().saved.pendingCreation, null);
+});

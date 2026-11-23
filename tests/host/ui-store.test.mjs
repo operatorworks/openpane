@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, symlink, link, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -130,17 +130,17 @@ test('a native transition stays pending after main paints and resolves once to t
   const child = { ...main, role: 'chat', scope: target.scope, viewId: target.viewId, label: target.label, documentIncarnation: randomUUID() };
   const ready = (context, sequence, revision = 3, visible = false) => f.store.execute({ op: 'relay', main, children: [{ context, visible, presenceSequence: sequence,
     placement: { nativeTransitionId: target.nativeTransitionId, bindingRevision: revision } }], departed: [] });
-  await assert.rejects(ready(child, 1, 4), /fixed placement target/);
-  const delivered = await ready(child, 1);
+  const ignored = await ready(child, 1, 4); assert.equal(ignored.children[0].envelope, null);
+  const delivered = await ready(child, 2);
   assert.equal(delivered.children[0].envelope.requestId, receipt.requestId);
   let status = await f.store.execute({ op: 'status', requestId: receipt.requestId });
   const resolved = status.receipt.participants.find(item => item.slot.kind === 'transition');
   assert.equal(resolved.placement.kind, 'ready'); assert.equal(resolved.slot.resolved.documentIncarnation, child.documentIncarnation); assert.equal(status.outcome, 'pending');
   await assert.rejects(paint(child), /visible/);
-  await ready(child, 2, 3, true); await paint(child);
+  await ready(child, 3, 3, true); await paint(child);
   assert.equal((await f.store.execute({ op: 'ack', session: child.documentIncarnation, envelope: env, result: { kind: 'rendered' } })).outcome, 'all-rendered');
   const reloaded = { ...child, documentIncarnation: randomUUID() };
-  const late = await ready(reloaded, 3, 3, true); assert.equal(late.children[0].envelope, null);
+  const late = await ready(reloaded, 4, 3, true); assert.equal(late.children[0].envelope, null);
   await assert.rejects(f.store.execute({ op: 'ack', session: reloaded.documentIncarnation, envelope: env, result: { kind: 'rendered' } }), /participant/);
 });
 
@@ -153,9 +153,10 @@ test('an empty native catalog must paint before confirming unchanged placement; 
   const idle = { op: 'placement-idle', session: main.documentIncarnation, envelope: env, transitionId: slot.transitionId };
   await assert.rejects(f.store.execute(idle), /source to paint/);
   await f.store.execute({ op: 'paint', session: main.documentIncarnation, deliveryGeneration: env.deliveryGeneration, selectionRevision: env.selectionRevision, digest: env.digest });
-  await f.store.execute(idle);
-  assert.equal((await f.store.execute({ op: 'ack', session: main.documentIncarnation, envelope: env, result: { kind: 'rendered' } })).outcome, 'all-rendered');
+  assert.equal((await f.store.execute({ op: 'ack', session: main.documentIncarnation, envelope: env, result: { kind: 'rendered' } })).outcome, 'pending');
+  assert.equal((await f.store.execute(idle)).outcome, 'all-rendered');
   const next = await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: 1 });
+  assert.deepEqual(f.store.context().selection.previousHealthy, { kind: 'experience', digest: separate.digest });
   f.restart(); const stopped = await f.store.execute({ op: 'status', requestId: next.receipt.requestId });
   assert.equal(stopped.receipt.participants.find(item => item.slot.kind === 'transition').placement.kind, 'failed'); assert.notEqual(stopped.outcome, 'all-rendered'); assert.notEqual(stopped.outcome, 'pending');
 });
@@ -230,4 +231,76 @@ test('a valid returning heartbeat preserves its own pending receipt after a dela
     await f.state(main, true, 2);
     assert.equal((await f.store.execute({ op: 'ack', session: main.documentIncarnation, envelope: envelope(selected.receipt), result: { kind: 'rendered' } })).outcome, 'all-rendered');
   } finally { Date.now = now; }
+});
+
+
+test('a failed new appearance keeps the previous painted bundle pinned while another window is pending', async t => {
+  const f=await fixture(t), one=f.window('one'),two=f.window('two');await f.state(one);await f.state(two);
+  const a=bundle('painted-a'),first=await f.store.execute({op:'apply',requestId:f.id(),expectedRevision:0,bundle:a});
+  const env=envelope(first.receipt);await f.store.execute({op:'paint',session:one.documentIncarnation,deliveryGeneration:env.deliveryGeneration,selectionRevision:env.selectionRevision,digest:env.digest});
+  await f.store.execute({op:'ack',session:one.documentIncarnation,envelope:env,result:{kind:'rendered'}});
+  const second=await f.store.execute({op:'apply',requestId:f.id(),expectedRevision:1,bundle:bundle('failed-b')});
+  await f.store.execute({op:'ack',session:one.documentIncarnation,envelope:envelope(second.receipt),result:{kind:'failed',reason:'Could not paint'}});
+  const pruned=await f.store.execute({op:'prune',requestId:f.id(),keep:0});assert.ok(!pruned.removed.includes(a.digest));assert.equal(f.store.bundle(a.digest).digest,a.digest);
+});
+
+test('an expired replacement lease still fences older document presence', async t => {
+  const f=await fixture(t),old=f.window(),current={...old,documentIncarnation:randomUUID()};await f.state(current,true,4);
+  const now=Date.now;Date.now=()=>now()+16000;
+  try {await assert.rejects(f.state(old,true,3),/Stale/);const result=await f.store.execute({op:'refresh',requestId:f.id(),expectedRevision:0});assert.deepEqual(result.receipt.participants,[]);}finally{Date.now=now;}
+});
+
+for(const kind of ['symlink','hardlink','directory'])test(`UI database refuses a ${kind} before touching the conversation database`,async t=>{
+  const directory=await mkdtemp(join(tmpdir(),'ui-db-isolation-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+  const path=join(directory,'ui.sqlite'),hostPath=join(directory,'host.sqlite'),original=new DatabaseSync(hostPath);
+  original.exec("PRAGMA journal_mode=WAL;CREATE TABLE sentinel(value TEXT);INSERT INTO sentinel VALUES ('preserve')");original.close();
+  if(kind==='symlink')await symlink(hostPath,path);else if(kind==='hardlink')await link(hostPath,path);else await mkdir(path);
+  assert.throws(()=>new UiStore(path,'host'),/independent regular file|separate/);
+  const check=new DatabaseSync(hostPath);try{assert.equal(check.prepare('PRAGMA journal_mode').get().journal_mode,'wal');assert.equal(check.prepare('SELECT value FROM sentinel').get().value,'preserve');assert.deepEqual(check.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'ui_%'").all(),[]);}finally{check.close();}
+});
+
+test('a valid apply clears the old startup recovery diagnostic',async t=>{
+  const f=await fixture(t),bad=bundle('missing-startup');await f.store.execute({op:'apply',requestId:f.id(),expectedRevision:0,bundle:bad});
+  const corrupt=new DatabaseSync(f.path);corrupt.prepare('DELETE FROM ui_bundles WHERE digest=?').run(bad.digest);corrupt.close();f.restart();
+  assert.match(f.store.context().fault,/missing or invalid/);await f.store.execute({op:'apply',requestId:f.id(),expectedRevision:f.store.context().revision,bundle:bundle('repaired')});assert.equal(f.store.context().fault,null);
+});
+
+
+test('a mismatched child placement hint leaves sibling delivery and presence intact',async t=>{
+  const f=await fixture(t),main=f.window(),one={...f.window('one'),role:'chat',scope:{hostId:'host',conversationId:'one'}};
+  await f.store.execute({op:'state',context:main,visible:true,presenceSequence:1,after:null,waitMs:0,nativePlacement:true});await f.state(one);
+  const base=bundle('isolated-hints'),separate=createExperienceBundle({...base.manifest,presentation:{...base.manifest.presentation,chats:'separate'}},null,[]);
+  const selected=await f.store.execute({op:'apply',requestId:f.id(),expectedRevision:0,bundle:separate}),env=envelope(selected.receipt),slot=selected.receipt.participants.find(row=>row.slot.kind==='transition').slot;
+  const target={scope:{hostId:'host',conversationId:'two'},viewId:'two',label:'two',nativeTransitionId:'transition',bindingRevision:3};await f.store.execute({op:'placement-reserve',session:main.documentIncarnation,envelope:env,transitionId:slot.transitionId,target});
+  const two={...main,role:'chat',scope:target.scope,viewId:'two',label:'two',documentIncarnation:randomUUID()};
+  const relay=sequence=>f.store.execute({op:'relay',main,children:[{context:one,visible:true,presenceSequence:sequence+1},{context:two,visible:true,presenceSequence:sequence,placement:{nativeTransitionId:'transition',bindingRevision:4}}],departed:[]});
+  await relay(1);const now=Date.now;Date.now=()=>now()+16000;
+  try{const reply=await relay(2);assert.equal(reply.children.find(row=>row.incarnation===one.documentIncarnation).envelope.requestId,env.requestId);const status=await f.store.execute({op:'ack',session:one.documentIncarnation,envelope:env,result:{kind:'rendered'}});assert.equal(status.receipt.participants.find(row=>row.slot.kind==='transition').placement.kind,'pending');}finally{Date.now=now;}
+});
+
+test('compaction requires explicit abandonment of pending waits and replays its exact latest CAS result after restart', async t => {
+  const f = await fixture(t), main = f.window(); await f.state(main);
+  const applied = await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: bundle('compact-pending') });
+  await assert.rejects(f.store.execute({ op: 'compact', expectedEpoch: 1 }), /abandon-waits/);
+  assert.equal(f.store.context().requestEpoch, 1);
+  assert.equal((await f.store.execute({ op: 'status', requestId: applied.receipt.requestId })).outcome, 'pending');
+  const request = { op: 'compact', expectedEpoch: 1, abandonWaits: true }, result = await f.store.execute(request);
+  assert.equal(result.epoch, 2); assert.equal(result.previousEpoch, 1); assert.equal(result.abandonedWaits, true);
+  f.restart(); assert.deepEqual(await f.store.execute(request), result);
+  await assert.rejects(f.store.execute({ ...request, abandonWaits: false }), /changed abandon-waits/);
+  await assert.rejects(f.store.execute({ op: 'status', requestId: applied.receipt.requestId }), /expired/);
+  const next = await f.store.execute({ op: 'compact', expectedEpoch: 2 }); assert.equal(next.epoch, 3);
+  await assert.rejects(f.store.execute(request), /already advanced/);
+});
+
+test('compaction preserves reserved recovery replay and explicit abandonment never marks its participants rendered', async t => {
+  const f = await fixture(t), main = f.window(); await f.state(main);
+  const request = { op: 'restore', requestId: `recovery:1:${randomUUID()}`, expectedRevision: 0, expectedRecoveryGeneration: 1 };
+  const pending = await f.store.execute(request); assert.equal(pending.outcome, 'pending');
+  await f.store.execute({ op: 'compact', expectedEpoch: 1 });
+  assert.deepEqual(await f.store.execute(request), pending);
+  await f.store.execute({ op: 'compact', expectedEpoch: 2, abandonWaits: true });
+  const retained = await f.store.execute(request);
+  assert.equal(retained.outcome, 'partial'); assert.equal(retained.receipt.participants[0].visual.kind, 'departed');
+  f.restart(); assert.deepEqual(await f.store.execute(request), retained);
 });

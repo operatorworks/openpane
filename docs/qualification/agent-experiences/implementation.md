@@ -259,3 +259,22 @@ it does not alone prove that shutdown overlaps an active response drain.
 
 Fresh correctness and maintainability reviews of these fixes are still required
 before the review-gauntlet checkpoints.
+
+
+### Recovery and replay hardening, November 23
+
+The final hardening check ran the full repository verification with Node 24.22.3
+and npm 11.19.1: 4,148 tests, 4,143 passed, no failures and five existing skips.
+Rust formatting and all 62 native tests passed. Focused tests cover whole-text
+carry copies, target-copy removal, independent legacy recovery, creation refusal,
+interrupted browser handoffs, request expiry, explicit Keep across replay epochs,
+compaction CAS replay and replacement creation after a lost reply. Recovered text
+is never submitted automatically.
+
+The rebuilt Mac application also passed an actual window check against an isolated
+recorded host. Repeated native Restore actions persisted even when builtin was
+already selected. The native close fallback preserved a committed draft on reopen.
+Normal Quit closed main and two children, and a restart recovered the second
+child's exact saved draft. Native Quit Without Saving exited successfully. The
+separate-window appearance receipt was all-rendered; this check submitted no
+recorded commands. The temporary app and host were closed afterward.

@@ -28,10 +28,11 @@ export interface UiConnectionSnapshot {
   readonly state: UiClientSnapshot | null;
   readonly diagnostic: string | null;
   readonly localBuiltin: boolean;
+  readonly confirmedGeneration: number | null;
   readonly cards: DisplayView;
 }
 export class UiConnection {
-  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, cards: NO_DISPLAY };
+  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, confirmedGeneration: null, cards: NO_DISPLAY };
   private readonly cards = new DisplayClient();
   private relayPaging = false;
   private readonly listeners = new Set<() => void>();
@@ -133,7 +134,7 @@ export class UiConnection {
   }
   async failPlacement(transition: PlacementTransition, reason: string): Promise<void> {
     if (!this.window) throw new Error('UI source is not registered');
-    await this.post({ op: 'placement-failed', session: this.window.documentIncarnation, envelope: transition.envelope, transitionId: transition.slot.transitionId, reason: reason.slice(0, 500) });
+    await this.post({ op: 'placement-failed', session: this.window.documentIncarnation, envelope: transition.envelope, transitionId: transition.slot.transitionId, reason: reason.slice(0, 500) || 'Appearance failed' });
     const state = this.snapshot.state;
     if (state?.selection.deliveryGeneration === transition.envelope.deliveryGeneration) this.update({ state: { ...state, transitions: state.transitions.filter(item => item.slot.transitionId !== transition.slot.transitionId) } });
   }
@@ -149,12 +150,12 @@ export class UiConnection {
     await this.post({ op: 'paint', session: this.window.documentIncarnation, deliveryGeneration: state.selection.deliveryGeneration,
       selectionRevision: state.selection.revision, digest: state.bundle?.digest ?? null });
     if (state.envelope) await this.ack(state.envelope, { kind: 'rendered' });
-    this.confirmed = key;
+    this.confirmed = key; this.update({ confirmedGeneration: state.selection.deliveryGeneration });
   }
   async failed(state: UiClientSnapshot, reason: string): Promise<void> {
     this.update({ diagnostic: reason });
     this.painted = null;
-    this.failure = { state, reason: reason.slice(0, 500) };
+    this.failure = { state, reason: reason.slice(0, 500) || 'Appearance failed' };
     await this.reportFailure();
   }
   private async reportFailure(): Promise<void> {
@@ -185,6 +186,7 @@ export class UiConnection {
       await this.finishRecovery();
     } catch (error) { this.update({ diagnostic: `${error instanceof Error ? error.message : 'Host unavailable'}. Builtin appearance is local; retry restore to reconcile.` }); }
   }
+  protected async recovered(): Promise<void> {}
   private async finishRecovery(): Promise<void> {
     const recovery = this.recovery;
     if (recovery?.kind !== 'reserved') return;
@@ -192,7 +194,7 @@ export class UiConnection {
       if (this.context && (this.context.hostId !== recovery.hostId || this.context.profileId !== recovery.profileId)) throw new UiServiceError('conflict', 'Appearance recovery belongs to a previous host profile');
       const result = record(await this.post(recovery.request), ['receipt', 'outcome']), receipt = parseApplyReceipt(result.receipt);
       if (receipt.requestId !== recovery.request.requestId || receipt.digest !== null) throw new Error('Invalid builtin recovery receipt');
-      if (this.recovery === recovery) { this.recoveryFloor = receipt.deliveryGeneration; this.saveRecovery(null); }
+      if (this.recovery === recovery) { this.recoveryFloor = receipt.deliveryGeneration; await this.recovered(); this.saveRecovery(null); }
     } catch (error) {
       if (this.recovery === recovery && error instanceof UiServiceError && ['stale-revision', 'expired', 'conflict', 'invalid-input'].includes(error.code)) {
         this.saveRecovery({ ...recovery, kind: 'conflicted', reason: `${error.message.slice(0, 800)}. Retry restore to confirm the current generation.` });

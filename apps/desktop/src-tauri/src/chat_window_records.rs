@@ -59,6 +59,7 @@ impl Action {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Phase {
+    Assigned,
     Requested,
     SourceSaved,
     TransferCommitted,
@@ -134,7 +135,26 @@ impl Intent {
         }
     }
 }
+pub struct InlineRecovery {
+    pub from_transition_id: String,
+    pub transition_id: String,
+}
 impl Reservation {
+    pub fn inline_recovery(&self, expected: &str) -> Result<InlineRecovery, &'static str> {
+        let original = self
+            .transition_id
+            .strip_prefix("inline:")
+            .unwrap_or(&self.transition_id);
+        let transition_id = format!("inline:{original}");
+        if expected != original && expected != transition_id {
+            return Err("stale-recovery-reservation");
+        }
+        identifier(&transition_id, 200)?;
+        Ok(InlineRecovery {
+            from_transition_id: original.into(),
+            transition_id,
+        })
+    }
     fn validate(&self) -> Result<(), &'static str> {
         self.scope.validate()?;
         identifier(&self.view_id, 200)?;
@@ -246,7 +266,9 @@ impl Profile {
             if entry.view_id != target.view_id || entry.label != target.label {
                 return Err("native-intent-target-mismatch");
             }
-            if entry.phase == Phase::Requested && entry.transition_id == target.transition_id {
+            if matches!(entry.phase, Phase::Assigned | Phase::Requested)
+                && entry.transition_id == target.transition_id
+            {
                 entry.phase = Phase::TargetReady;
             }
         }
@@ -265,7 +287,7 @@ impl Profile {
         let mut changed = false;
         for target in completed {
             if let Some(entry) = self.windows.get_mut(&target.scope.key()) {
-                if entry.phase == Phase::Requested
+                if matches!(entry.phase, Phase::Assigned | Phase::Requested)
                     && entry.transition_id == target.transition_id
                     && entry.view_id == target.view_id
                     && entry.label == target.label
@@ -366,7 +388,7 @@ impl Profile {
         identifier(&reservation.label, 200)?;
         identifier(&reservation.transition_id, 200)?;
         let key = reservation.scope.key();
-        if let Some(previous) = self.windows.get(&key) {
+        if let Some(previous) = self.windows.get_mut(&key) {
             if previous.view_id != reservation.view_id {
                 return Err("native-binding-mismatch");
             }
@@ -374,6 +396,9 @@ impl Profile {
                 && previous.creation_agent_id != reservation.creation_agent_id
             {
                 return Err("native-creation-agent-mismatch");
+            }
+            if previous.phase == Phase::Assigned && reservation.phase == Phase::Requested {
+                previous.phase = Phase::Requested;
             }
             return Ok(previous.clone());
         }
@@ -394,7 +419,7 @@ impl Profile {
         &mut self,
         source: &Scope,
         request_id: &str,
-        reservation: Reservation,
+        mut reservation: Reservation,
     ) -> Result<Intent, &'static str> {
         let key = Self::intent_key(source, request_id);
         let previous = self.intents.get(&key).ok_or("unknown-intent")?;
@@ -419,6 +444,7 @@ impl Profile {
         if reservation.scope.host_id != source.host_id {
             return Err("foreign-host");
         }
+        reservation.phase = Phase::Assigned;
         let target = self.reserve(reservation)?;
         let intent = self.intents.get_mut(&key).ok_or("unknown-intent")?;
         intent.target = Some(target);
@@ -455,6 +481,44 @@ mod tests {
             binding_revision: None,
             writer_generation: None,
         }
+    }
+    #[test]
+    fn interrupted_inline_recovery_replays_its_original_binding_transition() {
+        let original = reservation();
+        let first = original.inline_recovery("transition").unwrap();
+        let mut interrupted = original.clone();
+        interrupted.transition_id = first.transition_id.clone();
+        interrupted.phase = Phase::Failed;
+        let restored: Reservation =
+            serde_json::from_slice(&serde_json::to_vec(&interrupted).unwrap()).unwrap();
+        for expected in ["transition", restored.transition_id.as_str()] {
+            let replay = restored.inline_recovery(expected).unwrap();
+            assert_eq!(replay.from_transition_id, "transition");
+            assert_eq!(replay.transition_id, first.transition_id);
+        }
+        assert!(restored.inline_recovery("another-transition").is_err());
+    }
+    #[test]
+    fn assigning_an_intent_does_not_admit_a_native_window_and_reserving_promotes_it() {
+        let mut p = profile();
+        let source = scope("source");
+        p.intent(
+            source.clone(),
+            "1:allocation".into(),
+            Action::Create {
+                agent_id: "agent".into(),
+                carry: false,
+            },
+        )
+        .unwrap();
+        let assigned = p
+            .assign_intent(&source, "1:allocation", reservation())
+            .unwrap()
+            .target
+            .unwrap();
+        assert_eq!(assigned.phase, Phase::Assigned);
+        assert_eq!(p.reserve(reservation()).unwrap().phase, Phase::Requested);
+        assert_eq!(p.windows[&scope("target").key()].label, assigned.label);
     }
     #[test]
     fn reservation_replay_reuses_exact_view_and_refuses_scope_label_collisions() {

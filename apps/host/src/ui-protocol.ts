@@ -18,7 +18,7 @@ export type UiRequest = DisplayRequest
   | { readonly op: 'restore'; readonly requestId: string; readonly expectedRevision: number; readonly expectedRecoveryGeneration: number }
   | { readonly op: 'status'; readonly requestId: string }
   | { readonly op: 'prune'; readonly requestId: string; readonly keep: number }
-  | { readonly op: 'compact'; readonly expectedEpoch: number }
+  | { readonly op: 'compact'; readonly expectedEpoch: number; readonly abandonWaits?: boolean }
   | { readonly op: 'relay'; readonly main: WindowContext; readonly children: readonly { readonly context: WindowContext; readonly visible: boolean; readonly presenceSequence: number; readonly display?: DisplaySubscription | null; readonly placement?: { readonly nativeTransitionId: string; readonly bindingRevision: number } | null }[]; readonly departed: readonly string[] }
   | { readonly op: 'placement-reserve'; readonly session: string; readonly envelope: DeliveryEnvelope; readonly transitionId: string; readonly target: NativePlacementTarget }
   | { readonly op: 'placement-idle'; readonly session: string; readonly envelope: DeliveryEnvelope; readonly transitionId: string }
@@ -42,7 +42,11 @@ export function parseUiRequest(value: unknown): UiRequest {
     case 'prune': record(input, ['op', 'requestId', 'keep']);
       if (count(input.keep) > 16) throw new Error('Invalid keep count');
       return { op: input.op, requestId: identifier(input.requestId, 128), keep: count(input.keep) };
-    case 'compact': record(input, ['op', 'expectedEpoch']); return { op: input.op, expectedEpoch: count(input.expectedEpoch) };
+    case 'compact': {
+      record(input, Object.hasOwn(input, 'abandonWaits') ? ['op', 'expectedEpoch', 'abandonWaits'] : ['op', 'expectedEpoch']);
+      if (input.abandonWaits !== undefined && typeof input.abandonWaits !== 'boolean') throw new Error('Invalid abandon-waits choice');
+      return { op: input.op, expectedEpoch: count(input.expectedEpoch), abandonWaits: input.abandonWaits === true };
+    }
     case 'relay': {
       record(input, ['op', 'main', 'children', 'departed']);
       const main = parseWindowContext(input.main);
@@ -59,7 +63,7 @@ export function parseUiRequest(value: unknown): UiRequest {
         if (display && !sameScope(display.scope, context.scope)) throw new Error('Foreign relay display subscription');
         return { context, display, visible: child.visible, presenceSequence: count(child.presenceSequence), placement: placement === null || bindingRevision === null ? null : { nativeTransitionId: identifier(placement.nativeTransitionId, 200), bindingRevision } };
       });
-      if (new Set(children.map(child => child.context.label)).size !== children.length || new Set(children.map(child => child.context.documentIncarnation)).size !== children.length) throw new Error('Duplicate relay child');
+      if (new Set(children.map(child => child.context.label)).size !== children.length || new Set(children.map(child => child.context.documentIncarnation)).size !== children.length || new Set(children.map(child => child.context.viewId)).size !== children.length || new Set(children.map(child => JSON.stringify(child.context.scope))).size !== children.length) throw new Error('Duplicate relay child');
       return { op: input.op, main, children, departed: input.departed.map(value => identifier(value, 200)) };
     }
     case 'state': {

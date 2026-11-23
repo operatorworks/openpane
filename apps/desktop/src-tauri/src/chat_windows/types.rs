@@ -150,6 +150,16 @@ pub enum Command {
     RestoreBuiltin {
         incarnation: String,
     },
+    ReadRecovery {
+        incarnation: String,
+    },
+    ConfirmRecovery {
+        incarnation: String,
+        sequence: u64,
+    },
+    CloseCancelled {
+        incarnation: String,
+    },
     CloseReady {
         incarnation: String,
     },

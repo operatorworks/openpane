@@ -16,6 +16,7 @@ export function fixture(options = {}) {
     const owner = { viewId, failure, closed: false, select() { behavior.select(); },
       async readView(host) { await behavior.read(); return views.get(`${viewId}/${host}`) ?? empty(); },
       async saveView(host, value) { if (owner.closed) throw new Error('Closed owner'); views.set(`${viewId}/${host}`, value); },
+      async saveNavigation(host, scope) { await behavior.navigation?.(host, scope); const key = `${viewId}/${host}`; views.set(key, { ...(views.get(key) ?? empty()), route: scope }); },
       savedViews: (...args) => behavior.listing(...args),
       async draftScopes(hostId, after) {
         const scopes = [...drafts.values()].filter(row => drafts.get(`${viewId}/${hostId}/${row.scope.conversationId}`) === row && row.scope.hostId === hostId && (after === null || row.scope.conversationId > after)).map(row => row.scope).sort((a, b) => a.conversationId < b.conversationId ? -1 : 1).slice(0, 100);
@@ -23,6 +24,15 @@ export function fixture(options = {}) {
       },
       drafts(onFailure) {
         return { load: async selected => { await behavior.load?.(selected, viewId); loads.push(`${viewId}/${selected.hostId}/${selected.conversationId}`); return drafts.get(`${viewId}/${selected.hostId}/${selected.conversationId}`) ?? null; },
+          async commitTransfer(value, transfer) {
+            if (transfer.outcome !== 'copy-cleared') throw new Error('This fixture does not admit native carries');
+            try {
+              await behavior.write(); if (owner.closed) throw new Error('Closed owner');
+              const target = drafts.get(`${transfer.targetViewId}/${transfer.target.hostId}/${transfer.target.conversationId}`)?.draft ?? '';
+              if (target !== transfer.text && !target.startsWith(`${transfer.text}\n\n`)) return false;
+              drafts.set(`${viewId}/${value.scope.hostId}/${value.scope.conversationId}`, value); return true;
+            } catch (error) { onFailure(error); throw error; }
+          },
           loadImage: async (selected, id) => images.get(`${viewId}/${selected.hostId}/${selected.conversationId}/${id}`)?.slice() ?? null,
           async save(value, image) {
             try { await behavior.write(); if (owner.closed) throw new Error('Closed owner'); const key = id => `${viewId}/${value.scope.hostId}/${value.scope.conversationId}/${id}`;

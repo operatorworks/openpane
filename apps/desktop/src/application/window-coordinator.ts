@@ -1,11 +1,11 @@
-import { pruneDraftCarryHistory } from './draft-carry.js';
+import { pruneDraftCarryHistory, bindDraftCarry, sourceCarries } from './draft-carry.js';
 import { parseConversationOpenResult } from '@openpane/contracts';
 import type { ConversationOpenResult, ConversationScope, EditorBinding, ExperienceV1 } from '@openpane/contracts';
 import { sameScope } from '@openpane/contracts';
-import { count, record } from '@openpane/contracts/decode';
+import { count, identifier, record } from '@openpane/contracts/decode';
 import { BrowserViewStorage } from './browser-storage.js';
 import type { PlacementAcquisition, PlacementPort } from './placement-port.js';
-import { DesktopWindowPort, parseNativeReservation } from './window-context.js';
+import { DesktopWindowPort, parseNativeReservation, parseNativePlacementIntent, childPlacementResult } from './window-context.js';
 import type { NativeReservation, NativePlacementIntent } from './window-context.js';
 
 type Request = Parameters<PlacementPort['acquire']>[0];
@@ -24,8 +24,8 @@ export class WindowCoordinator implements PlacementPort {
   trackPlacement(handler: (reservation: NativeReservation, binding: EditorBinding) => Promise<void>): void { this.track = handler; }
   private notice: (result: ConversationOpenResult, requestId: string) => void = () => {};
   observeIntent(handler: (result: ConversationOpenResult, requestId: string) => void): void { this.notice = handler; }
-  private capture: (requestId: string) => Promise<{ readonly cancel: () => Promise<void> } | null> = async () => null;
-  captureCarry(handler: (requestId: string) => Promise<{ readonly cancel: () => Promise<void> } | null>): void { this.capture = handler; }
+  private capture: (requestId: string, sourceScope?: ConversationScope) => Promise<{ readonly cancel: () => Promise<void> } | null> = async () => null;
+  captureCarry(handler: (requestId: string, sourceScope?: ConversationScope) => Promise<{ readonly cancel: () => Promise<void> } | null>): void { this.capture = handler; }
   private readonly browserLabel: () => string;
   constructor(private readonly port: DesktopWindowPort | null, browserLabel?: () => string) {
     const id = crypto.randomUUID(); this.browserLabel = browserLabel ?? (() => `browser:${id}`);
@@ -46,26 +46,42 @@ export class WindowCoordinator implements PlacementPort {
   };
   private async intent(action: NativePlacementIntent['action'], scope: ConversationScope | null): Promise<Exclude<ConversationOpenResult, { readonly kind: 'inline' }>> {
     if (!this.port) return { kind: 'refused', reason: 'Native placement is unavailable.' };
+    let submitted = false;
     let requestId: string = crypto.randomUUID(), captured: { readonly cancel: () => Promise<void> } | null = null;
     try {
-      let context = record(await this.port.request({ kind: 'intent-context' }), ['epoch']), epoch = count(context.epoch);
+      let context = record(await this.port.request({ kind: 'intent-context' }), ['epoch', 'pendingCarryRequests']), epoch = count(context.epoch);
       if (!epoch) throw new Error('Invalid native request epoch');
-      if (action.carry && await pruneDraftCarryHistory(epoch) >= 1000) {
-        context = record(await this.port.request({ kind: 'intent-context', retireAfter: epoch }), ['epoch']); epoch = count(context.epoch);
-        await pruneDraftCarryHistory(epoch);
+      const protectedRequests = () => {
+        if (!Array.isArray(context.pendingCarryRequests) || context.pendingCarryRequests.length > 512) throw new Error('Invalid native carry inventory');
+        return context.pendingCarryRequests.map(value => identifier(value, 200));
+      };
+      if (action.carry && await pruneDraftCarryHistory(epoch, protectedRequests()) >= 1000) {
+        context = record(await this.port.request({ kind: 'intent-context', retireAfter: epoch }), ['epoch', 'pendingCarryRequests']); epoch = count(context.epoch);
+        await pruneDraftCarryHistory(epoch, protectedRequests());
       }
       requestId = `${epoch}:${requestId}`;
       captured = action.carry ? await this.capture(requestId) : null;
       const canonical = { ...action, carry: captured !== null };
-      const intent = record(await this.port.request({ kind: 'placement-intent', requestId, action: canonical }));
+      submitted = true;
+      let value: unknown;
+      try { value = await this.port.request({ kind: 'placement-intent', requestId, action: canonical }); }
+      catch { value = await this.port.request({ kind: 'read-intent', requestId }); }
+      if (value === null) throw new Error('Native request admission is unconfirmed.');
+      const intent = parseNativePlacementIntent(value);
+      if (intent.requestId !== requestId || this.port.context.role !== 'chat' || !sameScope(intent.sourceScope, this.port.context.reservation.scope)) throw new Error('Native request identity mismatch');
       if (intent.result !== null && intent.result !== undefined) {
         const result = parseConversationOpenResult(intent.result);
-        return result.kind === 'inline' ? { kind: 'detached', scope: result.scope, label: 'main' } : result;
+        if (result.kind === 'refused') await captured?.cancel();
+        return childPlacementResult(result);
       }
       const target = intent.target === null ? null : parseNativeReservation(intent.target);
       const pending = { kind: 'pending', scope: target?.scope ?? scope, reason: 'Main is coordinating the requested chat.' } as const; this.notice(pending, requestId); return pending;
     } catch (error) {
       let reason = error instanceof Error ? error.message : String(error);
+      if (submitted) {
+        const result = { kind: 'pending', scope, reason: `${reason} Inspect this request before retrying; its draft remains recoverable.` } as const;
+        this.notice(result, requestId); return result;
+      }
       try { await captured?.cancel(); } catch { reason += ' The draft remains pending in its source; recover local storage before retrying.'; }
       const result = { kind: 'refused', reason } as const; this.notice(result, requestId); return result;
     }
@@ -105,6 +121,18 @@ export class WindowCoordinator implements PlacementPort {
     if (owner.storage.viewId === sourceViewId) await owner.release();
     return BrowserViewStorage.transferClosed(plan);
   }
+  private async carryToNative(request: Request, reservation: NativeReservation): Promise<void> {
+    if (!request.carryFrom || sameScope(request.carryFrom, request.scope) || this.port?.context.role !== 'main') return;
+    const existing = (await sourceCarries(request.carryFrom)).find(carry => (carry.kind === 'offered' || carry.kind === 'applied') && carry.target && sameScope(carry.target, request.scope));
+    if (existing) return;
+    const context = record(await this.port.request({ kind: 'intent-context' }), ['epoch', 'pendingCarryRequests']);
+    const requestId = `${count(context.epoch)}:main-${reservation.transitionId}`;
+    const captured = await this.capture(requestId, request.carryFrom);
+    if (captured) {
+      try { await bindDraftCarry(request.carryFrom, requestId, request.scope); }
+      catch (error) { await captured.cancel(); throw error; }
+    }
+  }
   async acquire(request: Request, owner: Owner): Promise<PlacementAcquisition> {
     try {
       if (this.port?.context.role === 'chat') {
@@ -113,8 +141,14 @@ export class WindowCoordinator implements PlacementPort {
         return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
       }
       const native = await this.lookup(request.scope);
-      if (native.live) return this.launch(request);
-      const located = await BrowserViewStorage.locateEditor(request.scope), binding = located.binding;
+      if (native.live) {
+        if (native.reservation) await this.carryToNative(request, native.reservation);
+        const { binding } = await BrowserViewStorage.locateEditor(request.scope);
+        if (native.reservation && binding && binding.viewId === native.reservation.viewId && (binding.kind === 'editing' || binding.targetLabel === native.reservation.label && binding.transitionId === native.reservation.transitionId)) await this.track(native.reservation, binding);
+        return this.launch(request);
+      }
+      const located = await BrowserViewStorage.locateEditor(request.scope, owner.storage.viewId);
+      let binding = located.binding;
       const selectedLegacy = located.legacyViewIds.includes(owner.storage.viewId) ? owner.storage.viewId : null;
       if (located.legacyViewIds.length > 1 && selectedLegacy === null) {
         return { kind: 'refused', reason: `Independent saved work exists in views ${located.legacyViewIds.join(', ')}. Open the saved view you want to recover before moving this chat. All records are preserved.` };
@@ -124,6 +158,7 @@ export class WindowCoordinator implements PlacementPort {
       const separate = this.port?.context.role === 'main' && this.port.context.liveRelay && (this.forced.get(JSON.stringify(request.scope)) ?? this.presentation.chats) === 'separate';
       if (separate) {
         const reservation = parseNativeReservation(await this.port.request({ kind: 'reserve', scope: request.scope, viewId, creationAgentId: request.creation ? request.agentId : null, newTransition: binding?.kind === 'editing' }));
+        await this.carryToNative(request, reservation);
         if (request.creation && !binding && sourceViewId === null) {
           if (request.initialDraft !== null && request.initialDraft !== undefined) await BrowserViewStorage.prepareCreationDraft({ scope: request.scope, viewId: reservation.viewId, label: reservation.label, transitionId: reservation.transitionId, agentId: request.agentId }, request.initialDraft);
           return this.launch(request);
@@ -145,7 +180,10 @@ export class WindowCoordinator implements PlacementPort {
       }
       if (binding?.kind === 'editing' && owner.holds(binding.viewId)) return { kind: 'inline', view: { kind: 'owned', viewId: binding.viewId } };
       const label = this.port?.context.label ?? this.browserLabel();
-      if (binding?.kind === 'handoff-reserved' && binding.targetLabel !== label) return { kind: 'pending', scope: request.scope, reason: 'This chat is reserved for its recorded target. Retry that window or recover the failed handoff before opening another editor.' };
+      if (binding?.kind === 'handoff-reserved' && binding.targetLabel !== label) {
+        if (!this.port && binding.targetLabel.startsWith('browser:')) binding = await BrowserViewStorage.recoverBrowserHandoff(binding, label);
+        else return { kind: 'pending', scope: request.scope, reason: 'This chat is reserved for its recorded target. Retry that window or recover the failed handoff before opening another editor.' };
+      }
       const transitionId = binding?.kind === 'handoff-reserved' ? binding.transitionId : crypto.randomUUID();
       if (sourceViewId !== null || !request.creation) {
         const reservation: NativeReservation = { scope: request.scope, viewId, label, transitionId, creationAgentId: request.creation ? request.agentId : null,

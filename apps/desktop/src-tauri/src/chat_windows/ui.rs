@@ -49,13 +49,6 @@ impl ChatWindows {
                 {
                     return Err("invalid-ui-state");
                 }
-                if snapshot
-                    .pointer("/selection/selected/kind")
-                    .and_then(Value::as_str)
-                    == Some("builtin")
-                {
-                    broker.local_builtin = false;
-                }
                 if children.len() > 32 {
                     return Err("too-many-child-snapshots");
                 }

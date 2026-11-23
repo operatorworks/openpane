@@ -56,6 +56,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   const [awaiting, setAwaiting] = useState<{ readonly before: string | null } | null>(null);
   const [notice, setNotice] = useState('');
   const waiting = useRef<object | null>(null);
+  const inFlight = useRef<object | null>(null);
   function stopAwaiting() { waiting.current = null; setAwaiting(null); }
   const selectedKey = props.selected ? `${props.selected.hostId}/${props.selected.conversationId}` : null;
   useEffect(() => {
@@ -106,8 +107,8 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   const chats = entries.filter(entry => !filter || entry.provider.providerAgentId === filter);
   /** Opens or creates a chat. A rejection is shown here; any other failure is in the host status strip. */
   async function attempt(action: () => ReturnType<WorkspaceViewProps['open']>) {
-    if (waiting.current) return;
-    const attempt = {}; waiting.current = attempt;
+    if (inFlight.current) return;
+    const attempt = {}; inFlight.current = attempt; waiting.current = attempt;
     setNotice(''); setAwaiting({ before: selectedKey });
     try {
       const result = await action();
@@ -117,6 +118,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
       else { setNarrowPane('list'); setNotice(result.kind === 'detached' ? 'Chat opened in its own window.' : result.reason); }
     }
     catch { if (waiting.current !== attempt) return; stopAwaiting(); setNotice('That chat could not be opened. Refresh the list and try again.'); }
+    finally { if (inFlight.current === attempt) inFlight.current = null; }
   }
   function openChat(scope: ConversationScope) {
     if (selectedKey === `${scope.hostId}/${scope.conversationId}`) { setNarrowPane('conversation'); return; }

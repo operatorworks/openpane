@@ -46,7 +46,8 @@ export function normalizePup(input: unknown, query: string, title: string, range
       };
       const numerator = unitLabel(series.unit[0]), denominator = unitLabel(series.unit[1]);
       const unit = denominator === null ? numerator : numerator === null ? `per ${denominator}` : `${numerator}/${denominator}`;
-      return { label: boundedText(series.display_name, 200), unit, points: series.pointlist };
+      const name = boundedText(series.display_name, 200), scope = boundedText(series.scope, 200);
+      return { label: scope === '*' ? name : boundedText(`${name} {${scope}}`, 200), unit, points: series.pointlist };
     }),
   });
 }

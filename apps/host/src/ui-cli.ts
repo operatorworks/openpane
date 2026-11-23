@@ -21,7 +21,7 @@ export async function runUiCli(args: readonly string[]): Promise<void> {
   const { values, positionals } = parseArgs({ args: [...args], allowPositionals: true, options: {
     'data-dir': { type: 'string' }, 'request-id': { type: 'string' }, 'expected-revision': { type: 'string' },
     'expected-recovery-generation': { type: 'string' }, 'expected-epoch': { type: 'string' }, directory: { type: 'string' }, stdin: { type: 'boolean' },
-    builtin: { type: 'boolean' }, after: { type: 'string' }, keep: { type: 'string' }, 'wait-ms': { type: 'string' },
+    builtin: { type: 'boolean' }, 'abandon-waits': { type: 'boolean' }, after: { type: 'string' }, keep: { type: 'string' }, 'wait-ms': { type: 'string' },
     'scope-json': { type: 'string' }, 'publication-id': { type: 'string' }, query: { type: 'string' }, title: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, pup: { type: 'string' },
     'expected-attempt': { type: 'string' }, 'cursor-json': { type: 'string' }, 'subscription-id': { type: 'string' },
   } });
@@ -36,7 +36,7 @@ export async function runUiCli(args: readonly string[]): Promise<void> {
   const commandFlags: Readonly<Record<string, readonly string[]>> = {
     context: [], targets: ['after'], 'experience schema': [], 'experience apply': ['request-id', 'expected-revision', 'directory', 'stdin'],
     'experience refresh': ['request-id', 'expected-revision'], 'experience restore': ['request-id', 'expected-revision', 'expected-recovery-generation', 'builtin'],
-    'experience prune': ['request-id', 'keep'], 'maintenance compact': ['expected-epoch'], status: ['request-id'], wait: ['request-id', 'wait-ms'],
+    'experience prune': ['request-id', 'keep'], 'maintenance compact': ['expected-epoch', 'abandon-waits'], status: ['request-id'], wait: ['request-id', 'wait-ms'],
     'display schema': [], 'display publish': ['scope-json', 'publication-id', 'stdin'], 'display status': ['scope-json', 'publication-id'],
     'display remove': ['scope-json', 'publication-id', 'request-id'], 'display retry': ['scope-json', 'publication-id', 'expected-attempt'],
     'display list': ['scope-json', 'after', 'cursor-json', 'subscription-id'], 'display datadog': ['scope-json', 'publication-id', 'query', 'title', 'from', 'to', 'pup'],
@@ -62,7 +62,7 @@ export async function runUiCli(args: readonly string[]): Promise<void> {
       if (!values.builtin) throw new Error('Restore requires --builtin');
       request = { op: 'restore', requestId: requestId(), expectedRevision: expectedRevision(), expectedRecoveryGeneration: integer(values['expected-recovery-generation']) }; break;
     case 'experience prune': request = { op: 'prune', requestId: requestId(), keep: integer(values.keep) }; break;
-    case 'maintenance compact': request = { op: 'compact', expectedEpoch: integer(values['expected-epoch']) }; break;
+    case 'maintenance compact': request = { op: 'compact', expectedEpoch: integer(values['expected-epoch']), abandonWaits: values['abandon-waits'] === true }; break;
     case 'status': request = { op: 'status', requestId: requestId() }; break;
     case 'wait': {
       const limit = integer(values['wait-ms'] ?? '30000'); if (limit > 30000) throw new Error('Wait is limited to 30000 milliseconds');
