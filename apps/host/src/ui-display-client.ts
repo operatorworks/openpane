@@ -66,11 +66,12 @@ export async function publishDatadog(command: DatadogCommand): Promise<{ readonl
         input = { ...status.input, query: action.query, title: action.title, from: action.from, to: action.to };
       }
       else {
-        const configured = action.pup ?? (process.env.OPENPANE_PUP || null), executableHint = configured ?? 'PATH:pup', siteHint = process.env.DD_SITE || 'configured';
+        const configured = action.pup ?? (process.env.OPENPANE_PUP || null), executableHint = configured ?? 'PATH:pup';
         if (configured !== null && !isAbsolute(configured)) throw new Error('Configure an absolute --pup executable path');
         const context = parseUiContext(await requestUi(socket, { op: 'context' }));
         if (!new RegExp(`^${context.requestEpoch}:[\\da-f]{8}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{12}$`, 'i').test(publicationId)) throw new UiRefusal('expired', 'Use an EPOCH:UUID publication ID from the current ui context');
         const path = await executable(executableHint), version = await pupVersion(path, controller.signal), site = await pupSite(path, controller.signal);
+        const siteHint = process.env.DD_SITE === site ? site : 'configured';
         input = { query: action.query, title: action.title, from: action.from, to: action.to, executable: path, executableHint, version, site, siteHint };
       }
       request = { op: 'display-query-reserve', scope, publicationId, input: parseDisplayQueryInput(input) };

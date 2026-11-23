@@ -7,27 +7,28 @@ import { count, record } from '@openpane/contracts/decode';
 import { BrowserViewStorage } from './browser-storage.js';
 import { createApplicationController } from './application-controller.js';
 import type { ApplicationController } from './application-controller.js';
+import { IndependentDraftsError } from './view-state.js';
 import type { ViewStorageFactory } from './view-state.js';
 import { ChildUiConnection, NativeMainUiRelay } from './native-ui-relay.js';
 import { UiConnection } from './ui-connection.js';
 import type { UiTransport } from './ui-connection.js';
+import type { RecoveryOriginator } from './ui-recovery.js';
 import { childPlacementResult, DesktopWindowPort, parseNativePlacementIntent, parseNativeReservation, parseEditorRecoveryGrant, parseNativeWindowLookup } from './window-context.js';
 import type { DesktopWindowContext, NativePlacementIntent, NativeReservation } from './window-context.js';
 import type { DraftCarry } from './draft-carry.js';
-import { bindDraftCarry, offerDraftCarry, sourceCarries, targetCarries, cancelDraftCarry, refuseDraftCarry, retryDraftCarry } from './draft-carry.js';
+import { bindDraftCarry, offerDraftCarry, sourceCarries, targetCarries, cancelDraftCarry, refuseDraftCarry, retryDraftCarry, hostCarries, removeRetainedCarry } from './draft-carry.js';
 import { WindowCoordinator } from './window-coordinator.js';
 
 export type WindowRecovery =
   | { readonly kind: 'none' }
-  | { readonly kind: 'main'; readonly windows: readonly NativeReservation[] }
+  | { readonly kind: 'main'; readonly windows: readonly NativeReservation[]; readonly carries: readonly DraftCarry[]; readonly carriesAfter: IDBValidKey | null; readonly carryNotice: string | null }
   | { readonly kind: 'chat'; readonly pending: readonly NativePlacementIntent[]; readonly history: readonly NativePlacementIntent[]; readonly after: string | null;
-      readonly carries: readonly Pick<Extract<DraftCarry, { readonly kind: 'offered' | 'applied' }>, 'requestId' | 'kind' | 'target'>[] };
-export interface WindowRuntimeSnapshot { readonly recovery: WindowRecovery; readonly catalogOnly: boolean; readonly capabilityNotice: string | null; readonly placementNotice: string | null }
+      readonly carries: readonly DraftCarry[] };
+export interface WindowRuntimeSnapshot { readonly closing: boolean; readonly canRetryCreation: boolean; readonly recovery: WindowRecovery; readonly catalogOnly: boolean; readonly capabilityNotice: string | null; readonly placementNotice: string | null }
 const namespace = (agent: AgentDescriptor): string | null => 'kind' in agent ? agent.namespace : null;
 export class MainUiConnection extends UiConnection {
-  private restoration: { readonly sequence: number; readonly promise: Promise<void> } | null = null;
+  private restoration: { readonly sequence: number; readonly promise: Promise<boolean> } | null = null;
   private recoveryAttempt = 0;
-  private recoverySequence: number | null = null;
   constructor(private readonly port: DesktopWindowPort) {
     super(new NativeMainUiRelay(port), async context => parseWindowContext(await port.request({ kind: 'bind-ui', hostId: context.hostId, profileId: context.profileId })), port.context.liveRelay);
   }
@@ -39,17 +40,19 @@ export class MainUiConnection extends UiConnection {
     const reply = record(await this.port.request({ kind: 'restore-builtin' }), ['sequence']);
     await this.restoreNative(count(reply.sequence));
   }
-  restoreNative(sequence: number): Promise<void> {
+  restoreNative(sequence: number): Promise<boolean> {
     const active = this.restoration;
-    if (sequence <= this.recoveryAttempt || active && sequence <= active.sequence) return active?.promise ?? Promise.resolve();
+    if (sequence <= this.recoveryAttempt || active && sequence <= active.sequence) return active?.promise ?? Promise.resolve(true);
     const task = (active?.promise.catch(() => {}) ?? Promise.resolve()).then(async () => {
-      this.recoverySequence = sequence; await super.restore(); this.recoveryAttempt = sequence;
+      const recorded = await this.requestRecovery({ kind: 'native', brokerInstance: this.port.context.brokerInstance, sequence });
+      if (recorded) this.recoveryAttempt = sequence;
+      return recorded;
     }).finally(() => { if (this.restoration?.sequence === sequence) this.restoration = null; });
     this.restoration = { sequence, promise: task };
     return task;
   }
-  protected override async recovered(): Promise<void> {
-    if (this.recoverySequence !== null) await this.port.request({ kind: 'confirm-recovery', sequence: this.recoverySequence });
+  protected override async recovered(originator: RecoveryOriginator): Promise<void> {
+    if (originator.kind === 'native' && originator.brokerInstance === this.port.context.brokerInstance) await this.port.request({ kind: 'confirm-recovery', sequence: originator.sequence });
   }
 }
 /** One document owns one controller, and only main owns the host UI reader. */
@@ -59,13 +62,14 @@ export class WindowRuntime {
   readonly coordinator: WindowCoordinator;
   readonly port: DesktopWindowPort | null;
   private childOwner: BrowserViewStorage | null = null;
-  private snapshot: WindowRuntimeSnapshot = { recovery: { kind: 'none' }, catalogOnly: false, capabilityNotice: null, placementNotice: null };
+  private snapshot: WindowRuntimeSnapshot = { closing: false, canRetryCreation: false, recovery: { kind: 'none' }, catalogOnly: false, capabilityNotice: null, placementNotice: null };
   private readonly listeners = new Set<() => void>();
   private readonly cleanups: (() => void)[] = [];
   private started = false;
   private closed = false;
   private processing = false;
   private childReady = false;
+  private childRefusalReported = false;
   private catalogDirty = false;
   private recoveryDirty = true;
   private readonly requestHistory = new Map<string, NativePlacementIntent>();
@@ -74,6 +78,11 @@ export class WindowRuntime {
   private historyExtended = false;
   private nativeRecoverySeen: number | null = null;
   private nativeRecoveryTask: Promise<void> | null = null;
+  private separatePolicy = false;
+  private policyDelivery: string | null = null;
+  private policyAppliedScope: ConversationScope | null = null;
+  private carryRecoveryAfter: IDBValidKey | null = null;
+  private carrySettlementAfter: IDBValidKey | null = null;
   private policyScope: ConversationScope | null = null;
   private placingPolicy: ConversationScope | null = null;
   private readonly pendingIntents = new Map<string, Extract<ConversationOpenResult, { readonly kind: 'pending' }>>();
@@ -96,7 +105,7 @@ export class WindowRuntime {
       locate: async scope => {
         const located = await BrowserViewStorage.locateEditor(scope);
         if (located.binding) return located.binding.viewId;
-        if (located.legacyViewIds.length > 1) throw new Error(`Independent drafts exist in views ${located.legacyViewIds.join(', ')}. Choose one saved view before carrying its draft.`);
+        if (located.legacyViewIds.length > 1) throw new IndependentDraftsError(located.legacyViewIds);
         return located.legacyViewIds[0] ?? null;
       },
       get catalogViewId() { return context.role === 'chat' ? undefined : catalogViewId; },
@@ -145,7 +154,8 @@ export class WindowRuntime {
         const captured = await this.controller.capturePlacementDraft(sourceScope);
         if (!captured?.text) return null;
         const binding = await BrowserViewStorage.bindingForView(captured.viewId);
-        if (!binding || binding.kind !== 'editing' || !sameScope(binding.scope, sourceScope)) throw new Error('The original draft editor changed. Reopen it before carrying its text.');
+        if (!binding) { captured.recover(); return null; }
+        if (binding.kind !== 'editing' || !sameScope(binding.scope, sourceScope)) throw new Error('The original draft editor changed. Reopen it before carrying its text.');
         if (existing?.kind === 'refused') await retryDraftCarry(sourceScope, requestId, binding.viewId, binding.writerGeneration);
         else await offerDraftCarry({ source: sourceScope, sourceViewId: binding.viewId, requestId, writerGeneration: binding.writerGeneration,
           emptyOnly: true, expected: { text: captured.text, revision: captured.revision } });
@@ -179,6 +189,7 @@ export class WindowRuntime {
     this.cleanups.push(this.controller.subscribe(() => {
       const result = this.controller.getSnapshot().lastPlacement;
       if (result !== this.lastPlacement) { this.lastPlacement = result; if (!this.processing || result?.kind === 'refused' || result?.kind === 'detached') this.recoveryDirty = true; }
+      this.uiChanged();
       if (!this.processing) void this.drive();
     }));
     this.cleanups.push(this.ui.subscribe(this.uiChanged)); this.uiChanged();
@@ -186,7 +197,11 @@ export class WindowRuntime {
       void this.port.listen(event, () => {
         if (event === 'openpane-close-requested') void this.closeWindow();
         else { this.recoveryDirty = true; if (event === 'openpane-ui-wakeup') { this.catalogDirty = true; void this.recoveryWake(); } void this.drive(); }
-      }).then(unlisten => { if (this.closed) unlisten(); else this.cleanups.push(unlisten); }, error => this.update({ placementNotice: String(error) }));
+      }).then(unlisten => {
+        if (this.closed) { unlisten(); return; }
+        this.cleanups.push(unlisten);
+        if (event === 'openpane-ui-wakeup') void this.recoveryWake();
+      }, error => this.update({ placementNotice: String(error) }));
     }
     this.ui.start();
     const initialUi = this.context.role === 'main' ? new Promise<void>(resolve => {
@@ -196,13 +211,24 @@ export class WindowRuntime {
     void initialUi.then(() => this.closed ? undefined : this.controller.start()).then(() => this.drive());
   }
   private uiChanged = (): void => {
-    const state = this.ui.getSnapshot(), presentation = state.localBuiltin ? null : state.state?.bundle?.manifest.presentation ?? null;
+    if (this.context.role === 'main') void this.recoveryWake();
+    const state = this.ui.getSnapshot();
+    if (!state.localBuiltin && state.state && state.validatedGeneration !== state.state.selection.deliveryGeneration) return;
+    const presentation = state.localBuiltin ? null : state.state?.bundle?.manifest.presentation ?? null;
     const separate = presentation?.chats === 'separate';
     const supported = this.context.role === 'main' && this.context.liveRelay;
-    const catalogOnly = separate && supported;
+    const active = this.controller.getSnapshot().active;
+    const catalogOnly = separate && supported && !active;
     this.coordinator.setPresentation(presentation);
-    if (!catalogOnly) this.policyScope = null;
-    if (catalogOnly && !this.snapshot.catalogOnly) this.policyScope = this.controller.getSnapshot().active?.scope ?? null;
+    const delivery = state.localBuiltin || !state.state ? null : JSON.stringify([state.deliveryContext, state.state.selection.deliveryGeneration, state.state.selection.revision, state.state.bundle?.digest]);
+    if (this.policyDelivery !== delivery) { this.policyDelivery = delivery; this.policyAppliedScope = null; }
+    this.separatePolicy = separate && supported;
+    if (!this.separatePolicy) { this.policyScope = null; this.policyAppliedScope = null; }
+    else {
+      const pending = this.controller.getSnapshot().lastPlacement;
+      const scope = active?.scope ?? (pending?.kind === 'pending' ? pending.scope : null);
+      if (scope && (!this.policyAppliedScope || !sameScope(this.policyAppliedScope, scope))) this.policyScope = scope;
+    }
     this.update({ catalogOnly, capabilityNotice: separate && this.context.role !== 'chat' && !supported
       ? 'Separate chat windows require a supported desktop launcher. Chats stay inline here.' : null });
     if (!this.processing) void this.drive();
@@ -218,17 +244,22 @@ export class WindowRuntime {
         if (!state.pending) { this.nativeRecoverySeen = null; return; }
         if (this.nativeRecoverySeen === sequence) return;
         this.nativeRecoverySeen = sequence;
-        await ui.restoreNative(sequence);
+        if (!await ui.restoreNative(sequence)) { this.nativeRecoverySeen = null; return; }
       }
     })().catch(error => { this.update({ placementNotice: String(error) }); }).finally(() => { this.nativeRecoveryTask = null; });
   }
   private async closeWindow(): Promise<void> {
-    if (!this.port || this.closed) return;
-    try { await this.controller.dispose(); await this.port.request({ kind: 'close-ready' }); }
+    if (!this.port || this.closed || this.snapshot.closing) return;
+    this.update({ closing: true });
+    let saved = false;
+    try { await this.controller.prepareClose(); saved = true; await this.controller.dispose(); await this.port.request({ kind: 'close-ready' }); }
     catch (error) {
       await this.port.request({ kind: 'close-cancelled' }).catch(() => {});
-      this.update({ placementNotice: `Saving this window failed: ${String(error)}. Copy any unsaved text before using Close Chat Without Saving or Quit Without Saving in the Recovery menu.` });
-    }
+      if (saved) {
+        this.update({ placementNotice: `The saved editor is reopening after its window cleanup failed: ${String(error)}` });
+        window.location.reload();
+      } else this.update({ placementNotice: `Saving this window failed: ${String(error)}. Copy any unsaved text before using Close Chat Without Saving or Quit Without Saving in the Recovery menu.` });
+    } finally { this.update({ closing: false }); }
   }
   private async drive(): Promise<void> {
     if (this.processing || this.closed) return;
@@ -241,6 +272,9 @@ export class WindowRuntime {
         if (state.saved.pendingCreation && !this.childReady) await this.controller.recoverCreation();
         await this.syncDraftCarries();
         const current = this.controller.getSnapshot(), binding = this.childOwner?.editorBinding();
+        if (!this.childReady && !this.childRefusalReported && !current.active && !current.saved.pendingCreation && current.error && this.context.reservation.creationAgentId) {
+          await this.port?.request({ kind: 'creation-refused' }); this.childRefusalReported = true; this.update({ canRetryCreation: true });
+        }
         if (!this.childReady && current.active && binding && sameScope(current.active.scope, this.context.reservation.scope)) {
           await this.port?.request({ kind: 'ready', binding, visible: document.visibilityState === 'visible' });
           this.childReady = true; if (this.ui instanceof ChildUiConnection) this.ui.refresh();
@@ -250,6 +284,7 @@ export class WindowRuntime {
       await this.syncDraftCarries();
       if (this.policyScope) {
         const scope = this.policyScope;
+        this.policyAppliedScope = scope;
         this.placingPolicy = scope;
         let placed: ConversationOpenResult;
         try { placed = await this.controller.openReserved(scope); } finally { this.placingPolicy = null; }
@@ -301,6 +336,8 @@ export class WindowRuntime {
         target = assigned.target;
         if (!target) throw new Error('Main did not persist the target allocation.');
       }
+      const currentTarget = parseNativeWindowLookup(await this.port.request({ kind: 'lookup', scope: target.scope }), target.scope);
+      if (currentTarget.kind === 'opening' && currentTarget.reservation.phase === 'failed') throw new Error('Creation was refused in its assigned window. Open that window to review its saved text and retry the same creation.');
       if (intent.action.carry) await bindDraftCarry(intent.sourceScope, intent.requestId, target.scope);
       const pending = this.controller.getSnapshot().saved.pendingCreation;
       if (pending && sameScope(pending.scope, target.scope)) {
@@ -325,10 +362,17 @@ export class WindowRuntime {
       const value = await this.port.request({ kind: 'reservations' });
       if (!Array.isArray(value) || value.length > 512) throw new Error('Invalid native recovery inventory');
       const state = this.controller.getSnapshot(), hostId = state.host.kind === 'ready' ? state.host.metadata.hostId : null;
-      this.update({ recovery: { kind: 'main', windows: value.map(parseNativeReservation).filter(window => window.scope.hostId === hostId) } });
+      let carries: readonly DraftCarry[] = [], carriesAfter: IDBValidKey | null = null, carryNotice: string | null = null;
+      try { if (hostId) { const page = await hostCarries(hostId, this.carryRecoveryAfter); carries = page.carries; carriesAfter = page.after; if (page.unreadable) carryNotice = 'Some saved transfer records cannot be read. Other chats remain available; original records are preserved.'; } }
+      catch { carryNotice = 'Saved draft transfer history could not be read. Original drafts are preserved.'; }
+      this.update({ recovery: { kind: 'main', windows: value.map(parseNativeReservation).filter(window => window.scope.hostId === hostId), carries, carriesAfter, carryNotice } });
       const pending = state.lastPlacement;
       if (pending?.kind === 'pending' && pending.scope?.hostId === hostId) {
         const native = parseNativeWindowLookup(await this.port.request({ kind: 'lookup', scope: pending.scope }), pending.scope);
+        if (native.kind === 'opening' && native.reservation.phase === 'failed') {
+          const result = { kind: 'refused', reason: 'The assigned chat could not be created. Open its saved window to review the refusal; its unsent draft is preserved.' } as const;
+          if (this.controller.settlePlacement(pending, result)) { this.policyScope = null; this.update({ placementNotice: result.reason }); }
+        }
         if (native.kind === 'ready' && this.controller.settlePlacement(pending, { kind: 'detached', scope: pending.scope, label: native.reservation.label })) {
           if (this.policyScope && sameScope(this.policyScope, pending.scope)) this.policyScope = null;
           if (this.snapshot.placementNotice === pending.reason) this.update({ placementNotice: null });
@@ -349,6 +393,7 @@ export class WindowRuntime {
     if ([...pending, ...items].some(intent => !sameScope(intent.sourceScope, this.context.role === 'chat' ? this.context.reservation.scope : intent.sourceScope))) throw new Error('Foreign source in native request history');
     const previous = this.snapshot.recovery.kind === 'chat' ? this.snapshot.recovery.pending : [];
     const recheck = new Set(previous.map(item => item.requestId));
+    for (const carry of await sourceCarries(this.context.reservation.scope)) if (carry.kind === 'offered') recheck.add(carry.requestId);
     for (const requestId of this.pendingIntents.keys()) recheck.add(requestId);
     for (const requestId of recheck) if (!pending.some(item => item.requestId === requestId) && !items.some(item => item.requestId === requestId)) {
       const saved = await this.port.request({ kind: 'read-intent', requestId });
@@ -357,16 +402,18 @@ export class WindowRuntime {
         if (intent.requestId !== requestId || !sameScope(intent.sourceScope, this.context.reservation.scope)) throw new Error('Foreign native request result');
         items.push(intent);
       } else if (carryRequestEpoch(requestId) < epoch) {
+        await this.refuseOfferedCarry(requestId);
         const pending = this.pendingIntents.get(requestId);
         if (pending) {
           this.pendingIntents.delete(requestId);
           const result = { kind: 'refused', reason: 'This recorded result expired. Check main before starting another chat. Your unsent draft is preserved.' } as const;
           this.controller.settlePlacement(pending, result);
+          await this.refuseOfferedCarry(requestId);
           if (this.pendingIntent?.requestId === requestId) { this.pendingIntent = null; this.update({ placementNotice: result.reason }); }
         }
       }
     }
-    for (const item of items) this.requestHistory.set(item.requestId, item);
+    for (const item of items) { this.requestHistory.set(item.requestId, item); if (item.result?.kind === 'refused') await this.refuseOfferedCarry(item.requestId); }
     for (const [requestId, pending] of this.pendingIntents) {
       const recorded = this.requestHistory.get(requestId)?.result;
       if (!recorded || recorded.kind === 'pending') continue;
@@ -377,8 +424,14 @@ export class WindowRuntime {
     }
     if (append || !this.historyExtended) this.historyAfter = value.after;
     if (append) this.historyExtended = true;
-    const carries = (await sourceCarries(this.context.reservation.scope)).flatMap(carry => carry.kind === 'offered' || carry.kind === 'applied' ? [{ requestId: carry.requestId, kind: carry.kind, target: carry.target }] : []);
+    const carries = await sourceCarries(this.context.reservation.scope);
     this.update({ recovery: { kind: 'chat', pending, history: [...this.requestHistory.values()], after: this.historyAfter, carries } });
+  }
+  async retryAssignedCreation(): Promise<void> {
+    if (this.context.role !== 'chat' || !this.snapshot.canRetryCreation || !this.context.reservation.creationAgentId) return;
+    this.update({ canRetryCreation: false }); this.childRefusalReported = false;
+    await this.controller.createReserved(this.context.reservation.scope, this.context.reservation.creationAgentId);
+    void this.drive();
   }
   async loadMoreRequests(): Promise<void> {
     if (!this.historyAfter) return;
@@ -387,9 +440,12 @@ export class WindowRuntime {
   async retryIntent(intent: NativePlacementIntent): Promise<void> {
     try {
       if (intent.action.carry) {
-        const binding = this.childOwner?.editorBinding();
-        if (!binding || this.context.role !== 'chat' || !sameScope(intent.sourceScope, binding.scope)) throw new Error('The original source editor must retry this carry.');
-        await retryDraftCarry(intent.sourceScope, intent.requestId, binding.viewId, binding.writerGeneration);
+        const carry = (await sourceCarries(intent.sourceScope)).find(carry => carry.requestId === intent.requestId);
+        if (carry?.kind === 'refused') {
+          const binding = this.childOwner?.editorBinding();
+          if (!binding || this.context.role !== 'chat' || !sameScope(intent.sourceScope, binding.scope)) throw new Error('The original source editor must retry this carry.');
+          await retryDraftCarry(intent.sourceScope, intent.requestId, binding.viewId, binding.writerGeneration);
+        }
       }
       await this.port?.request({ kind: 'retry-intent', requestId: intent.requestId }); this.recoveryDirty = true; await this.refreshRecovery();
     }
@@ -400,13 +456,21 @@ export class WindowRuntime {
     const carry = (await sourceCarries(this.context.reservation.scope)).find(carry => carry.requestId === requestId);
     if (carry?.kind === 'offered') await refuseDraftCarry(carry);
   }
-  async keepDraft(requestId: string): Promise<void> {
-    if (this.context.role !== 'chat') return;
+  async keepDraft(requestId: string, source?: ConversationScope): Promise<void> {
+    const scope = this.context.role === 'chat' ? this.context.reservation.scope : source; if (!scope) return;
     try {
-      const carry = (await sourceCarries(this.context.reservation.scope)).find(carry => carry.requestId === requestId);
+      const carry = (await sourceCarries(scope)).find(carry => carry.requestId === requestId);
       const kept = carry ? await cancelDraftCarry(carry) : false;
       await this.refreshRecovery(); this.update({ placementNotice: kept ? 'The draft stays in this chat. No queued send or image was moved.' : 'The draft transfer already completed. Its text is available in the destination chat.' });
     } catch (error) { this.update({ placementNotice: String(error) }); }
+  }
+  async moreSavedTransfers(): Promise<void> {
+    if (this.snapshot.recovery.kind !== 'main' || !this.snapshot.recovery.carriesAfter) return;
+    this.carryRecoveryAfter = this.snapshot.recovery.carriesAfter; await this.refreshRecovery();
+  }
+  async removeSavedCarry(carry: DraftCarry): Promise<void> {
+    try { await removeRetainedCarry(carry); await this.refreshRecovery(); }
+    catch (error) { this.update({ placementNotice: String(error) }); }
   }
   async resumeWindow(reservation: NativeReservation, inline = false): Promise<void> {
     if (!this.port || this.context.role !== 'main' || this.processing || this.controller.getSnapshot().busy) { this.update({ placementNotice: 'Finish the current operation, then retry this saved chat.' }); return; }
@@ -440,10 +504,18 @@ export class WindowRuntime {
       this.update({ placementNotice: result.kind === 'pending' || result.kind === 'refused' ? result.reason : null });
       await this.controller.refreshCatalog(); await this.refreshRecovery();
     } catch (error) { this.update({ placementNotice: error instanceof Error ? error.message : String(error) }); }
-    finally { this.processing = false; }
+    finally { this.processing = false; if (this.catalogDirty || this.recoveryDirty) queueMicrotask(() => { void this.drive(); }); }
   }
   private async syncDraftCarries(): Promise<void> {
-    const active = this.controller.getSnapshot().active;
+    const state = this.controller.getSnapshot(), active = state.active;
+    if (this.context.role === 'main' && state.host.kind === 'ready') {
+      try {
+        const page = await hostCarries(state.host.metadata.hostId, this.carrySettlementAfter); this.carrySettlementAfter = page.after;
+        for (const carry of page.carries) if (carry.kind === 'applied') {
+          try { await this.controller.settleCarriedDraft(carry); } catch { this.update({ placementNotice: 'Some saved transfer text needs recovery. Its original records are preserved.' }); }
+        }
+      } catch { this.update({ placementNotice: 'Saved draft transfer history could not be read. Original drafts are preserved.' }); }
+    }
     if (!active) return;
     for (const carry of await targetCarries(active.scope)) {
       if (!carry.target) continue;
@@ -452,7 +524,7 @@ export class WindowRuntime {
       let outcome: 'committed' | 'changed' | 'cancelled' = 'changed';
       for (let attempt = 0; attempt < 3 && outcome === 'changed'; attempt++) {
         const current = await active.store.captureDraft(), text = carry.expected.text;
-        if (carry.emptyOnly && current.text && current.text !== text) { await refuseDraftCarry(carry); outcome = 'cancelled'; break; }
+        if (carry.emptyOnly && current.text) { await refuseDraftCarry(carry); outcome = 'cancelled'; break; }
         const merged = carriedDraftText(text, current.text);
         outcome = await active.store.transferDraft(current, merged, { kind: 'receive', source: carry.source, requestId: carry.requestId });
       }

@@ -1,10 +1,12 @@
 import { parseUiClientSnapshot, parseUiContext, parseApplyReceipt } from '@openpane/contracts';
 import type { ConversationScope, DeliveryEnvelope, NativePlacementTarget, PlacementTransition, UiClientSnapshot, UiContextV1, WindowContext } from '@openpane/contracts';
 import { count, record } from '@openpane/contracts/decode';
-import { parseUiRecovery, reserveRecovery, UI_RECOVERY_KEY } from './ui-recovery.js';
-import type { UiRecovery } from './ui-recovery.js';
+import { parseUiRecovery, reserveRecovery, sameRecoveryOriginator, UI_RECOVERY_KEY } from './ui-recovery.js';
+import type { UiRecovery, RecoveryOriginator } from './ui-recovery.js';
 import { DisplayClient, NO_DISPLAY } from './display-client.js';
 import type { DisplayView } from './display-client.js';
+
+const sameDelivery = (a: UiClientSnapshot, b: UiClientSnapshot): boolean => a.selection.deliveryGeneration === b.selection.deliveryGeneration && a.selection.revision === b.selection.revision && a.bundle?.digest === b.bundle?.digest;
 
 class UiServiceError extends Error { constructor(readonly code: string, message: string) { super(message); } }
 
@@ -28,11 +30,13 @@ export interface UiConnectionSnapshot {
   readonly state: UiClientSnapshot | null;
   readonly diagnostic: string | null;
   readonly localBuiltin: boolean;
+  readonly deliveryContext: string | null;
+  readonly validatedGeneration: number | null;
   readonly confirmedGeneration: number | null;
   readonly cards: DisplayView;
 }
 export class UiConnection {
-  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, confirmedGeneration: null, cards: NO_DISPLAY };
+  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, deliveryContext: null, validatedGeneration: null, confirmedGeneration: null, cards: NO_DISPLAY };
   private readonly cards = new DisplayClient();
   private relayPaging = false;
   private readonly listeners = new Set<() => void>();
@@ -47,6 +51,7 @@ export class UiConnection {
   private recovery: UiRecovery | null = null;
   private lastContext: UiContextV1 | null = null;
   private recoveryFloor: number | null = null;
+  private restorationRequests = 0;
   constructor(private readonly relay: NativeUiRelayPort = noChildUiRelay,
     private readonly identify?: (context: UiContextV1) => Promise<WindowContext>, private readonly nativePlacement = false) {
     try {
@@ -92,21 +97,22 @@ export class UiConnection {
           if (!this.window || this.window.hostId !== this.context.hostId || this.window.profileId !== this.context.profileId) {
           this.window = this.identify ? await this.identify(this.context) : { role: 'main', profileId: this.context.profileId, hostId: this.context.hostId,
             brokerInstance: `browser:${crypto.randomUUID()}`, label: 'browser', documentIncarnation: crypto.randomUUID(), viewId: crypto.randomUUID() };
-          this.sequence = 0;
+          this.sequence = 0; this.painted = null; this.confirmed = null; this.failure = null;
+          this.update({ state: null, deliveryContext: JSON.stringify(this.window), validatedGeneration: null, confirmedGeneration: null });
           }
         }
         if (this.recovery?.kind === 'reserved') await this.finishRecovery();
         const state = parseUiClientSnapshot(await this.post({ op: 'state', context: this.window, presenceSequence: await this.nextPresenceSequence(),
           visible: document.visibilityState === 'visible', nativePlacement: this.nativePlacement, display: this.cards.subscription(), after: this.snapshot.state?.change ?? null, waitMs: this.cards.needsPaging() || this.relayPaging ? 50 : 2000 }));
         if (this.context) this.lastContext = { ...this.context, revision: state.selection.revision, selection: state.selection };
-        if (!this.recovery && (state.selection.selected.kind === 'builtin' || this.recoveryFloor !== null && state.selection.deliveryGeneration >= this.recoveryFloor)) this.update({ localBuiltin: false });
+        if (!this.recovery && this.restorationRequests === 0 && (state.selection.selected.kind === 'builtin' || this.recoveryFloor !== null && state.selection.deliveryGeneration >= this.recoveryFloor)) this.update({ localBuiltin: false });
         const recoveryNotice = this.recovery?.kind === 'conflicted' ? this.recovery.reason : this.recovery?.kind === 'needs-context' ? 'Builtin appearance is local. Retry restore when connected to save it.' : null;
         this.cards.accept(state.display);
         this.update({ state, cards: this.cards.getSnapshot(), diagnostic: state.fault ?? recoveryNotice });
         this.relayPaging = await this.relay.publish(state, this.window, request => this.post(request));
-        if (this.failure && this.failure.state.selection.deliveryGeneration !== state.selection.deliveryGeneration) this.failure = null;
+        if (this.failure && !sameDelivery(this.failure.state, state)) this.failure = null;
         if (this.failure && document.visibilityState === 'visible') await this.reportFailure().catch(() => {});
-        if (this.painted?.selection.deliveryGeneration === state.selection.deliveryGeneration && document.visibilityState === 'visible' && !this.snapshot.localBuiltin) await this.reportPaint(state).catch(() => {});
+        if (this.painted && sameDelivery(this.painted, state) && document.visibilityState === 'visible' && !this.snapshot.localBuiltin) await this.reportPaint(state).catch(() => {});
         delay = 300;
       } catch (error) {
         if (this.abort.signal.aborted) return;
@@ -141,15 +147,18 @@ export class UiConnection {
   async rendered(state: UiClientSnapshot): Promise<void> {
     if (!this.window || this.snapshot.localBuiltin && state.selection.selected.kind !== 'builtin') return;
     this.painted = state;
+    this.update({ validatedGeneration: state.selection.deliveryGeneration });
     await this.reportPaint(state);
   }
   private async reportPaint(state: UiClientSnapshot): Promise<void> {
     if (!this.window) return;
-    const key = `${this.window.documentIncarnation}:${state.selection.deliveryGeneration}`;
+    const owner = this.window;
+    const key = JSON.stringify([owner, state.selection, state.bundle?.digest, state.envelope?.requestId]);
     if (this.confirmed === key) return;
     await this.post({ op: 'paint', session: this.window.documentIncarnation, deliveryGeneration: state.selection.deliveryGeneration,
       selectionRevision: state.selection.revision, digest: state.bundle?.digest ?? null });
     if (state.envelope) await this.ack(state.envelope, { kind: 'rendered' });
+    if (this.window !== owner || !this.snapshot.state || !sameDelivery(this.snapshot.state, state)) return;
     this.confirmed = key; this.update({ confirmedGeneration: state.selection.deliveryGeneration });
   }
   async failed(state: UiClientSnapshot, reason: string): Promise<void> {
@@ -173,20 +182,28 @@ export class UiConnection {
     try { if (value) localStorage.setItem(UI_RECOVERY_KEY, JSON.stringify(value)); else localStorage.removeItem(UI_RECOVERY_KEY); }
     catch { this.update({ diagnostic: 'Builtin appearance is active locally; recovery could not be saved across reloads.' }); }
   }
-  async restore(): Promise<void> {
+  async restore(): Promise<void> { await this.requestRecovery({ kind: 'browser' }); }
+  protected async requestRecovery(originator: RecoveryOriginator): Promise<boolean> {
+    this.restorationRequests++;
     this.update({ localBuiltin: true, diagnostic: 'OpenPane appearance is active locally. Saving builtin selection…' });
     try {
+      if (this.recovery?.kind === 'reserved' && !sameRecoveryOriginator(this.recovery.originator, originator)) await this.finishRecovery();
+      if (originator.kind === 'native' && this.recovery?.kind === 'conflicted' && sameRecoveryOriginator(this.recovery.originator, originator)) return true;
       if (this.recovery?.kind !== 'reserved') {
         this.saveRecovery({ version: 1, kind: 'needs-context' });
         let context: UiContextV1;
         try { context = parseUiContext(await this.post({ op: 'context' })); this.lastContext = context; }
         catch (error) { if (!this.lastContext) throw error; context = this.lastContext; }
-        this.saveRecovery(reserveRecovery(context));
+        this.saveRecovery(reserveRecovery(context, originator));
       }
       await this.finishRecovery();
-    } catch (error) { this.update({ diagnostic: `${error instanceof Error ? error.message : 'Host unavailable'}. Builtin appearance is local; retry restore to reconcile.` }); }
+      return true;
+    } catch (error) {
+      this.update({ diagnostic: `${error instanceof Error ? error.message : 'Host unavailable'}. Builtin appearance is local; retry restore to reconcile.` });
+      return this.recovery !== null && this.recovery.kind !== 'needs-context' && sameRecoveryOriginator(this.recovery.originator, originator);
+    } finally { this.restorationRequests--; }
   }
-  protected async recovered(): Promise<void> {}
+  protected async recovered(_originator: RecoveryOriginator): Promise<void> {}
   private async finishRecovery(): Promise<void> {
     const recovery = this.recovery;
     if (recovery?.kind !== 'reserved') return;
@@ -194,7 +211,7 @@ export class UiConnection {
       if (this.context && (this.context.hostId !== recovery.hostId || this.context.profileId !== recovery.profileId)) throw new UiServiceError('conflict', 'Appearance recovery belongs to a previous host profile');
       const result = record(await this.post(recovery.request), ['receipt', 'outcome']), receipt = parseApplyReceipt(result.receipt);
       if (receipt.requestId !== recovery.request.requestId || receipt.digest !== null) throw new Error('Invalid builtin recovery receipt');
-      if (this.recovery === recovery) { this.recoveryFloor = receipt.deliveryGeneration; await this.recovered(); this.saveRecovery(null); }
+      if (this.recovery === recovery) { this.recoveryFloor = receipt.deliveryGeneration; await this.recovered(recovery.originator); if (this.recovery === recovery) this.saveRecovery(null); }
     } catch (error) {
       if (this.recovery === recovery && error instanceof UiServiceError && ['stale-revision', 'expired', 'conflict', 'invalid-input'].includes(error.code)) {
         this.saveRecovery({ ...recovery, kind: 'conflicted', reason: `${error.message.slice(0, 800)}. Retry restore to confirm the current generation.` });

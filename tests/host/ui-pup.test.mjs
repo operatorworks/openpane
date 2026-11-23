@@ -131,3 +131,20 @@ test('grouped metrics retain their distinct scopes beside the metric display nam
   assert.deepEqual(normalize(raw).series.map(series=>series.label),['system.cpu.user {host:a}','system.cpu.user {host:b}']);
   assert.deepEqual(normalize(raw).series.map(series=>series.points),[source.series[0].pointlist,source.series[0].pointlist]);
 });
+
+for (const exitCode of [0, 7]) test(`ordinary pup exit ${exitCode} drains a helper with closed streams`, { timeout: 10000 }, async t => {
+  const f = await executable(t, `const {spawn}=require('node:child_process'); const fs=require('node:fs');
+    const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
+    fs.writeFileSync(process.argv[2],String(child.pid)); process.stdout.write('{}'); process.exit(${exitCode});`);
+  const ready = join(f.directory, 'helper'); let pid;
+  t.after(() => { if (pid) try { process.kill(pid, 'SIGKILL'); } catch {} });
+  const result = await runPup(f.path, [ready], { signal: new AbortController().signal });
+  pid = Number(await readFile(ready, 'utf8'));
+  assert.equal(result.kind, exitCode === 0 ? 'completed' : 'failed');
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; throw error; }
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.fail('Pup helper survived a completed query attempt');
+});

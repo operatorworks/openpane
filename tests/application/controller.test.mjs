@@ -1708,3 +1708,48 @@ test('a navigation failure after durable pending creation reports its same reser
   await restored.app.start(); await restored.app.recoverCreation();
   assert.deepEqual(restored.created, [result.scope]); assert.deepEqual(restored.app.getSnapshot().active.scope, result.scope); assert.equal(restored.app.getSnapshot().saved.pendingCreation, null);
 });
+
+test('placement refusal remains within the native result contract when its source error is long', async t => {
+  const { parseConversationOpenResult } = await import('@openpane/contracts');
+  const f = fixture({ placement: { async acquire() { throw new Error('x'.repeat(1500)); } } }); t.after(() => f.app.dispose());
+  await f.app.start(); const result = await f.app.open(scope);
+  assert.equal(result.kind, 'refused'); assert.equal(result.reason.length, 1000); assert.deepEqual(parseConversationOpenResult(result), result);
+});
+
+test('a refused handoff restores the still-owned source editor with its exact saved draft', async t => {
+  let moving = false;
+  const f = fixture({ placement: { async acquire(_request, owner) {
+    if (moving) { await owner.quiesce(); return { kind: 'refused', reason: 'Destination changed before commit' }; }
+    return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+  } } });
+  t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), route: scope }); await f.app.start();
+  await f.app.getSnapshot().active.store.setDraft('Survive refused handoff'); moving = true;
+  const result = await f.app.openReserved(scope), active = f.app.getSnapshot().active;
+  assert.equal(result.kind, 'refused'); assert.deepEqual(active.scope, scope); assert.equal(active.store.getSnapshot().draft, 'Survive refused handoff');
+  assert.equal(f.app.getSnapshot().storageFailure, ''); assert.deepEqual(f.submitted, []);
+  await active.store.setDraft('Still writable after refusal'); assert.equal(f.drafts.get('original-view/host/conversation').draft, 'Still writable after refusal');
+});
+
+test('a recovery lease acquired after disposal closes without losing the original saved draft', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); await f.app.start();
+  const earlier = { hostId: 'host', conversationId: 'late-source' }; f.storage.locate = async () => 'late-source-view';
+  f.drafts.set('late-source-view/host/late-source', { version: 3, scope: earlier, draft: 'Original closed text', draftRevision: 1, frontendSends: [], outbox: [], image: null });
+  const entered = Promise.withResolvers(), release = Promise.withResolvers();
+  f.behavior.reopen = async () => { entered.resolve(); await release.promise; };
+  const acquiring = f.app.capturePlacementDraft(earlier); await entered.promise; const closing = f.app.dispose(); release.resolve();
+  await closing; assert.equal(await acquiring, null);
+  assert.equal(f.leases.find(lease => lease.viewId === 'late-source-view').closed, true);
+  assert.equal(f.drafts.get('late-source-view/host/late-source').draft, 'Original closed text'); assert.deepEqual(f.submitted, []);
+});
+
+test('an inline editor acquired after disposal is released instead of stranding its lease', async t => {
+  const entered = Promise.withResolvers(), release = Promise.withResolvers(); let moving = false, acquired;
+  const f = fixture({ placement: { async acquire(_request, owner) {
+    if (!moving) return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+    entered.resolve(); await release.promise; acquired = await f.storage.reopen('late-inline-view', () => {});
+    return { kind: 'inline', view: { kind: 'acquired', storage: acquired } };
+  } } });
+  t.after(() => f.app.dispose()); await f.app.start(); moving = true;
+  const opening = f.app.openReserved(scope); await entered.promise; await f.app.dispose(); release.resolve(); await opening;
+  assert.equal(acquired.closed, true); assert.deepEqual(f.submitted, []);
+});

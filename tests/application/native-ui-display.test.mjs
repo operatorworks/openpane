@@ -61,10 +61,14 @@ test('child placement notices retain the exact durable request ID and pending re
 });
 
 
-test('a failed window save cancels the native quit before offering explicit recovery',async()=>{
-  const {WindowRuntime}=await import('../../apps/desktop/dist/application/window-runtime.js');const commands=[];
-  const runtime=Object.create(WindowRuntime.prototype);Object.assign(runtime,{closed:false,controller:{async dispose(){throw new Error('Storage write failed');}},port:{async request(command){commands.push(command.kind);}},snapshot:{placementNotice:null},listeners:new Set()});
-  await runtime.closeWindow();assert.deepEqual(commands,['close-cancelled']);assert.match(runtime.snapshot.placementNotice,/Copy any unsaved text/);assert.match(runtime.snapshot.placementNotice,/Recovery menu/);
+test('cleanup failure after successful save reopens the saved editor after cancelling native close', async t => {
+  const { WindowRuntime } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  const commands = [], originalWindow = globalThis.window; let reloaded = 0;
+  globalThis.window = { location: { reload() { reloaded++; } } }; t.after(() => { globalThis.window = originalWindow; });
+  const runtime = Object.create(WindowRuntime.prototype);
+  Object.assign(runtime, { closed: false, controller: { async prepareClose() {}, async dispose() { throw new Error('Cleanup failed after save'); } },
+    port: { async request(command) { commands.push(command.kind); } }, snapshot: { closing: false, placementNotice: null }, listeners: new Set() });
+  await runtime.closeWindow(); assert.deepEqual(commands, ['close-cancelled']); assert.equal(reloaded, 1); assert.match(runtime.snapshot.placementNotice, /saved editor is reopening/);
 });
 
 test('a native child retries an unconfirmed card cursor when the cached page is unchanged', async t => {
@@ -123,7 +127,7 @@ test('a second explicit native restore arriving during the first save is process
   const { WindowRuntime, MainUiConnection } = await import('../../apps/desktop/dist/application/window-runtime.js');
   let sequence = 1, pending = true, release; const first = new Promise(resolve => { release = resolve; }), calls = [];
   const ui = Object.create(MainUiConnection.prototype);
-  ui.restoreNative = async current => { calls.push(current); if (current === 1) await first; if (current === sequence) pending = false; };
+  ui.restoreNative = async current => { calls.push(current); if (current === 1) await first; if (current === sequence) pending = false; return true; };
   const runtime = Object.create(WindowRuntime.prototype);
   Object.assign(runtime, { context: { role: 'main' }, ui, port: { async request() { return { pending, sequence }; } }, nativeRecoverySeen: null, nativeRecoveryTask: null, snapshot: {}, listeners: new Set() });
   const firstWake = runtime.recoveryWake(); await wait(() => calls.length === 1);
@@ -134,10 +138,10 @@ test('a second explicit native restore arriving during the first save is process
 test('a wake that first sees a newer native sequence queues behind a manual restore already saving', async t => {
   const { WindowRuntime, MainUiConnection } = await import('../../apps/desktop/dist/application/window-runtime.js');
   const { UiConnection } = await import('../../apps/desktop/dist/application/ui-connection.js');
-  const original = UiConnection.prototype.restore; let sequence = 0, pending = false, release; const gate = new Promise(resolve => { release = resolve; }), calls = [];
-  UiConnection.prototype.restore = async function() { calls.push(this.recoverySequence); if (calls.length === 1) await gate; await this.recovered(); };
-  t.after(() => { release(); UiConnection.prototype.restore = original; });
-  const port = { context: { liveRelay: true, role: 'main' }, async request(command) {
+  const original = UiConnection.prototype.requestRecovery; let sequence = 0, pending = false, release; const gate = new Promise(resolve => { release = resolve; }), calls = [];
+  UiConnection.prototype.requestRecovery = async function(originator) { calls.push(originator.sequence); if (calls.length === 1) await gate; await this.recovered(originator); return true; };
+  t.after(() => { release(); UiConnection.prototype.requestRecovery = original; });
+  const port = { context: { liveRelay: true, role: 'main', brokerInstance: 'broker' }, async request(command) {
     if (command.kind === 'restore-builtin') { pending = true; return { sequence: ++sequence }; }
     if (command.kind === 'read-recovery') return { pending, sequence };
     if (command.kind === 'confirm-recovery') { if (sequence === command.sequence) pending = false; return {}; }
@@ -181,4 +185,81 @@ test('a late ready lookup cannot clear a newer main placement or its notice', as
   const newer = { ...scope, conversationId: 'newer' }; await f.app.open(newer); runtime.snapshot.placementNotice = 'Waiting for newer';
   const expected = f.app.getSnapshot().lastPlacement; release(); await refreshing;
   assert.equal(f.app.getSnapshot().lastPlacement, expected); assert.equal(runtime.snapshot.placementNotice, 'Waiting for newer');
+});
+
+test('main reconciles a native restore already pending before its wake listener is installed', async () => {
+  const { WindowRuntime, MainUiConnection } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  let install, reads = 0, pending = true; const installed = new Promise(resolve => { install = resolve; }), restored = [];
+  const ui = Object.create(MainUiConnection.prototype);
+  Object.assign(ui, { subscribe() { return () => {}; }, start() {}, getSnapshot: () => ({ state: {}, diagnostic: null }), async restoreNative(sequence) { restored.push(sequence); pending = false; return true; } });
+  const runtime = Object.create(WindowRuntime.prototype);
+  Object.assign(runtime, { context: { role: 'main' }, started: false, closed: false, cleanups: [], recoveryDirty: false, nativeRecoverySeen: null, nativeRecoveryTask: null,
+    configurePlacementTracking() {}, uiChanged() {}, async drive() {}, ui, controller: { subscribe() { return () => {}; }, async start() {}, getSnapshot: () => ({ lastPlacement: null }) },
+    port: { async listen(event) { if (event === 'openpane-ui-wakeup') await installed; return () => {}; }, async request(command) { assert.equal(command.kind, 'read-recovery'); reads++; return { pending, sequence: 3 }; } } });
+  runtime.start(); await new Promise(resolve => setImmediate(resolve)); assert.equal(reads, 0);
+  install(); await wait(() => restored.length === 1);
+  assert.deepEqual(restored, [3]); assert.equal(pending, false); assert.equal(reads, 2);
+});
+
+for (const fails of [false, true]) test(`native close drains the latest draft before disposal (write fails ${fails})`, async t => {
+  const { WindowRuntime } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  const { fixture } = await import('./controller-fixture.mjs');
+  const f = fixture(); t.after(() => f.app.dispose());
+  f.views.set('original-view/host', { version: 2, route: scope, pendingCreation: null }); await f.app.start();
+  const active = f.app.getSnapshot().active; await active.store.setDraft('Earlier saved text');
+  let release, entered; const gate = new Promise(resolve => { release = resolve; }), saving = new Promise(resolve => { entered = resolve; });
+  f.behavior.write = async () => { entered(); await gate; if (fails) throw new Error('Latest draft could not be saved'); };
+  const writing = active.store.setDraft('Latest unsent edit').catch(error => error.message); await saving;
+  const commands = [], runtime = Object.create(WindowRuntime.prototype);
+  Object.assign(runtime, { closed: false, controller: f.app, port: { async request(command) { commands.push(command.kind); } }, snapshot: { closing: false, placementNotice: null }, listeners: new Set() });
+  const closing = runtime.closeWindow(); await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(commands, []);
+  release(); await Promise.all([writing, closing]);
+  assert.deepEqual(commands, [fails ? 'close-cancelled' : 'close-ready']);
+  assert.equal(f.app.getSnapshot().active?.store ?? null, fails ? active.store : null);
+  assert.equal(f.drafts.get('original-view/host/chat').draft, fails ? 'Earlier saved text' : 'Latest unsent edit');
+  if (fails) assert.match(runtime.snapshot.placementNotice, /Copy any unsaved text/);
+});
+
+test('main does not publish mismatched child envelopes and omits its already-consumed card page', async () => {
+  const main = { ...context, role: 'main', label: 'main', documentIncarnation: 'main' }; delete main.scope;
+  const commands = [], subscription = { scope, subscriptionId: 'sub', cursor: null };
+  const relay = new NativeMainUiRelay({ async request(command) {
+    commands.push(command);
+    if (command.kind === 'drain-ui') return { children: [{ context, display: subscription, visible: true, presenceSequence: 1, placement: null }], reports: [], localBuiltin: false };
+    return { ok: true };
+  } });
+  const envelope = { requestId: '1:changed', deliveryGeneration: 1, selectionRevision: 1, digest: 'a'.repeat(64) };
+  assert.equal(await relay.publish(state(page(subscription, 1)), main, async () => ({ children: [{ incarnation: 'child', envelope, display: page(subscription, 1) }] })), true);
+  assert.equal(commands.some(command => command.kind === 'publish-ui'), false);
+  await relay.publish(state(page(subscription, 1)), main, async () => ({ children: [{ incarnation: 'child', envelope: null, display: page(subscription, 1) }] }));
+  const published = commands.find(command => command.kind === 'publish-ui');
+  assert.equal(published.snapshot.display, null); assert.deepEqual(published.children[0].display, page(subscription, 1));
+});
+
+test('a definitive assigned creation refusal settles main and exposes same-scope retry in its child', async () => {
+  const { WindowRuntime } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  const commands = [], reservation = { scope, viewId: 'view', label: 'chat', transitionId: 'transition', creationAgentId: 'agent', phase: 'failed', bindingRevision: 1, writerGeneration: 1 };
+  const runtime = Object.create(WindowRuntime.prototype);
+  let current = { busy: false, host: { kind: 'ready' }, storageFailure: '', active: null, saved: { pendingCreation: { scope, agentId: 'agent' } }, error: '' };
+  const retries = [];
+  Object.assign(runtime, { context: { role: 'chat', reservation }, closed: false, processing: false, childReady: false, childRefusalReported: false, recoveryDirty: false,
+    controller: { getSnapshot: () => current, async recoverCreation() { current = { ...current, saved: { pendingCreation: null }, error: 'Provider refused creation' }; }, async createReserved(scope, agent) { retries.push({ scope, agent }); } },
+    port: { async request(command) { commands.push(command); } }, snapshot: { canRetryCreation: false }, listeners: new Set(), async syncDraftCarries() {} });
+  await runtime.drive(); assert.equal(commands[0].kind, 'creation-refused'); assert.equal(commands.some(command => command.kind === 'ready'), false);
+  assert.equal(runtime.snapshot.canRetryCreation, true); runtime.drive = async () => {};
+  await runtime.retryAssignedCreation(); assert.deepEqual(retries, [{ scope, agent: 'agent' }]);
+  const pending = { kind: 'pending', scope, reason: 'Waiting for assigned editor' }; let settled;
+  const main = Object.create(WindowRuntime.prototype);
+  Object.assign(main, { context: { role: 'main' }, controller: { getSnapshot: () => ({ host: { kind: 'ready', metadata: { hostId: 'host' } }, lastPlacement: pending }), settlePlacement(expected, result) { assert.equal(expected, pending); settled = result; return true; } },
+    port: { async request(command) { return command.kind === 'reservations' ? [] : { kind: 'opening', reservation }; } }, snapshot: { recovery: { kind: 'none' } }, listeners: new Set() });
+  await main.refreshRecovery(); assert.equal(settled.kind, 'refused'); assert.match(settled.reason, /unsent draft is preserved/);
+});
+
+
+test('the last first-message check reads current native policy synchronously', () => {
+  const coordinator = new WindowCoordinator({ context: { role: 'main', liveRelay: true } });
+  assert.equal(coordinator.canAutomaticallySend(), true);
+  coordinator.setPresentation({ navigation: 'rail', chats: 'separate', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } });
+  assert.equal(coordinator.canAutomaticallySend(), false);
+  coordinator.setPresentation(null); assert.equal(coordinator.canAutomaticallySend(), true);
 });

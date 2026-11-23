@@ -50,7 +50,8 @@ export class NativeMainUiRelay implements NativeUiRelayPort {
       if (identity && (!expected || !sameScope(identity.scope, expected.scope) || identity.subscriptionId !== expected.subscriptionId)) throw new Error('Foreign native card delivery');
       return { incarnation, envelope: child.envelope === null ? null : parseDelivery(child.envelope), display };
     });
-    await this.port.request({ kind: 'publish-ui', snapshot, children: scoped });
+    if (scoped.some(child => child.envelope && (child.envelope.deliveryGeneration !== snapshot.selection.deliveryGeneration || child.envelope.selectionRevision !== snapshot.selection.revision || child.envelope.digest !== (snapshot.bundle?.digest ?? null)))) return true;
+    await this.port.request({ kind: 'publish-ui', snapshot: { ...snapshot, display: null }, children: scoped });
     this.previousChildren = live;
     if (!Array.isArray(drained.reports) || drained.reports.length > 64) throw new Error('Invalid child report queue');
     for (const value of drained.reports) {
@@ -87,7 +88,7 @@ export class NativeMainUiRelay implements NativeUiRelayPort {
 
 /** A child reads only its caller-checked native cache. Conversation traffic remains on its normal service connection. */
 export class ChildUiConnection implements UiTransport {
-  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, confirmedGeneration: null, cards: NO_DISPLAY };
+  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, deliveryContext: null, validatedGeneration: null, confirmedGeneration: null, cards: NO_DISPLAY };
   private readonly cards = new DisplayClient();
   private readonly listeners = new Set<() => void>();
   private readonly unlisten: (() => void)[] = [];
@@ -136,6 +137,7 @@ export class ChildUiConnection implements UiTransport {
           if (typeof value.localBuiltin !== 'boolean') throw new Error('Invalid native recovery state');
           if (value.context !== null) {
             const context = parseWindowContext(value.context);
+            this.update({ deliveryContext: JSON.stringify(context) });
             if (this.cards.profile(context.profileId, context.hostId)) await this.presence();
             if (context.role !== 'chat' || context.documentIncarnation !== this.port.context.documentIncarnation || context.viewId !== this.port.context.viewId) throw new Error('Native relay changed window identity');
           }
@@ -158,6 +160,7 @@ export class ChildUiConnection implements UiTransport {
   }
   async rendered(state: UiClientSnapshot): Promise<void> {
     this.painted = state;
+    this.update({ validatedGeneration: state.selection.deliveryGeneration });
     const key = `${state.selection.deliveryGeneration}:${state.envelope?.requestId ?? ''}`;
     if (this.confirmed === key) return;
     await this.report(state, null); this.confirmed = key; this.update({ confirmedGeneration: state.selection.deliveryGeneration });

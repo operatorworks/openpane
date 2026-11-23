@@ -46,3 +46,31 @@ test('profile changes drop old staged data and scope objects cannot mutate an in
   assert.notEqual(client.subscription().subscriptionId, previous.subscriptionId); assert.equal(client.accept(reply), false); assert.deepEqual(client.getSnapshot().publications, []);
   client.profile('other-profile', 'other-host'); assert.equal(client.subscription(), null); assert.equal(client.getSnapshot().kind, 'unavailable');
 });
+
+for (const samePage of [false, true]) test(`removed card identity remains immutable across changes (same page ${samePage})`, () => {
+  const client = new DisplayClient(); client.profile('profile', 'host'); client.select(a); const original = publication(a, 1);
+  client.accept(snapshot(client.subscription(), [original], live(20)));
+  const removal = { kind: 'removed', publicationId: original.publicationId, sequence: 21 }, changed = { kind: 'published', publication: { ...original, sequence: 22, digest: 'b'.repeat(64) } };
+  if (samePage) client.accept(changes(client.subscription(), [removal, changed], 22));
+  else { client.accept(changes(client.subscription(), [removal], 21)); client.accept(changes(client.subscription(), [changed], 22)); }
+  assert.equal(client.getSnapshot().kind, 'unavailable');
+  assert.equal(client.subscription().cursor.sequence, samePage ? 20 : 21);
+  assert.deepEqual(client.getSnapshot().publications, samePage ? [original] : []);
+});
+
+
+test('successful display compaction retires old identity history without exhausting an open reader', () => {
+  const client = new DisplayClient(); client.profile('profile', 'host'); client.select(a); let sequence = 0;
+  client.accept(snapshot(client.subscription(), [], { kind: 'live', epoch: 1, sequence }, 'first', sequence));
+  for (let epoch = 1; epoch <= 9; epoch++) {
+    for (let n = 0; n < 512; n++) {
+      const card = publication(a, ++sequence);
+      const published = changes(client.subscription(), [{ kind: 'published', publication: card }], sequence); published.page.next.epoch = epoch; client.accept(published);
+      assert.equal(client.getSnapshot().kind, 'ready');
+      const removed = changes(client.subscription(), [{ kind: 'removed', publicationId: card.publicationId, sequence: ++sequence }], sequence); removed.page.next.epoch = epoch; client.accept(removed);
+    }
+    const current = client.subscription(); client.accept({ kind: 'page', page: { kind: 'reset', scope: a, subscriptionId: current.subscriptionId, from: current.cursor } });
+    client.accept(snapshot(client.subscription(), [], { kind: 'live', epoch: epoch + 1, sequence }, `epoch-${epoch + 1}`, sequence));
+    assert.equal(client.getSnapshot().kind, 'ready'); assert.deepEqual(client.getSnapshot().publications, []);
+  }
+});

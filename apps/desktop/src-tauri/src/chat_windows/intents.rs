@@ -81,7 +81,9 @@ impl ChatWindows {
                         &request_id,
                         document.scope.as_ref(),
                     )?;
-                let _ = app.emit_to("main", "openpane-ui-wakeup", ());
+                if label != "main" {
+                    let _ = app.emit_to("main", "openpane-ui-wakeup", ());
+                }
                 if let Some((source_label, _)) = broker
                     .documents
                     .iter()

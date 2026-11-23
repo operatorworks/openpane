@@ -15,6 +15,8 @@ export class DisplayClient {
   private view: DisplayView = NO_DISPLAY;
   private stage: Stage | null = null;
   private backlog = false;
+  private identityEpoch: number | null = null;
+  private identities = new Map<string, { readonly sequence: number; readonly digest: string }>();
   getSnapshot(): DisplayView { return this.view; }
   subscription(): DisplaySubscription | null { return this.current; }
   needsPaging(): boolean { return this.current !== null && this.view.kind !== 'unavailable' && (this.backlog || this.current.cursor === null || this.current.cursor.kind === 'snapshot'); }
@@ -30,6 +32,7 @@ export class DisplayClient {
   private reset(scope: ConversationScope | null, retain: boolean): void {
     const publications = retain && this.view.kind !== 'none' ? this.view.publications : [];
     scope = scope === null ? null : { hostId: scope.hostId, conversationId: scope.conversationId };
+    if (!retain) { this.identities.clear(); this.identityEpoch = null; }
     this.selected = scope; this.stage = null; this.backlog = false;
     if (!scope) { this.current = null; this.view = NO_DISPLAY; return; }
     if (this.hostId !== null && scope.hostId !== this.hostId) {
@@ -48,6 +51,15 @@ export class DisplayClient {
     try {
       if (delivery.kind === 'unavailable') { this.view = { kind: 'unavailable', scope: current.scope, publications: existing, reason: delivery.reason }; return false; }
       const page = delivery.page;
+      const epoch = page.kind !== 'reset' && page.next.kind === 'live' ? page.next.epoch : null;
+      const rotated = epoch !== null && this.identityEpoch !== null && epoch !== this.identityEpoch;
+      const identities = rotated ? new Map(existing.map(publication => [publication.publicationId, { sequence: publication.sequence, digest: publication.digest }])) : new Map(this.identities);
+      const remember = (publication: DisplayPublication) => {
+        const known = identities.get(publication.publicationId);
+        if (known && (known.sequence !== publication.sequence || known.digest !== publication.digest)) throw new Error('An immutable display publication changed');
+        identities.set(publication.publicationId, { sequence: publication.sequence, digest: publication.digest });
+        if (identities.size > 4096 + (page.kind === 'snapshot' && page.next.kind === 'snapshot' ? 32 : 0)) throw new Error('Display identity history exceeds limits');
+      };
       if (page.kind === 'reset') {
         this.current = { ...current, cursor: null }; this.stage = null; this.backlog = false; this.view = { kind: 'loading', scope: current.scope, publications: existing };
       } else if (page.kind === 'snapshot') {
@@ -55,6 +67,7 @@ export class DisplayClient {
         const stage = this.stage;
         if (!stage || stage.id !== page.snapshotId || stage.highWater !== page.highWater) throw new Error('Display snapshot identity changed');
         for (const publication of page.publications) {
+          remember(publication);
           const old = stage.publications.get(publication.publicationId);
           if (old && (old.sequence !== publication.sequence || old.digest !== publication.digest)) throw new Error('Display snapshot publication changed');
           stage.publications.set(publication.publicationId, publication);
@@ -63,6 +76,7 @@ export class DisplayClient {
         if (page.next.kind === 'live') {
           const previous = new Map(existing.map(publication => [publication.publicationId, publication]));
           const publications = [...stage.publications.values()].sort((a, b) => a.sequence - b.sequence).map(publication => {
+            remember(publication);
             const old = previous.get(publication.publicationId);
             if (old && (old.sequence !== publication.sequence || old.digest !== publication.digest)) throw new Error('An immutable display publication changed');
             return old ?? publication;
@@ -77,6 +91,7 @@ export class DisplayClient {
         for (const change of page.changes) {
           if (change.kind === 'removed') publications.delete(change.publicationId);
           else {
+            remember(change.publication);
             const publication = change.publication, old = publications.get(publication.publicationId);
             if (old && (old.sequence !== publication.sequence || old.digest !== publication.digest)) throw new Error('An immutable display publication changed');
             publications.set(publication.publicationId, old ?? publication);
@@ -87,6 +102,7 @@ export class DisplayClient {
         this.current = { ...current, cursor: page.next };
         this.backlog = page.next.sequence < page.highWater;
       }
+      this.identities = identities; if (epoch !== null) this.identityEpoch = epoch;
     } catch {
       this.stage = null; this.view = { kind: 'unavailable', scope: current.scope, publications: existing, reason: 'Saved card identity changed. Reconnect after repairing the affected UI data.' };
     }

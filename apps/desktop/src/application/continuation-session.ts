@@ -36,6 +36,7 @@ interface ContinuationRecord<Owner extends ContinuationOwner> {
   /** Check again returned no view. A click zeroes this with the budgets; settling a view clears it. */
   checkFailed: boolean;
   stopped: boolean;
+  explicitCarry: boolean;
   placement: Extract<ConversationOpenResult, { readonly kind: 'pending' }> | null;
 }
 interface ContinuationPort<Owner extends ContinuationOwner> {
@@ -152,7 +153,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     }
     stop();
     const record: ContinuationRecord<Owner> = { owner, target, chain: [{ scope: target.scope, view: null }], arrived, earlier: [], action: null,
-      error: '', earlierError: '', timer: undefined, delay: CONTINUATION_POLL_MS, failures: 0, moves: 0, checkFailed: false, stopped: false, placement: null };
+      error: '', earlierError: '', timer: undefined, delay: CONTINUATION_POLL_MS, failures: 0, moves: 0, checkFailed: false, stopped: false, explicitCarry: false, placement: null };
     continuation = record;
     publishContinuation(record);
     void refreshContinuation(record);
@@ -175,7 +176,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
       for (let attempt = 0; attempt < 3; attempt++) {
         const destination = await next.store.captureDraft();
         if (port.owner() !== owner || port.active()?.store !== next.store) return;
-        if (onlyWhenEmpty && destination.text && !copiedDraftPresent(text, destination.text)) { await recoverText(); return; }
+        if (onlyWhenEmpty && destination.text) { await recoverText(); return; }
         const merged = copiedDraftPresent(text, destination.text) ? destination.text : carriedDraftText(text, destination.text);
         if (merged === destination.text || await next.store.replaceDraft(destination, merged)) { copied = true; break; }
       }
@@ -194,7 +195,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     }
     return undefined;
   }
-  async function moveToSuccessor(owner: Owner, record: ContinuationRecord<Owner>, successor: ConversationScope): Promise<void> {
+  async function moveToSuccessor(owner: Owner, record: ContinuationRecord<Owner>, successor: ConversationScope, explicit = record.explicitCarry): Promise<void> {
     if (!liveContinuation(record)) return;
     const from = record.target;
     record.action = 'move';
@@ -209,7 +210,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
         record.error = opened.kind === 'detached' ? 'Continuation opened in its own window.' : opened.reason;
         publishContinuation(record); return;
       }
-      await moveDraft(owner, from.scope);
+      await moveDraft(owner, from.scope, !explicit);
       await port.save(owner, { ...port.requireSaved(owner).saved, route: newest });
       const agent = from.agent;
       const fromAgent = 'kind' in agent && agent.providerAgentId !== null
@@ -240,6 +241,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     if (!record || !liveContinuation(record) || record.action || record.placement) return;
     clearTimeout(record.timer);
     record.action = action;
+    if (action === 'start') record.explicitCarry = true;
     record.error = '';
     record.delay = CONTINUATION_POLL_MS;
     record.failures = 0;
@@ -313,5 +315,9 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     record.error = result.kind === 'refused' ? result.reason : 'Continuation opened in its assigned editor.';
     publishContinuation(record); return true;
   }
-  return { stop, watch, newestSegment, moveDraft, act, readEarlier, settlePlacement };
+  function trackPlacement(result: ConversationOpenResult): void {
+    if (result.kind !== 'pending' || !result.scope || !continuation?.placement?.scope || !sameScope(continuation.placement.scope, result.scope)) return;
+    continuation.placement = result;
+  }
+  return { stop, watch, newestSegment, moveDraft, act, readEarlier, settlePlacement, trackPlacement };
 }

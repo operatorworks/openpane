@@ -30,7 +30,6 @@ function ReviewWorkspace(props: WorkspaceViewProps) {
     try {
       const result = await action();
       if (result?.kind === 'refused') setError(result.reason);
-      else if (result?.kind === 'pending') setNotice(result.reason);
       else if (result?.kind === 'detached') setNotice('Review opened in its own window.');
     } catch { setError('Could not open this review. Retry, or check the host status above.'); } finally { setBusy(false); }
   }

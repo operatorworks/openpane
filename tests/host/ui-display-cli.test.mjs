@@ -133,3 +133,12 @@ for (const group of [false, true]) test(`killing the packaged CLI ${group ? 'job
   assert.equal((await f.calls()).filter(call => call.args.includes('metrics')).length, 1);
   assert.deepEqual((await f.page()).body.value.publications, []);
 });
+
+
+test('an invalid credential-like DD_SITE is never retained in query metadata', { timeout: 15000 }, async t => {
+  const f = await fixture(t), publicationId = await f.id(), marker = 'PRIVATE_SITE_CREDENTIAL_MARKER';
+  const result = await f.cli(f.query(publicationId), '', { DD_SITE: `https://${marker}@bad.invalid/path` }).done;
+  assert.equal(result.code, 0, result.stderr); assert.doesNotMatch(result.stdout + result.stderr, new RegExp(marker));
+  const status = await f.status(publicationId); assert.equal(status.input.site, 'us3.datadoghq.com'); assert.equal(status.input.siteHint, 'configured');
+  assert.equal((await readFile(join(f.profile, 'ui.sqlite'))).includes(Buffer.from(marker)), false);
+});

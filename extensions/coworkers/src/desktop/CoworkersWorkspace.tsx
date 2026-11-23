@@ -115,7 +115,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
       if (waiting.current !== attempt) return;
       stopAwaiting();
       if (result.kind === 'inline') setNarrowPane('conversation');
-      else { setNarrowPane('list'); setNotice(result.kind === 'detached' ? 'Chat opened in its own window.' : result.reason); }
+      else { setNarrowPane('list'); setNotice(result.kind === 'detached' ? 'Chat opened in its own window.' : result.kind === 'refused' ? result.reason : ''); }
     }
     catch { if (waiting.current !== attempt) return; stopAwaiting(); setNotice('That chat could not be opened. Refresh the list and try again.'); }
     finally { if (inFlight.current === attempt) inFlight.current = null; }

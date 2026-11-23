@@ -100,3 +100,23 @@ for (const purpose of ['active', 'recovery']) test(`${purpose} readiness failure
   capture.release(); await flush();
   assert.equal(f.closes(), 1);
 });
+
+test('an explicit editor reopen retries its own loader after shared background recovery declines the view', async () => {
+  const pool = createViewLeasePool({ createStore() { throw new Error('No store requested'); }, failed() {} });
+  const entered = deferred(), release = deferred(); let editorLoads = 0, closed = 0;
+  const background = pool.open('reserved-view', async () => { entered.resolve(); await release.promise; return null; }, { interested: false });
+  await entered.promise;
+  const editor = pool.open('reserved-view', async () => { editorLoads++; return { viewId: 'reserved-view', close() { closed++; } }; }, { required: true });
+  release.resolve(); assert.equal(await background, null); const owned = await editor;
+  assert.equal(owned.storage.viewId, 'reserved-view'); assert.equal(editorLoads, 1);
+  owned.release(); await pool.dispose(); assert.equal(closed, 1);
+});
+
+test('disposal waits for an acquired physical owner to finish opening and release its locks', async () => {
+  const pool = createViewLeasePool({ createStore() { throw new Error('No store requested'); }, failed() {} });
+  const entered = deferred(), read = deferred(); let locked = false, finished = false, closed = 0;
+  const acquiring = pool.open('opening-view', async () => { locked = true; entered.resolve(); await read.promise; return { viewId: 'opening-view', close() { closed++; locked = false; } }; });
+  await entered.promise; const closing = pool.dispose(); void closing.then(() => { finished = true; });
+  await flush(); assert.equal(finished, false); assert.equal(locked, true);
+  read.resolve(); await closing; assert.equal(await acquiring, null); assert.equal(locked, false); assert.equal(closed, 1);
+});

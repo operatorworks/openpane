@@ -97,6 +97,9 @@ export class DisplayDatabase {
     if (!row) return null;
     const publication = parseDisplayPublication(JSON.parse(displayText(row.value)));
     if (!sameScope(publication.scope, scope) || publication.publicationId !== publicationId || publication.digest !== displayDigest(publication.event)) throw new Error('Stored display payload identity or digest mismatch');
+    const key = this.key(scope, publicationId);
+    const receipt = key?.mode === 'raw' && !key.removed ? key.receipt : key?.mode === 'query' && key.outcome.kind === 'published' ? key.outcome.receipt : null;
+    if (!receipt || canonicalJson(publicationReceipt(publication)) !== canonicalJson(receipt)) throw new Error('Stored display payload disagrees with its publication receipt');
     return publication;
   }
   removePublication(scope: ConversationScope, publicationId: string): number {

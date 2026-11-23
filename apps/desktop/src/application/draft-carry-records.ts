@@ -2,15 +2,15 @@ import { parseEditorBinding, parseScope, sameScope } from '@openpane/contracts';
 import type { ConversationScope } from '@openpane/contracts';
 import { count, identifier, record } from '@openpane/contracts/decode';
 import type { DraftTransferCommit, LocalRecords } from '@openpane/client';
-import { editorBindingKey } from './editor-bindings.js';
+import { editorBindingKey, editorViewKey } from './editor-bindings.js';
 
 interface CarryIdentity { readonly version: 1; readonly source: ConversationScope; readonly sourceViewId: string; readonly requestId: string; readonly emptyOnly?: true }
 export type DraftCarry = CarryIdentity & (
   | { readonly kind: 'offered'; readonly target: ConversationScope | null; readonly expected: { readonly text: string; readonly revision: number } }
   | { readonly kind: 'refused'; readonly target: ConversationScope | null; readonly expected: { readonly text: string; readonly revision: number } }
   | { readonly kind: 'applied'; readonly target: ConversationScope; readonly expected: { readonly text: string; readonly revision: number } }
-  | { readonly kind: 'cancelled'; readonly target: ConversationScope | null; readonly outcome: 'kept-at-source' }
-  | { readonly kind: 'settled'; readonly target: ConversationScope; readonly outcome: 'cleared' | 'changed' }
+  | { readonly kind: 'cancelled'; readonly target: ConversationScope | null; readonly outcome: 'kept-at-source'; readonly retainedText?: string }
+  | { readonly kind: 'settled'; readonly target: ConversationScope; readonly outcome: 'cleared' | 'changed'; readonly retainedText?: string }
 );
 export const carryKey = (source: ConversationScope, requestId: string): IDBValidKey => ['draft-carry', source.hostId, source.conversationId, requestId];
 export const carryTargetKey = (source: ConversationScope, requestId: string, target: ConversationScope): IDBValidKey => ['draft-carry-target', target.hostId, target.conversationId, source.hostId, source.conversationId, requestId];
@@ -19,11 +19,15 @@ export function parseCarry(value: unknown): DraftCarry {
   const input = record(value);
   const common = ['version', 'source', 'sourceViewId', 'requestId', 'kind', 'target'];
   if (Object.hasOwn(input, 'emptyOnly')) { common.push('emptyOnly'); if (input.emptyOnly !== true) throw new Error('Invalid empty-target carry'); }
+  if (Object.hasOwn(input, 'retainedText')) {
+    common.push('retainedText');
+    if (typeof input.retainedText !== 'string' || !input.retainedText || new TextEncoder().encode(input.retainedText).byteLength > 1024 * 1024 || input.kind !== 'settled' && input.kind !== 'cancelled') throw new Error('Invalid retained carry text');
+  }
   record(input, input.kind === 'settled' || input.kind === 'cancelled' ? [...common, 'outcome'] : [...common, 'expected']);
   if (input.version !== 1) throw new Error('Unsupported draft carry record');
   const source = parseScope(input.source), target = input.target === null ? null : parseScope(input.target);
   if (target && (target.hostId !== source.hostId || sameScope(target, source))) throw new Error('Invalid draft carry target');
-  const identity = { ...(input.emptyOnly === true ? { emptyOnly: true as const } : {}), version: 1, source, sourceViewId: identifier(input.sourceViewId, 200), requestId: identifier(input.requestId, 200) } satisfies CarryIdentity;
+  const identity = { ...(typeof input.retainedText === 'string' ? { retainedText: input.retainedText } : {}), ...(input.emptyOnly === true ? { emptyOnly: true as const } : {}), version: 1, source, sourceViewId: identifier(input.sourceViewId, 200), requestId: identifier(input.requestId, 200) } satisfies CarryIdentity;
   if (input.kind === 'cancelled') { if (input.outcome !== 'kept-at-source') throw new Error('Invalid cancelled carry'); return { ...identity, kind: 'cancelled', target, outcome: 'kept-at-source' }; }
   if (input.kind === 'settled') {
     if (!target || input.outcome !== 'cleared' && input.outcome !== 'changed') throw new Error('Invalid draft carry settlement');
@@ -76,6 +80,15 @@ function readBoundDraft(store: IDBObjectStore, target: ConversationScope, read: 
 export function commitCopiedDraft(store: IDBObjectStore, viewId: string, records: LocalRecords, transfer: Extract<DraftTransferCommit, { readonly outcome: 'copy-cleared' }>, result: (committed: boolean) => void, fail: (error: unknown) => void): void {
   if (sameScope(records.scope, transfer.target) || records.scope.hostId !== transfer.target.hostId || records.draft !== '') throw new Error('Invalid copied draft release');
   readBoundDraft(store, transfer.target, saved => {
+    if (!saved && viewId === transfer.targetViewId) {
+      const owner = store.get(editorViewKey(viewId)), target = store.get(['draft', viewId, transfer.target.hostId, transfer.target.conversationId]); let remaining = 2;
+      const read = () => { try {
+        if (owner.result !== undefined || !copiedDraftPresent(transfer.text, draftText(target.result, transfer.target))) { result(false); return; }
+        store.put(records, ['draft', viewId, records.scope.hostId, records.scope.conversationId]); result(true);
+      } catch (error) { fail(error); } };
+      for (const request of [owner, target]) request.onsuccess = () => { if (--remaining === 0) read(); };
+      return;
+    }
     if (!saved || saved.viewId !== transfer.targetViewId || !copiedDraftPresent(transfer.text, saved.text)) { result(false); return; }
     store.put(records, ['draft', viewId, records.scope.hostId, records.scope.conversationId]); result(true);
   }, fail);
@@ -108,9 +121,13 @@ export function commitCarriedDraft(store: IDBObjectStore, viewId: string, record
       if (carry.kind !== 'applied') { result(false); return; }
       if (!sameScope(carry.source, records.scope) || carry.sourceViewId !== viewId || transfer.outcome === 'cleared' && records.draft !== '') throw new Error('Draft transfer does not match its source');
       const settled: DraftCarry = { version: 1, kind: 'settled', source: carry.source, sourceViewId: carry.sourceViewId, requestId: carry.requestId, target: carry.target, outcome: transfer.outcome };
-      if (transfer.outcome === 'changed') { commit(settled); return; }
+      if (transfer.outcome === 'changed') { commit({ ...settled, retainedText: carry.expected.text }); return; }
       readBoundDraft(store, carry.target, saved => {
-        if (!saved || !copiedDraftPresent(carry.expected.text, saved.text)) { result(false); return; }
+        if (!saved || !copiedDraftPresent(carry.expected.text, saved.text)) {
+          store.put({ ...settled, outcome: 'changed', retainedText: carry.expected.text }, carryKey(carry.source, carry.requestId));
+          store.delete(carryTargetKey(carry.source, carry.requestId, carry.target));
+          result(false); return;
+        }
         commit(settled);
       }, fail);
     } catch (error) { fail(error); }

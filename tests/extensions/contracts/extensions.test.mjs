@@ -72,6 +72,8 @@ test('compatibility rejects undeclared targets and invalid exports before activa
   const valid = { ...entry, activate() { activations++; } };
   for (const [metadata, target, loaded, code] of [
     [{ ...manifest, sdkVersion: 'future' }, 'desktop', valid, 'sdk-version'],
+    [{ ...manifest, sdkVersion: '0.13.0' }, 'desktop', valid, 'sdk-version'],
+    [manifest, 'desktop', { ...valid, sdkVersion: '0.13.0' }, 'sdk-version'],
     [{ ...manifest, sdkVersion: '0.12.0' }, 'desktop', valid, 'sdk-version'],
     [manifest, 'desktop', { ...valid, sdkVersion: '0.12.0' }, 'sdk-version'],
     [{ ...manifest, sdkVersion: '0.9.0' }, 'desktop', valid, 'sdk-version'],

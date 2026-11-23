@@ -31,7 +31,7 @@ child.stderr.on('data', chunk => { stderrBytes += chunk.length; if (stderrBytes 
 child.stdout.on('error', () => stop('pup-failed')); child.stderr.on('error', () => stop('pup-failed'));
 child.once('error', () => { failure ??= 'pup-unavailable'; });
 child.once('close', (code, killedBy) => {
-  if (failure) signal('SIGKILL');
+  signal('SIGKILL');
   clearTimeout(deadline); clearTimeout(escalation); process.stdin.destroy();
   process.exitCode = failure ? failures[failure] : code === 0 && killedBy === null ? 0 : failures['pup-failed'];
 });

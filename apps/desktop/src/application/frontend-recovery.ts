@@ -1,7 +1,8 @@
 import type { ServiceMetadata } from '@openpane/contracts/service';
 import type { OwnedViewStorage } from './view-state.js';
+import { SupersededDraftsError } from './view-state.js';
 import type { FrontendSends } from './frontend-sends.js';
-import type { createViewLeasePool, ViewBorrow } from './view-leases.js';
+import type { createViewLeasePool, ViewBorrow, StoreBorrow } from './view-leases.js';
 
 interface RecoveryTarget {
   readonly pool: ReturnType<typeof createViewLeasePool>;
@@ -31,7 +32,9 @@ async function scanView(target: RecoveryTarget, signal: AbortSignal, valid: () =
     if (!valid()) return false;
     for (const scope of page.scopes) {
       if (!valid()) return false;
-      const borrow = await pool.recovery(lease, scope);
+      let borrow: StoreBorrow;
+      try { borrow = await pool.recovery(lease, scope); }
+      catch (error) { if (error instanceof SupersededDraftsError) continue; throw error; }
       try {
         const journal = borrow.store.frontendJournal;
         for (let index = 0; index < journal.read().length && valid(); index += 32) {

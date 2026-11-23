@@ -62,6 +62,9 @@ pub enum Command {
         binding: Binding,
         visible: bool,
     },
+    CreationRefused {
+        incarnation: String,
+    },
     #[serde(rename_all = "camelCase")]
     BindUi {
         incarnation: String,

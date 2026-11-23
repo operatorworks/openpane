@@ -422,7 +422,7 @@ for(const removed of [false,true])test(`inline continuation copies a whole phras
   assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft,removed?'':'note\n\nnotebook');assert.equal(f.drafts.get('original-view/host/conversation').draft,removed?'note':'');assert.deepEqual(f.submitted,[]);
 });
 
-test('restart after the destination copy commits resumes its predecessor route without duplicating the draft',async t=>{
+test('restart after a copy preserves both drafts until the user can review the saved predecessor',async t=>{
   const f=opened(fixture());f.storage.catalogViewId='original-view';t.after(()=>f.app.dispose());const successor=segment('successor');let started=false;
   const continuation=async input=>{if(input.action==='start')started=true;return input.scope.conversationId===scope.conversationId?{...none,closure:'cancelled',successor:started?{kind:'confirmed',scope:successor}:null}:none;};
   f.behavior.continuation=continuation;f.behavior.observation=async()=>({kind:'concluded',cause:'cancelled'});await f.app.start();await eventually(()=>Boolean(f.app.getSnapshot().continuation?.view));
@@ -433,7 +433,7 @@ test('restart after the destination copy commits resumes its predecessor route w
   try{
     await entered.promise;assert.equal(f.views.get('original-view/host').route.conversationId,'conversation');
     const restarted=fixture();restarted.storage.catalogViewId='original-view';t.after(()=>restarted.app.dispose());for(const[key,value]of f.views)restarted.views.set(key,structuredClone(value));for(const[key,value]of f.drafts)restarted.drafts.set(key,structuredClone(value));restarted.behavior.continuation=continuation;
-    await restarted.app.start();assert.equal(restarted.app.getSnapshot().active.scope.conversationId,'successor');assert.equal(restarted.app.getSnapshot().active.store.getSnapshot().draft,'note\n\nnotebook');assert.equal(restarted.drafts.get('original-view/host/conversation').draft,'');assert.deepEqual(restarted.submitted,[]);
+    await restarted.app.start();assert.equal(restarted.app.getSnapshot().active.scope.conversationId,'successor');assert.equal(restarted.app.getSnapshot().active.store.getSnapshot().draft,'note\n\nnotebook');assert.equal(restarted.drafts.get('original-view/host/conversation').draft,'note');assert.equal(restarted.app.getSnapshot().savedDraftRecovery.text,'note');assert.deepEqual(restarted.submitted,[]);
   }finally{release.resolve();await moving;}
 });
 

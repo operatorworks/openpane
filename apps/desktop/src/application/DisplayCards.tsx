@@ -13,7 +13,7 @@ export function useDisplayCards(scope: ConversationScope) {
     previous.current = null; unseen.current.clear(); announced.current = 0; setNewCount(0); setAnnouncement('');
     const scroll = root.current?.closest('.conversation-content');
     if (!(scroll instanceof HTMLElement)) return;
-    const track = () => { bottom.current = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 48; if (bottom.current) { unseen.current.clear(); setNewCount(0); } };
+    const track = () => { if (!scroll.getClientRects().length || !scroll.clientHeight) return; bottom.current = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 48; if (bottom.current) { unseen.current.clear(); setNewCount(0); } };
     track(); scroll.addEventListener('scroll', track, { passive: true });
     const resize = new ResizeObserver(track); resize.observe(scroll);
     return () => { scroll.removeEventListener('scroll', track); resize.disconnect(); };
@@ -29,8 +29,9 @@ export function useDisplayCards(scope: ConversationScope) {
     unseen.current = new Set([...unseen.current].filter(id => current.has(id)));
     const additions = [...current].filter(id => !known.has(id)), added = additions.length;
     if (!added) { setNewCount(unseen.current.size); return; }
-    if (bottom.current) {
-      const scroll = root.current?.closest('.conversation-content');
+    const visibleScroll = root.current?.closest('.conversation-content');
+    if (bottom.current && visibleScroll instanceof HTMLElement && visibleScroll.getClientRects().length && visibleScroll.clientHeight) {
+      const scroll = visibleScroll;
       if (scroll instanceof HTMLElement) scroll.scrollTop = scroll.scrollHeight;
       announced.current += added;
       setAnnouncement(`${added === 1 ? 'New card' : `${added} new cards`} added. ${announced.current} received in this chat.`);

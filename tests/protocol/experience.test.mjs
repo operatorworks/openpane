@@ -83,7 +83,10 @@ test('a rendered transition receipt names the exact child document that painted'
   const scope = { hostId: 'host', conversationId: 'chat' }, target = { scope, label: 'child', viewId: 'editor', nativeTransitionId: 'native', bindingRevision: 1 };
   const participant = { slot: { kind: 'transition', transitionId: 'transition', source, target, resolved: null }, visual: { kind: 'rendered' }, placement: { kind: 'ready', transitionId: 'transition', bindingRevision: 1 } };
   const receipt = { requestId: '1:11111111-1111-4111-8111-111111111111', deliveryGeneration: 1, selectionRevision: 1, digest: 'a'.repeat(64), requestDigest: 'b'.repeat(64), participants: [participant] };
-  assert.throws(() => parseApplyReceipt(receipt), /no painted document/);
+  assert.throws(() => parseApplyReceipt(receipt), /document/);
+  participant.visual = { kind: 'pending', reason: 'Waiting to paint' };
+  assert.throws(() => parseApplyReceipt(receipt), /document/);
+  participant.visual = { kind: 'rendered' };
   participant.slot.resolved = { ...source, role: 'chat', label: 'child', documentIncarnation: 'child-document', viewId: 'editor', scope };
   assert.equal(parseApplyReceipt(receipt).participants[0].visual.kind, 'rendered');
   participant.slot.target = null; participant.slot.resolved = null; participant.placement = { kind: 'unchanged' };

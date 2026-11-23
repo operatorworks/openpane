@@ -1,18 +1,14 @@
 import { initializeDraft } from './initial-draft.js';
 import { commitCarriedDraft, commitCopiedDraft } from './draft-carry-records.js';
 import type { ConversationScope, EditorBinding } from '@openpane/contracts';
-import { parseEditorBinding, parseScope, sameScope } from '@openpane/contracts';
+import { parseEditorBinding, parseScope, parseCommand, sameScope } from '@openpane/contracts';
 import { identifier, record } from '@openpane/contracts/decode';
 import type { DraftStoragePort } from '@openpane/client';
 
 import { activateEditor, conversationLock, editorBindingKey, editorViewKey, readEditorBinding, recoverEditor, transferEditor } from './editor-bindings.js';
 import type { EditorClaim, EditorRecoveryGrant, HandoffPlan } from './editor-bindings.js';
-import { decodeView } from './view-state.js';
+import { decodeView, SupersededDraftsError } from './view-state.js';
 import type { OwnedViewStorage, SavedDraftRecovery, SavedView, ViewStorageFactory } from './view-state.js';
-
-export class SupersededDraftsError extends Error {
-  constructor() { super('This conversation was reopened in a newer view.'); this.name = 'SupersededDrafts'; }
-}
 
 export function openViewDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -100,16 +96,32 @@ export class BrowserViewStorage implements OwnedViewStorage {
       if (!release) return null;
       const bound = await read(editorViewKey(viewId));
       const saved = decodeView(await read(['view', viewId, hostId]), hostId);
-      for (const scope of bound === undefined ? [selectedScope, saved.route ?? saved.pendingCreation?.scope] : [parseScope(bound)]) {
+      const keys = bound === undefined ? await new Promise<IDBValidKey[]>((resolve, reject) => {
+        const tx = db.transaction('records'), request = tx.objectStore('records').getAllKeys(IDBKeyRange.bound(['draft', viewId, hostId], ['draft', viewId, hostId, []], false, true), 1025);
+        tx.oncomplete = () => resolve(request.result); tx.onabort = () => reject(tx.error);
+      }) : [];
+      if (keys.length > 1024) throw new Error('This saved view has too many drafts for recovery. Its records are preserved.');
+      const scopes = bound === undefined ? keys.flatMap(key => Array.isArray(key) && typeof key[3] === 'string' ? [{ hostId, conversationId: key[3] }] : []) : [parseScope(bound)];
+      for (const scope of bound === undefined ? [selectedScope, saved.route ?? saved.pendingCreation?.scope, ...scopes] : scopes) {
         if (!scope) continue;
         if (scope.hostId !== hostId) throw new Error('Saved draft recovery belongs to another host');
         const binding = await readEditorBinding(db, scope);
-        if (!binding) continue;
         const value = await read(['draft', viewId, hostId, scope.conversationId]);
         if (value === undefined) continue;
         const draft = record(value);
         if (typeof draft.draft !== 'string' || !sameScope(parseScope(draft.scope), scope)) throw new Error('Unsupported saved draft. Its original records are preserved.');
-        return { kind: binding.viewId === viewId ? 'bound' : 'independent', viewId, scope, text: draft.draft };
+        const entries = Array.isArray(draft.outbox) ? draft.outbox.slice(0, 1024) : [], queuedTexts: string[] = [];
+        for (const value of entries) {
+          try { const entry = record(value), command = parseCommand(entry.command); if (sameScope(command.scope, scope) && command.body.kind === 'send') queuedTexts.push(command.body.text); } catch {}
+        }
+        let image: SavedDraftRecovery['image'];
+        try {
+          if (draft.image) {
+            const metadata = record(draft.image), selectionId = identifier(metadata.selectionId), bytes = await read(['draft-image', viewId, hostId, scope.conversationId, selectionId]);
+            if (bytes instanceof Uint8Array && bytes.byteLength <= 4 * 1024 * 1024 && typeof metadata.name === 'string') image = { name: metadata.name.slice(0, 200), bytes };
+          }
+        } catch {}
+        return { kind: !binding || binding.viewId === viewId ? 'bound' : 'independent', viewId, scope, text: draft.draft, scopes, queuedTexts, queuedCount: entries.length, ...(image ? { image } : {}) };
       }
       return null;
     } finally { db.close(); release?.(); }
@@ -152,7 +164,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
       }
       const legacyViewIds = await new Promise<readonly string[]>((resolve, reject) => {
         const transaction = db.transaction('records'), request = transaction.objectStore('records').openCursor();
-        const found = new Set<string>(); let scanned = 0, failure: unknown;
+        const found = new Set<string>(), unreadable = new Set<string>(); let scanned = 0, failure: unknown;
         if (preferredViewId) {
           const store = transaction.objectStore('records'), draft = store.getKey(['draft', preferredViewId, scope.hostId, scope.conversationId]);
           const imagePrefix = ['draft-image', preferredViewId, scope.hostId, scope.conversationId];
@@ -174,7 +186,20 @@ export class BrowserViewStorage implements OwnedViewStorage {
             if (Array.isArray(key) && typeof key[1] === 'string' && key[2] === scope.hostId) {
               if ((key[0] === 'draft' || key[0] === 'draft-image') && key[3] === scope.conversationId) found.add(key[1]);
               if (key[0] === 'view') {
-                const saved = decodeView(cursor.value, scope.hostId);
+                let saved;
+                try { saved = decodeView(cursor.value, scope.hostId); }
+                catch {
+                  unreadable.add(key[1]);
+                  const raw: unknown = cursor.value;
+                  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+                    const value = record(raw), pending = value.pendingCreation && typeof value.pendingCreation === 'object' ? record(value.pendingCreation) : null;
+                    for (const candidate of [value.route, pending?.scope, value.pendingCreation]) {
+                      let matches = false; try { matches = sameScope(parseScope(candidate), scope); } catch {}
+                      if (matches) throw new Error('The saved editor for this conversation is unreadable. Its original records are preserved.');
+                    }
+                  }
+                  cursor.continue(); return;
+                }
                 if (saved.route && sameScope(saved.route, scope) || saved.pendingCreation && sameScope(saved.pendingCreation.scope, scope)) found.add(key[1]);
               }
             }
@@ -182,7 +207,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
             cursor.continue();
           } catch (error) { failure = error; transaction.abort(); }
         };
-        transaction.oncomplete = () => resolve([...found]);
+        transaction.oncomplete = () => { if ([...found].some(viewId => unreadable.has(viewId))) reject(new Error('The saved editor for this conversation is unreadable. Its original records are preserved.')); else resolve([...found]); };
         transaction.onabort = () => reject(failure ?? transaction.error ?? new Error('Saved editor scan interrupted.'));
       });
       return { binding: null, legacyViewIds };

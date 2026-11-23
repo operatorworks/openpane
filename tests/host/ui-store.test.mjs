@@ -331,3 +331,39 @@ test('a child refused at presence capacity does not block already admitted relay
   assert.equal((await f.store.execute({ op: 'status', requestId: receipt.requestId })).outcome, 'all-rendered');
   await assert.rejects(f.store.execute({ op: 'relay', main, children: [present(existing, 2)], departed: [] }), /Stale/);
 });
+
+for (const table of ['ui_receipts', 'ui_state']) test(`automatic SQLite rollback of ${table} also restores the live selection`, async t => {
+  const f = await fixture(t), database = new DatabaseSync(f.path), selected = bundle(`automatic-rollback-${table.replaceAll('_', '-')}`);
+  t.after(() => database.close());
+  database.exec(`CREATE TRIGGER reject_apply BEFORE INSERT ON ${table} BEGIN SELECT RAISE(ROLLBACK,'injected automatic rollback'); END`);
+  const request = { op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: selected };
+  await assert.rejects(f.store.execute(request));
+  assert.equal(f.store.context().revision, 0); assert.equal(f.store.context().selection.selected.kind, 'builtin');
+  database.exec('DROP TRIGGER reject_apply');
+  await assert.rejects(f.store.execute({ op: 'status', requestId: request.requestId }), /not found/i);
+  assert.throws(() => f.store.bundle(selected.digest), /unavailable/i);
+  f.restart(); assert.equal(f.store.context().revision, 0);
+  const retried = await f.store.execute(request); assert.equal(retried.receipt.selectionRevision, 1);
+});
+
+test('a failed idle catalog appearance does not leave an unreserved placement pending', async t => {
+  const f = await fixture(t), main = f.window();
+  await f.store.execute({ op: 'state', context: main, visible: true, presenceSequence: 1, after: null, waitMs: 0, nativePlacement: true });
+  const base = bundle('failed-idle'), separate = createExperienceBundle({ ...base.manifest, presentation: { ...base.manifest.presentation, chats: 'separate' } }, null, []);
+  const { receipt } = await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: separate });
+  const result = await f.store.execute({ op: 'ack', session: main.documentIncarnation, envelope: envelope(receipt), result: { kind: 'failed', reason: 'Stylesheet did not load' } });
+  assert.notEqual(result.outcome, 'pending'); assert.ok(result.receipt.participants.every(participant => participant.visual.kind === 'failed'));
+  await f.store.execute({ op: 'compact', expectedEpoch: 1 });
+});
+
+test('an expired main presence cannot complete an idle placement as rendered', async t => {
+  const f = await fixture(t), main = f.window();
+  await f.store.execute({ op: 'state', context: main, visible: true, presenceSequence: 1, after: null, waitMs: 0, nativePlacement: true });
+  const base = bundle('expired-idle'), separate = createExperienceBundle({ ...base.manifest, presentation: { ...base.manifest.presentation, chats: 'separate' } }, null, []);
+  const { receipt } = await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: separate });
+  await paint(f.store, main, receipt); await f.store.execute({ op: 'ack', session: main.documentIncarnation, envelope: envelope(receipt), result: { kind: 'rendered' } });
+  const transitionId = receipt.participants.find(participant => participant.slot.kind === 'transition').slot.transitionId, now = Date.now;
+  Date.now = () => now() + 16000;
+  try { await assert.rejects(f.store.execute({ op: 'placement-idle', session: main.documentIncarnation, envelope: envelope(receipt), transitionId }), /placement/i); }
+  finally { Date.now = now; }
+});

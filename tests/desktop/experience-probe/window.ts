@@ -73,6 +73,8 @@ async function run() {
         const state = await command<{ generation: number; slot: number }>({ kind: 'read' });
         if (state.slot !== context.slot) throw new Error('Foreign scoped relay');
         output.textContent = `View ${key}\n${await get(database, key)}\nPainted generation ${state.generation}`;
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        if (document.visibilityState !== 'visible') return;
         await report('paint', { ...context, generation: state.generation });
       };
       await listen('probe-wakeup', () => { void read().catch(error => report('failure', String(error))); });

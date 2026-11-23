@@ -170,10 +170,11 @@ export function createFrontendSends(deps: {
       become(metadata ? { ...metadata, connection } : null);
       syncRows(); schedule();
     },
-    forStore({ viewId, scope, eligibility, capture, recoveryNeeded }: { readonly recoveryNeeded: () => void; readonly viewId: string; readonly scope: ConversationScope; readonly capture: CaptureStore; readonly eligibility: () => FrontendEligibility }): FrontendAdmission {
+    forStore({ viewId, scope, eligibility, capture, recoveryNeeded }: { readonly recoveryNeeded: () => void; readonly viewId: string; readonly scope: ConversationScope; readonly capture: CaptureStore; readonly eligibility: () => FrontendEligibility }): FrontendAdmission & { dispose(): void } {
       const writer = { retired: false };
       const admitted = writers.get(viewId) ?? new Set(); admitted.add(writer); writers.set(viewId, admitted);
       return {
+        dispose() { writer.retired = true; admitted.delete(writer); if (!admitted.size && writers.get(viewId) === admitted) writers.delete(viewId); },
         capture() {
           const current = authority, session = current.session;
           if (writer.retired) throw new Error('This editor is moving to another window.');
@@ -231,10 +232,10 @@ export function createFrontendSends(deps: {
     async release(key: string): Promise<void> { const entry = entries.get(key); if (entry) await unavailable(entry); },
     async releaseView(viewId: string): Promise<void> {
       for (const writer of writers.get(viewId) ?? []) writer.retired = true;
-      writers.delete(viewId);
       for (const [key, item] of provisional) if (item.viewId === viewId) { item.retained.release(); item.borrow.release(); provisional.delete(key); }
       await Promise.all([...entries.values()].filter(entry => entry.viewId === viewId).map(unavailable));
     },
+    resumeView(viewId: string): void { for (const writer of writers.get(viewId) ?? []) writer.retired = false; },
     storageFailed(viewId: string): void {
       failedViews.add(viewId);
       for (const [key, entry] of entries) if (entry.viewId === viewId) { entries.delete(key); entry.retained.release(); entry.borrow.release(); remember(viewId, entry.reference); }

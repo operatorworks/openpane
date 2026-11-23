@@ -107,7 +107,7 @@ export function CrewWorkspace(props: WorkspaceViewProps) {
       if (opening.current !== token) return;
       if (result.kind === 'inline') setNotice('');
       if (result.kind === 'detached') setNotice('Conversation opened in its own window.');
-      else if (result.kind !== 'inline') setNotice(result.reason);
+      else if (result.kind === 'refused') setNotice(result.reason);
     }).catch(() => { if (opening.current === token) setNotice('That conversation could not be opened. Refresh and try again.'); }).finally(() => { if (opening.current === token) opening.current = null; });
   }
 

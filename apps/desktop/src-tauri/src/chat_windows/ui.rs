@@ -17,14 +17,7 @@ impl ChatWindows {
                 self.require_main(broker, label, &incarnation)?;
                 identifier(&host_id, 1024)?;
                 identifier(&profile_id, 200)?;
-                if broker
-                    .host
-                    .as_ref()
-                    .is_some_and(|previous| previous != &(host_id.clone(), profile_id.clone()))
-                {
-                    return Err("host-identity-changed");
-                }
-                broker.host = Some((host_id, profile_id));
+                broker.bind_host(host_id, profile_id)?;
                 let document = self.document(broker, label, &incarnation)?;
                 let mut context = self
                     .context(broker, label, document)

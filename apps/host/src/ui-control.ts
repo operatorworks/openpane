@@ -105,13 +105,13 @@ export async function openUiQuerySession(path: string, request: unknown): Promis
       }, close };
   } catch (error) { close(); throw error; }
 }
-export async function requestUi(path: string, request: unknown): Promise<unknown> {
+export async function requestUi(path: string, request: unknown, timeoutMs = 10000): Promise<unknown> {
   checkSocket(path);
   const input = uiFrame(request);
   const socket = createConnection(path), reader = new UiFrames(socket);
-  const deadline = setTimeout(() => socket.destroy(), 10000);
+  const deadline = setTimeout(() => socket.destroy(), timeoutMs);
   try {
     socket.once('connect', () => socket.write(input));
-    return uiResponse(await reader.next(10000));
+    return uiResponse(await reader.next(timeoutMs));
   } finally { clearTimeout(deadline); reader.close(); }
 }

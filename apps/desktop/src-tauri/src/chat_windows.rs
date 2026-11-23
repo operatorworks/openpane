@@ -52,6 +52,36 @@ fn apply_close_progress(app: &tauri::AppHandle, progress: CloseProgress) {
     }
 }
 impl Broker {
+    fn abandon_unregistered_openings(&mut self) -> Vec<String> {
+        let abandoned: Vec<_> = self
+            .opening
+            .keys()
+            .filter(|label| !self.documents.contains_key(*label))
+            .cloned()
+            .collect();
+        for label in &abandoned {
+            self.opening.remove(label);
+        }
+        abandoned
+    }
+    fn bind_host(&mut self, host_id: String, profile_id: String) -> Result<(), &'static str> {
+        if self
+            .host
+            .as_ref()
+            .is_some_and(|previous| previous != &(host_id.clone(), profile_id.clone()))
+        {
+            if self.children_open() {
+                return Err(
+                    "Close chat windows and restart OpenPane after the host identity changes.",
+                );
+            }
+            self.snapshot = None;
+            self.child_snapshots.clear();
+            self.reports.clear();
+        }
+        self.host = Some((host_id, profile_id));
+        Ok(())
+    }
     fn request_restore(&mut self) -> Result<(), &'static str> {
         self.recovery_sequence = self
             .recovery_sequence
@@ -336,14 +366,26 @@ impl ChatWindows {
     pub fn close_requested(&self, app: &tauri::AppHandle, label: &str) -> bool {
         if let Ok(mut guard) = self.broker.lock() {
             if let Ok(broker) = guard.as_mut() {
+                let abandoned = if label == "main" {
+                    broker.abandon_unregistered_openings()
+                } else {
+                    Vec::new()
+                };
                 let labels = broker.begin_close(label);
-                if broker.main_closing && broker.documents.is_empty() && broker.opening.is_empty() {
-                    drop(guard);
+                let quit =
+                    broker.main_closing && broker.documents.is_empty() && broker.opening.is_empty();
+                let unregistered = label != "main" && !broker.documents.contains_key(label);
+                drop(guard);
+                for target in &abandoned {
+                    if let Some(window) = app.get_webview_window(target) {
+                        let _ = window.destroy();
+                    }
+                }
+                if quit {
                     app.exit(0);
                     return true;
                 }
-                if label != "main" && !broker.documents.contains_key(label) {
-                    drop(guard);
+                if unregistered {
                     if let Some(window) = app.get_webview_window(label) {
                         let _ = window.destroy();
                     }
@@ -427,7 +469,6 @@ impl ChatWindows {
             Command::Reserve { scope, .. }
             | Command::Phase { scope, .. }
             | Command::RecoverInline { scope, .. }
-            | Command::Lookup { scope, .. }
             | Command::Launch { scope, .. } => self.require_host(broker, scope)?,
             Command::AssignIntent {
                 scope,
@@ -590,7 +631,11 @@ impl ChatWindows {
                 )
             }
             Command::Lookup { incarnation, scope } => {
+                scope.validate()?;
                 self.require_main(broker, label, &incarnation)?;
+                if broker.host.is_some() {
+                    self.require_host(broker, &scope)?;
+                }
                 broker.lookup_window(&self.origin, &scope)
             }
             Command::Launch {
@@ -712,6 +757,26 @@ impl ChatWindows {
                 Ok(
                     json!({"kind":"pending","scope":scope,"reason":"Waiting for the assigned editor"}),
                 )
+            }
+            Command::CreationRefused { incarnation } => {
+                let document = self.document(broker, label, &incarnation)?;
+                let scope = document.scope.clone().ok_or("child-required")?;
+                if document.ready {
+                    return Err("editor-already-ready");
+                }
+                broker.storage.mutate(&self.origin, |profile| {
+                    let entry = profile
+                        .windows
+                        .get_mut(&scope.key())
+                        .ok_or("unknown-reservation")?;
+                    if entry.creation_agent_id.is_none() {
+                        return Err("creation-required");
+                    }
+                    entry.phase = Phase::Failed;
+                    Ok(())
+                })?;
+                let _ = app.emit_to("main", "openpane-ui-wakeup", ());
+                Ok(json!({"ok":true}))
             }
             Command::Ready {
                 incarnation,
@@ -1069,6 +1134,29 @@ mod admission_tests {
         {
             let mut guard = windows.broker.lock().unwrap();
             let broker = guard.as_mut().unwrap();
+            broker
+                .bind_host("host".into(), "first-profile".into())
+                .unwrap();
+            broker.snapshot = Some(json!({"old":"appearance"}));
+            broker
+                .bind_host("host".into(), "second-profile".into())
+                .unwrap();
+            assert!(broker.snapshot.is_none());
+            broker.opening.insert(
+                "unregistered".into(),
+                Scope {
+                    host_id: "host".into(),
+                    conversation_id: "chat".into(),
+                },
+            );
+            assert!(broker
+                .bind_host("other-host".into(), "profile".into())
+                .is_err());
+            assert_eq!(broker.host.as_ref().unwrap().0, "host");
+            broker.abandon_unregistered_openings();
+            broker
+                .bind_host("other-host".into(), "profile".into())
+                .unwrap();
             broker.request_restore().unwrap();
             let first = broker.recovery_sequence;
             broker.request_restore().unwrap();
@@ -1131,10 +1219,12 @@ mod admission_tests {
                     conversation_id: "opening".into(),
                 },
             );
-            assert_eq!(broker.begin_close("main"), vec!["still-opening"]);
+            assert_eq!(
+                broker.abandon_unregistered_openings(),
+                vec!["still-opening"]
+            );
+            assert_eq!(broker.begin_close("main"), vec!["main"]);
             assert_eq!(broker.close_progress(), CloseProgress::Idle);
-            broker.opening.clear();
-            assert_eq!(broker.close_progress(), CloseProgress::RequestMain);
             assert_eq!(broker.close_progress(), CloseProgress::Idle);
             assert!(broker.documents.contains_key("main"));
             assert_eq!(broker.finish_close("main").unwrap(), CloseProgress::Quit);

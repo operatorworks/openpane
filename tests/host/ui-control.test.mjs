@@ -94,3 +94,15 @@ test('native relay rejects duplicate conversation or saved-view ownership',async
   assert.equal(parseUiRequest({op:'relay',main,children,departed:[]}).children.length,2);
   for(const key of ['scope','viewId']){const duplicate=structuredClone(children);duplicate[1].context[key]=duplicate[0].context[key];assert.throws(()=>parseUiRequest({op:'relay',main,children:duplicate,departed:[]}),/Duplicate relay child/);}
 });
+
+
+test('wait deadline bounds a final stalled status socket and returns its last pending receipt', { timeout: 5000 }, async t => {
+  const { createServer } = await import('node:net'), { chmod } = await import('node:fs/promises');
+  const directory = await mkdtemp('/tmp/op-wait-budget-'), sockets = new Set(); let polls = 0;
+  const server = createServer(socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); socket.on('data', () => { if (++polls === 1) socket.end(JSON.stringify({ ok: true, value: { outcome: 'pending', receipt: { requestId: '1:wait-fixture' } } }) + '\n'); }); });
+  await new Promise(resolve => server.listen(join(directory, 'ui.sock'), resolve)); await chmod(join(directory, 'ui.sock'), 0o600);
+  t.after(async () => { for (const socket of sockets) socket.destroy(); await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true }); });
+  const started = performance.now(), result = await command(cli, ['ui', '--data-dir', directory, 'wait', '--request-id', '1:wait-fixture', '--wait-ms', '500']);
+  assert.equal(result.code, 0, result.stderr); assert.ok(performance.now() - started < 1500); assert.ok(polls >= 2);
+  assert.deepEqual(JSON.parse(result.stdout), { outcome: 'pending', receipt: { requestId: '1:wait-fixture' }, waitEnded: true });
+});

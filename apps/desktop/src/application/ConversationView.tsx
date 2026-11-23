@@ -285,7 +285,7 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
         </section>} />} />
     {Object.keys(view.document.decisions).length > 0 && <div className="conversation-approvals" role="region" aria-label="Pending approvals">{Object.values(view.document.decisions).map(decision => <section className="decision-card" key={decision.pendingId} aria-label="Approval required">
       <h2>Approval required</h2><p tabIndex={0} role="region" aria-label="Approval request details">{decision.prompt}</p><div className="action-row">
-        {decision.choices.map(choice => <button data-openpane-part="button" key={choice} disabled={!connected || !active.agent.commands.includes('approve') || decision.reserved || approving.has(decision.pendingId)} onClick={() => approve(decision.pendingId, choice)}>{decision.choiceLabels?.[choice] ?? (agent === 'codex' && choice === 'accept' ? 'Allow' : agent === 'codex' && choice === 'decline' ? 'Deny' : choice)}</button>)}
+        {decision.choices.map(choice => <button data-openpane-essential="approval" data-openpane-part="button" key={choice} disabled={!connected || !active.agent.commands.includes('approve') || decision.reserved || approving.has(decision.pendingId)} onClick={() => approve(decision.pendingId, choice)}>{decision.choiceLabels?.[choice] ?? (agent === 'codex' && choice === 'accept' ? 'Allow' : agent === 'codex' && choice === 'decline' ? 'Deny' : choice)}</button>)}
       </div>
     </section>)}</div>}
     {permissionState && showPermissions && <ConversationPermissions retained={recovery.retained} state={permissionState} actions={actions} enabled={connected} />}

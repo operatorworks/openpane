@@ -1,4 +1,4 @@
-import { pruneDraftCarryHistory, bindDraftCarry, sourceCarries } from './draft-carry.js';
+import { pruneDraftCarryHistory, bindDraftCarry, sourceCarries, keptMainDraft } from './draft-carry.js';
 import { parseConversationOpenResult } from '@openpane/contracts';
 import type { ConversationOpenResult, ConversationScope, EditorBinding, ExperienceV1 } from '@openpane/contracts';
 import { sameScope } from '@openpane/contracts';
@@ -33,6 +33,7 @@ export class WindowCoordinator implements PlacementPort {
   setPresentation(value: ExperienceV1['presentation'] | null): void {
     this.presentation = value ?? { navigation: 'rail', chats: 'inline', chatWindow: DEFAULT_WINDOW };
   }
+  canAutomaticallySend(): boolean { return this.port?.context.role !== 'main' || !this.port.context.liveRelay || this.presentation.chats === 'inline'; }
   async restoresInline(scope: ConversationScope): Promise<boolean> {
     if (this.port?.context.role !== 'main' || !this.port.context.liveRelay) return true;
     if (this.presentation.chats === 'separate') return false;
@@ -67,7 +68,10 @@ export class WindowCoordinator implements PlacementPort {
       submitted = true;
       let value: unknown;
       try { value = await this.port.request({ kind: 'placement-intent', requestId, action: canonical }); }
-      catch { value = await this.port.request({ kind: 'read-intent', requestId }); }
+      catch (error) {
+        value = await this.port.request({ kind: 'read-intent', requestId });
+        if (value === null) { submitted = false; throw error; }
+      }
       if (value === null) throw new Error('Native request admission is unconfirmed.');
       const intent = parseNativePlacementIntent(value);
       if (intent.requestId !== requestId || this.port.context.role !== 'chat' || !sameScope(intent.sourceScope, this.port.context.reservation.scope)) throw new Error('Native request identity mismatch');
@@ -122,10 +126,16 @@ export class WindowCoordinator implements PlacementPort {
   }
   private async carryToNative(request: Request, reservation: NativeReservation): Promise<void> {
     if (!request.carryFrom || sameScope(request.carryFrom, request.scope) || this.port?.context.role !== 'main') return;
-    const existing = (await sourceCarries(request.carryFrom)).find(carry => (carry.kind === 'offered' || carry.kind === 'applied') && carry.target && sameScope(carry.target, request.scope));
+    if (await keptMainDraft(request.carryFrom, request.scope)) return;
+    const existing = (await sourceCarries(request.carryFrom)).find(carry => (carry.kind === 'offered' || carry.kind === 'applied' || carry.kind === 'cancelled') && carry.target && sameScope(carry.target, request.scope));
     if (existing) return;
-    const context = record(await this.port.request({ kind: 'intent-context' }), ['epoch', 'pendingCarryRequests']);
-    const requestId = `${count(context.epoch)}:main-${reservation.transitionId}`;
+    let context = record(await this.port.request({ kind: 'intent-context' }), ['epoch', 'pendingCarryRequests']), epoch = count(context.epoch);
+    const pending = () => { if (!Array.isArray(context.pendingCarryRequests) || context.pendingCarryRequests.length > 1024) throw new Error('Invalid native carry inventory'); return context.pendingCarryRequests.map(value => identifier(value, 200)); };
+    if (await pruneDraftCarryHistory(epoch, pending()) >= 1000) {
+      context = record(await this.port.request({ kind: 'intent-context', retireAfter: epoch }), ['epoch', 'pendingCarryRequests']); epoch = count(context.epoch);
+      await pruneDraftCarryHistory(epoch, pending());
+    }
+    const requestId = `${epoch}:main-${reservation.transitionId}`;
     const captured = await this.capture(requestId, request.carryFrom);
     if (captured) {
       try { await bindDraftCarry(request.carryFrom, requestId, request.scope); }
@@ -172,7 +182,7 @@ export class WindowCoordinator implements PlacementPort {
         }
         await this.track(reservation, committed);
         if (reservation.phase === 'requested' || reservation.phase === 'failed' || reservation.phase === 'target-ready') await this.phase(reservation, 'source-saved');
-        if (reservation.phase !== 'source-released') {
+        if (binding?.kind !== 'handoff-reserved' || reservation.phase !== 'source-released') {
           await this.phase(reservation, 'transfer-committed'); await this.phase(reservation, 'source-released');
         }
         return this.launch(request);

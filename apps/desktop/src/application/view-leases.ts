@@ -80,15 +80,60 @@ export function createViewLeasePool(deps: {
       catch (error) { if (interested) borrow.failed(error); borrow.release(); throw error; }
     } finally { pending.release(); }
   }
+  function adopt(storage: OwnedViewStorage): ViewBorrow {
+    let didClose = () => {}, didFail = (_error: unknown) => {};
+    const closed = new Promise<void>((resolve, reject) => { didClose = resolve; didFail = reject; });
+    void closed.catch(() => {});
+    const lease: Lease = { closed, didClose, didFail, storage, stores: new Map(), borrows: 0, failureInterest: 0, closing: null };
+    leases.set(storage.viewId, lease);
+    if (disposal) { closeView(lease); throw new Error('This application has closed.'); }
+    return viewBorrow(lease, true);
+  }
+  const acquisitions = new Map<string, { users: number; readonly task: Promise<ViewBorrow | null>; readonly required: boolean }>();
+  async function open(viewId: string, load: () => Promise<OwnedViewStorage | null>, options: { readonly interested?: boolean; readonly required?: boolean } = {}): Promise<ViewBorrow | null> {
+    const interested = options.interested !== false;
+    if (disposal) return null;
+    const held = leases.get(viewId);
+    if (held && !held.closing) return viewBorrow(held, interested);
+    let pending = acquisitions.get(viewId);
+    if (!pending) {
+      const task = Promise.resolve().then(async () => {
+        await leases.get(viewId)?.closed;
+        if (disposal) return null;
+        const existing = leases.get(viewId);
+        if (existing && !existing.closing) return viewBorrow(existing, false);
+        const storage = await load();
+        if (!storage) return null;
+        if (storage.viewId !== viewId) { await storage.close(); throw new Error('The recovered view ID changed.'); }
+        if (disposal) { await track(Promise.resolve().then(() => storage.close())); return null; }
+        return adopt(storage);
+      });
+      pending = { users: 0, task, required: options.required === true }; acquisitions.set(viewId, pending);
+    }
+    pending.users++;
+    try {
+      const anchor = await pending.task;
+      if (!anchor && options.required && !pending.required && !disposal) {
+        if (acquisitions.get(viewId) === pending) acquisitions.delete(viewId);
+        return open(viewId, load, options);
+      }
+      if (!anchor || disposal) return null;
+      const lease = leases.get(viewId);
+      if (!lease || lease.storage !== anchor.storage) throw new Error('The recovered view lease changed.');
+      return viewBorrow(lease, interested);
+    } finally {
+      if (--pending.users === 0) {
+        if (acquisitions.get(viewId) === pending) acquisitions.delete(viewId);
+        void pending.task.then(anchor => anchor?.release(), () => {});
+      }
+    }
+  }
   return {
-    adopt(storage: OwnedViewStorage): ViewBorrow {
-      let didClose = () => {}, didFail = (_error: unknown) => {};
-      const closed = new Promise<void>((resolve, reject) => { didClose = resolve; didFail = reject; });
-      void closed.catch(() => {});
-      const lease: Lease = { closed, didClose, didFail, storage, stores: new Map(), borrows: 0, failureInterest: 0, closing: null };
-      leases.set(storage.viewId, lease);
-      if (disposal) { closeView(lease); throw new Error('This application has closed.'); }
-      return viewBorrow(lease, true);
+    adopt,
+    open,
+    async flushDrafts(): Promise<void> {
+      const stores = [...leases.values()].flatMap(lease => [...lease.stores.values()].filter(slot => !slot.closing).map(slot => slot.store));
+      await Promise.all(stores.map(store => store.captureDraft()));
     },
     async drainStores(viewId: string): Promise<void> {
       const lease = leases.get(viewId);
@@ -117,7 +162,9 @@ export function createViewLeasePool(deps: {
     owns: (storage: OwnedViewStorage) => leases.get(storage.viewId)?.storage === storage,
     dispose(): Promise<void> {
       if (disposal) return disposal;
+      const opening = [...acquisitions.values()].map(pending => pending.task);
       disposal = Promise.resolve().then(async () => {
+        await Promise.allSettled(opening);
         let failure: PromiseRejectedResult | undefined;
         while (closes.size) {
           const tasks = [...closes];

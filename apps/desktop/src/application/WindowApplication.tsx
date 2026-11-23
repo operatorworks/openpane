@@ -19,7 +19,7 @@ export function WindowApplication({ runtime }: { readonly runtime: WindowRuntime
   }, [runtime]);
   const notice = state.placementNotice ?? state.capabilityNotice;
   return <ExperienceScope connection={runtime.ui}><PersonalizationProvider><DesktopCustomizationProvider>
-    {runtime.context.role === 'chat' ? <ChatWindowApplication controller={runtime.controller} notice={notice} recovery={<WindowRecoveryControls runtime={runtime} recovery={state.recovery} />} />
-      : <BrowserApplication artifact={<ArtifactIdentity />} controller={runtime.controller} managedLifecycle windowRecovery={<WindowRecoveryControls runtime={runtime} recovery={state.recovery} />} catalogOnly={state.catalogOnly} placementNotice={notice} />}
+    {runtime.context.role === 'chat' ? <ChatWindowApplication suspended={state.closing} controller={runtime.controller} notice={notice} recovery={<>{state.canRetryCreation && <button type="button" onClick={() => void runtime.retryAssignedCreation()}>Retry assigned creation</button>}<WindowRecoveryControls runtime={runtime} recovery={state.recovery} /></>} />
+      : <BrowserApplication suspended={state.closing} artifact={<ArtifactIdentity />} controller={runtime.controller} managedLifecycle windowRecovery={<WindowRecoveryControls runtime={runtime} recovery={state.recovery} />} catalogOnly={state.catalogOnly} placementNotice={notice} />}
   </DesktopCustomizationProvider></PersonalizationProvider></ExperienceScope>;
 }

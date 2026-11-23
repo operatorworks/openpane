@@ -351,7 +351,7 @@ impl Profile {
             .filter_map(|intent| intent.target.as_ref().map(|target| target.scope.key()))
             .collect();
         self.windows.retain(|key, entry| {
-            entry.phase != Phase::TargetReady
+            !matches!(entry.phase, Phase::TargetReady | Phase::Assigned)
                 || live.contains(&entry.label)
                 || pending.contains(key)
         });
@@ -730,6 +730,26 @@ mod tests {
         p.compact_terminal_intents(Some(2)).unwrap();
         assert_eq!(p.intent_epoch, 3);
         assert_eq!(p.intents.len(), 2);
+    }
+    #[test]
+    fn closed_unpromoted_assignments_retire_without_consuming_history_forever() {
+        let mut p = profile();
+        for n in 0..MAX_WINDOWS {
+            let mut entry = reservation();
+            entry.scope = scope(&format!("assigned-{n}"));
+            entry.view_id = format!("view-{n}");
+            entry.label = format!("label-{n}");
+            entry.phase = Phase::Assigned;
+            p.reserve(entry).unwrap();
+        }
+        p.retire_closed_windows(&std::collections::BTreeSet::from(["label-0".into()]))
+            .unwrap();
+        assert_eq!(p.windows.len(), 1);
+        assert!(p.windows.values().any(|entry| entry.label == "label-0"));
+        let mut next = reservation();
+        next.scope = scope("fresh-target");
+        p.reserve(next).unwrap();
+        assert_eq!(p.windows.len(), 2);
     }
     #[test]
     fn closed_ready_window_history_retires_without_removing_live_windows_or_unresolved_targets() {

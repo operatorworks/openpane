@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { rename } from 'node:fs/promises';
 import { fixture, connected, draft, wait } from './browser-support.mjs';
 import { requestUi } from '../../apps/host/build/tsc/ui-control.js';
 import { createExperienceBundle, sha256 } from '../../apps/host/build/tsc/experience-bundle.js';
@@ -168,4 +169,49 @@ test('a retried painted acknowledgement clears the waiting notice for that exact
   release();
   assert.equal((await completed(socket, command.requestId)).outcome, 'all-rendered'); assert.ok(dropped >= 2);
   await wait(async () => await page.getByText('Appearance is visible locally; waiting for host confirmation.', { exact: true }).count() === 0, 'cleared confirmation notice');
+});
+
+for (const [label, css] of [
+  ['transparent message text', '[data-openpane-part="composer"] { color: transparent; }'],
+  ['transparent message text via alpha', '[data-openpane-part="composer"] { color: #12345600; }'],
+  ['clipped controls', '[data-openpane-part="button"] { padding: 64px; font-size: 48px; }'],
+]) test(`unusable appearance rejects ${label} and retains the editor`, { timeout: 45000 }, async t => {
+  const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  await draft(page, 'Readable saved text');
+  if (label === 'clipped controls') await page.setViewportSize({ width: 1000, height: 320 });
+  const editor = page.getByRole('textbox', { name: 'Message', exact: true }), original = await editor.elementHandle();
+  const first = experience('#3355aa'), bundle = createExperienceBundle({ ...first.manifest, assets: [{ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) }] }, css, []);
+  const context = await requestUi(socket, { op: 'context' }), requestId = `${context.requestEpoch}:${randomUUID()}`;
+  await requestUi(socket, { op: 'apply', requestId, expectedRevision: context.revision, bundle });
+  assert.equal((await completed(socket, requestId)).outcome, 'failed');
+  assert.equal(await page.locator('.experience-content').getAttribute('data-openpane-experience'), null);
+  assert.equal(await editor.inputValue(), 'Readable saved text'); assert.equal(await editor.evaluate((node, old) => node === old, original), true);
+});
+
+
+test('same-origin UI profile replacement stages the new digest before reporting the reused generation', { timeout: 45000 }, async t => {
+  const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page); await draft(page, 'Profile replacement keeps editor text');
+  const firstContext = await requestUi(socket, { op: 'context' }), first = experience('#3355aa');
+  const firstId = `${firstContext.requestEpoch}:${randomUUID()}`;
+  await requestUi(socket, { op: 'apply', requestId: firstId, expectedRevision: 0, bundle: first }); assert.equal((await completed(socket, firstId)).outcome, 'all-rendered');
+  let paused = true; const paints = [];
+  await page.route('**/api/ui/v1', async route => {
+    if (paused) return route.abort('connectionfailed');
+    const request = route.request().postDataJSON();
+    if (request.op === 'paint') paints.push({ request, shown: await page.locator('.experience-content').getAttribute('data-openpane-experience') });
+    return route.continue();
+  });
+  await host.stop(); await rename(join(host.directory, 'ui.sqlite'), join(host.directory, 'original-ui.sqlite'));
+  await host.start(Number(new URL(host.origin).port));
+  const replacement = await requestUi(socket, { op: 'context' }), second = experience('#aa5533'), secondId = `${replacement.requestEpoch}:${randomUUID()}`;
+  assert.notEqual(replacement.profileId, firstContext.profileId);
+  const applied = await requestUi(socket, { op: 'apply', requestId: secondId, expectedRevision: 0, bundle: second }); assert.equal(applied.receipt.deliveryGeneration, 1);
+  assert.equal(applied.outcome, 'selected-with-no-clients');
+  paused = false; await wait(() => paints.some(paint => paint.request.digest === second.digest), 'replacement profile paint');
+  await wait(() => page.locator('.experience-content').getAttribute('data-openpane-experience').then(digest => digest === second.digest), 'replacement visual');
+  assert.ok(paints.some(paint => paint.request.digest === second.digest));
+  assert.ok(paints.filter(paint => paint.request.digest === second.digest).every(paint => paint.shown === second.digest));
+  assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Profile replacement keeps editor text');
 });

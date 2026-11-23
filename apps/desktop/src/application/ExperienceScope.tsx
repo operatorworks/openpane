@@ -16,13 +16,26 @@ function essentialControls(root: HTMLElement): void {
     if (control.closest('[hidden]')) continue;
     const bounds = control.getBoundingClientRect(), style = getComputedStyle(control);
     if (!bounds.width || !bounds.height || style.visibility !== 'visible' || style.display === 'none' || Number(style.opacity) === 0) throw new Error('An essential OpenPane control is hidden');
-    let left = Math.max(0, bounds.left), top = Math.max(0, bounds.top), right = Math.min(innerWidth, bounds.right), bottom = Math.min(innerHeight, bounds.bottom);
+    if (/^(?:rgba|hsla)\([^)]*[,/]\s*0(?:\.0+)?\s*\)$/u.test(style.color) || style.color === 'transparent') throw new Error('An essential OpenPane control has transparent text');
+    let left = bounds.left, top = bounds.top, right = bounds.right, bottom = bounds.bottom, scrollReachable = false;
     for (let ancestor = control.parentElement; ancestor && ancestor !== root.parentElement; ancestor = ancestor.parentElement) {
       const clip = ancestor.getBoundingClientRect(), css = getComputedStyle(ancestor);
+      if (left < right && top < bottom) {
+        if (['auto', 'scroll'].includes(css.overflowX) && ancestor.scrollWidth > ancestor.clientWidth) {
+          const shift = Math.max(-(ancestor.scrollWidth - ancestor.clientWidth - ancestor.scrollLeft), Math.min(ancestor.scrollLeft, left >= clip.right ? clip.right - right : right <= clip.left ? clip.left - left : 0));
+          left += shift; right += shift; scrollReachable ||= shift !== 0;
+        }
+        if (['auto', 'scroll'].includes(css.overflowY) && ancestor.scrollHeight > ancestor.clientHeight) {
+          const shift = Math.max(-(ancestor.scrollHeight - ancestor.clientHeight - ancestor.scrollTop), Math.min(ancestor.scrollTop, top >= clip.bottom ? clip.bottom - bottom : bottom <= clip.top ? clip.top - top : 0));
+          top += shift; bottom += shift; scrollReachable ||= shift !== 0;
+        }
+      }
       if (css.overflowX !== 'visible') { left = Math.max(left, clip.left + ancestor.clientLeft); right = Math.min(right, clip.left + ancestor.clientLeft + ancestor.clientWidth); }
       if (css.overflowY !== 'visible') { top = Math.max(top, clip.top + ancestor.clientTop); bottom = Math.min(bottom, clip.top + ancestor.clientTop + ancestor.clientHeight); }
     }
-    if (left >= right || top >= bottom) continue;
+    left = Math.max(0, left); top = Math.max(0, top); right = Math.min(innerWidth, right); bottom = Math.min(innerHeight, bottom);
+    if (left >= right || top >= bottom) throw new Error('An essential OpenPane control is clipped');
+    if (scrollReachable) continue;
     const x = (left + right) / 2, y = (top + bottom) / 2;
     const hit = document.elementFromPoint(x, y);
     if (!hit || !control.contains(hit) && !hit.contains(control) && !hit.closest('[data-openpane-transient-overlay]')) throw new Error('An essential OpenPane control is covered');
@@ -99,7 +112,7 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
     })();
     return () => { abort.abort(); link?.remove(); if (!committed) setVisual(validatedVisual.current); };
     // Appearance delivery is keyed by its envelope, never the editor/controller or poll response object.
-  }, [connection, state?.selection.deliveryGeneration, transport.localBuiltin, visible]);
+  }, [connection, transport.deliveryContext, state?.selection.deliveryGeneration, state?.selection.revision, state?.bundle?.digest, transport.localBuiltin, visible]);
   const waitingNotice = notice === 'Appearance is visible locally; waiting for host confirmation.' && transport.confirmedGeneration === state?.selection.deliveryGeneration ? null : notice;
   const applied = transport.localBuiltin ? null : visual;
   return <div className="experience-frame">

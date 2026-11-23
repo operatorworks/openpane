@@ -123,7 +123,13 @@ export class UiStore {
       const result = run();
       this.db.prepare('INSERT OR REPLACE INTO ui_state(id,value) VALUES (1,?)').run(canonicalJson(this.state));
       this.db.exec('COMMIT'); return result;
-    } catch (error) { this.db.exec('ROLLBACK'); this.state = before; this.recoveryReason = recoveryReason; this.highestPresence.clear(); for (const [key, sequence] of highestPresence) this.highestPresence.set(key, sequence); this.manifests.clear(); this.sessions.clear(); for (const [id, session] of sessions) this.sessions.set(id, session); throw error; }
+    } catch (error) {
+      this.state = before; this.recoveryReason = recoveryReason;
+      this.highestPresence.clear(); for (const [key, sequence] of highestPresence) this.highestPresence.set(key, sequence);
+      this.manifests.clear(); this.sessions.clear(); for (const [id, session] of sessions) this.sessions.set(id, session);
+      try { if (this.db.isTransaction) this.db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
   }
   private notify(): void { this.change = next(this.change); for (const listener of this.listeners) listener(); }
   context(): object {
@@ -259,7 +265,7 @@ export class UiStore {
   }
   private placement(request: Extract<UiRequest, { op: 'placement-reserve' | 'placement-idle' | 'placement-failed' }>): object {
     const session = this.sessions.get(request.session), receipt = this.readReceipt(request.envelope.requestId);
-    if (!session || session.context.role !== 'main' || !session.nativePlacement || !receipt || canonicalJson(request.envelope) !== canonicalJson(receiptEnvelope(receipt)) || receipt.deliveryGeneration !== this.state.selection.deliveryGeneration) throw new UiRefusal('conflict', 'Unknown native placement attempt');
+    if (!session || Date.now() - session.seen > PRESENCE_MS || session.context.role !== 'main' || !session.nativePlacement || !receipt || canonicalJson(request.envelope) !== canonicalJson(receiptEnvelope(receipt)) || receipt.deliveryGeneration !== this.state.selection.deliveryGeneration) throw new UiRefusal('conflict', 'Unknown native placement attempt');
     let found = false;
     const participants = receipt.participants.map(participant => {
       const slot = participant.slot;
@@ -437,7 +443,13 @@ export class UiStore {
           if (receipt.deliveryGeneration !== this.state.selection.deliveryGeneration) throw new UiRefusal('conflict', 'Rendering attempt superseded');
           let found = false;
           const participants = receipt.participants.map(participant => {
-            if (participantSession(participant.slot) !== request.session) return participant;
+            const slot = participant.slot;
+            if (request.result.kind === 'failed' && slot.kind === 'transition' && slot.source.documentIncarnation === request.session
+              && slot.target === null && slot.resolved === null && participant.placement.kind === 'pending') {
+              found = true;
+              return { ...participant, visual: request.result, placement: { kind: 'failed' as const, transitionId: slot.transitionId, reason: request.result.reason } };
+            }
+            if (participantSession(slot) !== request.session) return participant;
             found = true;
             if (participant.visual.kind === 'pending') return { ...participant, visual: request.result };
             if (canonicalJson(participant.visual) !== canonicalJson(request.result)) throw new UiRefusal('conflict', 'Rendering result already committed');

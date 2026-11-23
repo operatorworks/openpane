@@ -153,7 +153,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
       carried = true;
       // Send only as the conversation's own Send would: connected, and an agent that takes messages. Otherwise the
       // text waits in its draft.
-      if (send && text.trim() && active.agent.commands.includes('send') && await whenConnected(active.store))
+      if (send && text.trim() && active.agent.commands.includes('send') && await whenConnected(active.store) && controller.canAutomaticallySend(active.scope))
         await controller.conversationActions(active).submit(() => active.store.send());
     } catch {
       // A failed send leaves the message in the conversation's outbox or draft; a failed draft write keeps the launch text.
@@ -221,7 +221,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const hostAlerts = <>
     {launchNotice && <p role="status">{launchNotice}</p>}
     {catalogOnly && launchText && !opening && <details><summary>Unsent launch text</summary><textarea readOnly aria-label="Unsent launch text" value={launchText} /></details>}
-    {app.savedDraftRecovery && <SavedDraftRecovery key={`${app.savedDraftRecovery.viewId}/${app.savedDraftRecovery.scope.conversationId}`} recovery={app.savedDraftRecovery} onOpen={() => { if (app.savedDraftRecovery) void (app.savedDraftRecovery.kind === 'bound' ? controller.create() : controller.open(app.savedDraftRecovery.scope)); }} onRemainingWork={() => { if (app.savedDraftRecovery) void controller.openRemainingSavedWork(app.savedDraftRecovery); }} onDismiss={() => { if (app.savedDraftRecovery) controller.dismissSavedDraftRecovery(app.savedDraftRecovery); }} />}
+    {app.savedDraftRecovery && <SavedDraftRecovery key={`${app.savedDraftRecovery.viewId}/${app.savedDraftRecovery.scope.conversationId}`} recovery={app.savedDraftRecovery} onSelectScope={scope => { if (app.savedDraftRecovery) void controller.inspectSavedDraft(app.savedDraftRecovery.viewId, scope); }} onOpen={() => { if (app.savedDraftRecovery) void (app.savedDraftRecovery.kind === 'bound' ? controller.create() : controller.open(app.savedDraftRecovery.scope)); }} onRemainingWork={() => { if (app.savedDraftRecovery) void controller.openRemainingSavedWork(app.savedDraftRecovery); }} onDismiss={() => { if (app.savedDraftRecovery) controller.dismissSavedDraftRecovery(app.savedDraftRecovery); }} />}
     {app.storageFailure && <div className="application-alert" role="alert"><strong>Local storage unavailable. Commands are blocked.</strong><p>{app.storageFailure}</p><p>Existing records have not been discarded. Restore browser storage access, then reload.</p></div>}
     {app.error && <p className="application-alert" role="alert">{app.error}</p>}
     {!placementNotice && app.lastPlacement?.kind === 'pending' && <p role="status">{app.lastPlacement.reason}</p>}
@@ -328,7 +328,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   </nav>;
   if (personalization.readiness === 'loading') return <ThemeScope><p role="status">Loading local preferences…</p></ThemeScope>;
   const resolvedAppearance = experience ? (experience.manifest.theme.mode === 'system' ? undefined : experience.manifest.theme.mode) : preferences.appearance === 'system' ? undefined : preferences.appearance;
-  if (fixedChat) return <ThemeScope variants={experience?.manifest.theme} appearance={resolvedAppearance} palette={contentPalette} className="application-chat-window" data-openpane-part="main">
+  if (fixedChat) return <ThemeScope inert={suspended} variants={experience?.manifest.theme} appearance={resolvedAppearance} palette={contentPalette} className="application-chat-window" data-openpane-part="main">
     <header className="application-chat-header" data-openpane-part="page-header"><h1>{app.active?.agent.label ?? 'Opening chat'}</h1>
       <button type="button" data-openpane-essential="new-chat" disabled={!enabled || !app.active} onClick={() => void controller.create(app.active?.agent.id)}>New chat</button>
     </header>

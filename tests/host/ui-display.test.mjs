@@ -17,7 +17,7 @@ async function fixture(t) {
   const open = () => new UiStore(path, 'host', () => ({ items: [], after: null }), value => members.has(JSON.stringify(value)));
   let store = open(); t.after(async () => { store.close(); await rm(directory, { recursive: true, force: true }); });
   const execute = (request, owner) => store.execute(parseUiRequest(request), owner ? { owner } : undefined);
-  return { members, get store() { return store; }, execute, id: () => `${store.context().requestEpoch}:${randomUUID()}`,
+  return { path, members, get store() { return store; }, execute, id: () => `${store.context().requestEpoch}:${randomUUID()}`,
     restart() { store.close(); store = open(); }, subscription: (cursor = null, target = scope, subscriptionId = randomUUID()) => ({ scope: target, subscriptionId, cursor }) };
 }
 const input = () => ({ query: 'avg:system.cpu.user{*}', title: 'CPU', from: '1h', to: 'now', executable: '/fixture/pup', executableHint: 'PATH:pup', version: '1.23.6', site: 'us3.datadoghq.com', siteHint: 'us3.datadoghq.com' });
@@ -229,4 +229,28 @@ test('compaction retains interrupted query attempts until explicit removal aband
   await f.execute({ op: 'compact', expectedEpoch: f.store.context().requestEpoch });
   assert.equal((await f.execute({ op: 'display-status', scope, publicationId })).mode, 'missing');
   await assert.rejects(f.execute(request, 'new-owner'), /epoch expired/);
+});
+
+for (const field of ['event', 'sequence', 'publishedAtMs']) test(`stored card ${field} must match its original publication receipt`, async t => {
+  const f = await fixture(t), publicationId = f.id();
+  const original = await f.execute({ op: 'display-publish', scope, publicationId, event: event() });
+  const { DatabaseSync } = await import('node:sqlite'), { displayDigest } = await import('../../apps/host/build/tsc/ui-display-db.js');
+  const db = new DatabaseSync(f.path);
+  try {
+    const row = db.prepare('SELECT value FROM ui_display_cards WHERE id=?').get(publicationId), publication = JSON.parse(row.value);
+    if (field === 'event') { publication.event.value.title = 'Rewritten'; publication.digest = displayDigest(publication.event); }
+    else publication[field]++;
+    db.prepare('UPDATE ui_display_cards SET value=? WHERE id=?').run(JSON.stringify(publication), publicationId);
+  } finally { db.close(); }
+  f.restart();
+  assert.deepEqual((await f.execute({ op: 'display-status', scope, publicationId })).receipt, original.receipt);
+  await assert.rejects(f.execute({ op: 'display-list', subscription: f.subscription() }), /receipt|identity|digest/);
+});
+
+
+test('subscription churn evicts old cursors while fresh reads and refresh remain available', async t => {
+  const f = await fixture(t), first = f.subscription(); const initial = await f.execute({ op: 'display-list', subscription: first });
+  for (let i = 0; i < 140; i++) assert.equal((await f.execute({ op: 'display-list', subscription: f.subscription() })).kind, 'snapshot');
+  assert.equal((await f.execute({ op: 'display-list', subscription: { ...first, cursor: initial.next } })).kind, 'reset');
+  assert.equal((await f.execute({ op: 'display-list', subscription: f.subscription() })).kind, 'snapshot');
 });

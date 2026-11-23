@@ -3,7 +3,6 @@ import { canonicalJson, DISPLAY_PAGE_LIMITS, parseDisplayPage } from '@openpane/
 import type { ConversationScope, DisplayChange, DisplayCursor, DisplayPage, DisplayPublication, DisplaySubscription } from '@openpane/contracts';
 import { count } from '@openpane/contracts/decode';
 import { DisplayDatabase, displayScope, displayText } from './ui-display-db.js';
-import { UiRefusal } from './ui-protocol.js';
 
 interface Snapshot {
   readonly scope: string; readonly subscriptionId: string; readonly epoch: number; readonly highWater: number;
@@ -31,7 +30,10 @@ export class DisplayPages {
     const id = subscriptionKey(subscription), epoch = this.epoch();
     let issued = this.issued.get(id);
     if (!issued) {
-      if (this.issued.size >= maxSubscriptions) throw new UiRefusal('capacity', 'Display read subscription capacity reached');
+      if (this.issued.size >= maxSubscriptions) {
+        const oldest = [...this.issued].sort((a, b) => a[1].expires - b[1].expires)[0];
+        if (oldest) this.issued.delete(oldest[0]);
+      }
       issued = { epoch, sequences: new Set(), expires: Date.now() + lifetime }; this.issued.set(id, issued);
     }
     issued.expires = Date.now() + lifetime; issued.sequences.add(sequence);
@@ -88,7 +90,10 @@ export class DisplayPages {
       const initial = [...this.snapshots].find(([, value]) => value.scope === scope && value.subscriptionId === subscription.subscriptionId && !value.complete);
       if (initial) { id = initial[0]; snapshot = initial[1]; }
       else {
-        if (this.snapshots.size >= maxSubscriptions) throw new UiRefusal('capacity', 'Display snapshot capacity reached');
+        if (this.snapshots.size >= maxSubscriptions) {
+          const oldest = [...this.snapshots].sort((a, b) => a[1].expires - b[1].expires)[0];
+          if (oldest) this.snapshots.delete(oldest[0]);
+        }
         id = randomUUID(); snapshot = { scope, subscriptionId: subscription.subscriptionId, epoch: this.epoch(), highWater: this.data.sequence(), afters: new Set([0]), complete: false, expires: Date.now() + lifetime };
         this.snapshots.set(id, snapshot);
       }

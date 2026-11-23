@@ -43,7 +43,10 @@ export function parseApplyReceipt(value: unknown): ApplyReceipt {
   const participants = input.participants.map(value => {
     const input = record(value, ['slot', 'visual', 'placement']), slot = parseCohortSlot(input.slot), placement = parsePlacementOutcome(input.placement);
     if (slot.kind === 'transition' && 'transitionId' in placement && placement.transitionId !== slot.transitionId) throw new Error('Placement outcome names another transition');
-    if (slot.kind === 'transition' && placement.kind === 'ready' && (!slot.target || placement.bindingRevision !== slot.target.bindingRevision)) throw new Error('Ready placement does not match its reserved binding');
+    if (slot.kind === 'transition' && placement.kind === 'ready') {
+      if (!slot.resolved) throw new Error('Ready placement has no resolved child document');
+      if (!slot.target || placement.bindingRevision !== slot.target.bindingRevision) throw new Error('Ready placement does not match its reserved binding');
+    }
     const visual = parseVisualOutcome(input.visual);
     if (slot.kind === 'transition' && !slot.resolved && (slot.target !== null || placement.kind !== 'unchanged') && visual.kind === 'rendered') throw new Error('Rendered transition has no painted document');
     return { slot, visual, placement };
