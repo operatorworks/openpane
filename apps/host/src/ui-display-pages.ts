@@ -7,7 +7,7 @@ import { UiRefusal } from './ui-protocol.js';
 
 interface Snapshot {
   readonly scope: string; readonly subscriptionId: string; readonly epoch: number; readonly highWater: number;
-  readonly afters: Set<number>; expires: number;
+  readonly afters: Set<number>; expires: number; complete: boolean;
 }
 interface Issued { readonly epoch: number; readonly sequences: Set<number>; expires: number }
 const lifetime = 60_000, maxSubscriptions = 128;
@@ -84,11 +84,12 @@ export class DisplayPages {
       id = cursor.snapshotId; snapshot = this.snapshots.get(id); after = cursor.after;
       if (!snapshot || snapshot.scope !== scope || snapshot.subscriptionId !== subscription.subscriptionId || snapshot.highWater !== cursor.highWater || !snapshot.afters.has(after)) return reset();
     } else {
-      const initial = [...this.snapshots].find(([, value]) => value.scope === scope && value.subscriptionId === subscription.subscriptionId);
+      for (const [id, snapshot] of this.snapshots) if (snapshot.complete && snapshot.scope === scope && snapshot.subscriptionId === subscription.subscriptionId) this.snapshots.delete(id);
+      const initial = [...this.snapshots].find(([, value]) => value.scope === scope && value.subscriptionId === subscription.subscriptionId && !value.complete);
       if (initial) { id = initial[0]; snapshot = initial[1]; }
       else {
         if (this.snapshots.size >= maxSubscriptions) throw new UiRefusal('capacity', 'Display snapshot capacity reached');
-        id = randomUUID(); snapshot = { scope, subscriptionId: subscription.subscriptionId, epoch: this.epoch(), highWater: this.data.sequence(), afters: new Set([0]), expires: Date.now() + lifetime };
+        id = randomUUID(); snapshot = { scope, subscriptionId: subscription.subscriptionId, epoch: this.epoch(), highWater: this.data.sequence(), afters: new Set([0]), complete: false, expires: Date.now() + lifetime };
         this.snapshots.set(id, snapshot);
       }
     }
@@ -109,7 +110,7 @@ export class DisplayPages {
     const page: DisplayPage = { ...identity, kind: 'snapshot', snapshotId: id, highWater, publications, next };
     if (bytes(page) > maximumBytes) return null;
     parseDisplayPage(page);
-    if (next.kind === 'snapshot') snapshot.afters.add(next.after); else this.issue(subscription, next.sequence);
+    if (next.kind === 'snapshot') snapshot.afters.add(next.after); else { this.issue(subscription, next.sequence); snapshot.complete = true; }
     return page;
   }
 }

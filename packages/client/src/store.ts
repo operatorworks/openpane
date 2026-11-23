@@ -252,9 +252,8 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
     },
     getSnapshot: () => view,
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    async setDraft(text) {
-      await ready;
-      await enqueue(async () => {
+    setDraft(text) {
+      return enqueue(async () => {
         await persist(revised({ draft: text }));
         publish();
       });
@@ -263,6 +262,15 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
     replaceDraft: (expected, text) => enqueue(async () => {
       if (local.draft !== expected.text || local.draftRevision !== expected.revision) return false;
       await persist(revised({ draft: text })); publish(); return true;
+    }),
+    transferDraft: (expected, text, transfer) => enqueue(async () => {
+      const matches = local.draft === expected.text && local.draftRevision === expected.revision;
+      if (!matches && transfer.kind === 'receive') return 'changed';
+      if (!drafts.commitTransfer) throw new Error('This storage cannot atomically transfer a draft');
+      const next = matches && text !== local.draft ? revised({ draft: text }) : local;
+      const outcome = transfer.kind === 'receive' ? 'received' : matches ? 'cleared' : 'changed';
+      if (!await drafts.commitTransfer(next, { source: transfer.source, requestId: transfer.requestId, outcome })) return 'cancelled';
+      local = next; publish(); return matches ? 'committed' : 'changed';
     }),
     async selectImage(file) {
       await ready;

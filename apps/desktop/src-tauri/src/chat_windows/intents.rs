@@ -9,6 +9,24 @@ impl ChatWindows {
         command: Command,
     ) -> Result<Value, &'static str> {
         match command {
+            Command::IntentContext {
+                incarnation,
+                retire_after,
+            } => {
+                self.document(broker, label, &incarnation)?
+                    .scope
+                    .as_ref()
+                    .ok_or("child-only")?;
+                let profile = broker.storage.profile(&self.origin)?;
+                if profile.intents.len() >= crate::chat_window_records::MAX_INTENTS
+                    || retire_after == Some(profile.intent_epoch)
+                {
+                    broker.storage.mutate(&self.origin, |profile| {
+                        profile.compact_terminal_intents(retire_after)
+                    })?;
+                }
+                Ok(json!({"epoch":broker.storage.profile(&self.origin)?.intent_epoch}))
+            }
             Command::PlacementIntent {
                 incarnation,
                 request_id,
@@ -91,11 +109,7 @@ impl ChatWindows {
                     return Err("main-unavailable");
                 }
                 let intent = broker.storage.mutate(&self.origin, |profile| {
-                    let count = profile
-                        .intents
-                        .values()
-                        .filter(|intent| intent.result.is_none())
-                        .count();
+                    let count = profile.pending_intents(&source.host_id).count();
                     let intent = profile
                         .intents
                         .get_mut(&crate::chat_window_records::Profile::intent_key(
@@ -151,7 +165,9 @@ impl ChatWindows {
                 } else {
                     None
                 };
-                Ok(json!({"pending":pending,"items":history,"after":cursor}))
+                Ok(
+                    json!({"epoch":broker.storage.profile(&self.origin)?.intent_epoch,"pending":pending,"items":history,"after":cursor}),
+                )
             }
             Command::Reservations { incarnation } => {
                 self.require_main(broker, label, &incarnation)?;
@@ -161,7 +177,12 @@ impl ChatWindows {
                     .windows
                     .values()
                     .filter(|reservation| {
-                        !matches!(reservation.phase, Phase::TargetReady)
+                        broker
+                            .host
+                            .as_ref()
+                            .is_some_and(|host| host.0 == reservation.scope.host_id)
+                            && !reservation.transition_id.starts_with("inline:")
+                            && !matches!(reservation.phase, Phase::TargetReady)
                             && !broker.opening.contains_key(&reservation.label)
                     })
                     .collect();
@@ -169,12 +190,11 @@ impl ChatWindows {
             }
             Command::PendingIntents { incarnation } => {
                 self.require_main(broker, label, &incarnation)?;
+                let host = &broker.host.as_ref().ok_or("ui-context-not-bound")?.0;
                 let pending: Vec<&Intent> = broker
                     .storage
                     .profile(&self.origin)?
-                    .intents
-                    .values()
-                    .filter(|intent| intent.result.is_none())
+                    .pending_intents(host)
                     .collect();
                 Ok(json!(pending))
             }
@@ -187,6 +207,8 @@ impl ChatWindows {
                 creation_agent_id,
             } => {
                 self.require_main(broker, label, &incarnation)?;
+                self.admit_child(broker, &scope)?;
+                self.retire_window_history(broker)?;
                 // Allocation and assignment are flushed in the same native-file transaction.
                 let reservation = Reservation {
                     scope,
@@ -218,22 +240,7 @@ impl ChatWindows {
                     return Err("invalid-intent-result");
                 }
                 broker.storage.mutate(&self.origin, |profile| {
-                    let intent = profile
-                        .intents
-                        .get_mut(&crate::chat_window_records::Profile::intent_key(
-                            &source_scope,
-                            &request_id,
-                        ))
-                        .ok_or("unknown-intent")?;
-                    if intent
-                        .result
-                        .as_ref()
-                        .is_some_and(|previous| previous != &result)
-                    {
-                        return Err("intent-result-conflict");
-                    }
-                    intent.result = Some(result);
-                    Ok(())
+                    profile.complete_intent(&source_scope, &request_id, result)
                 })?;
                 if let Some(document) = broker
                     .documents

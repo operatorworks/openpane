@@ -375,3 +375,28 @@ test('Start a new chat uses the ordinary create flow with the same agent and mov
   assert.equal(starts, 0);
   assert.deepEqual(f.submitted, []);
 });
+
+for (const action of ['continueConversation', 'startNewChat']) test(`${action} retains its exact pending placement and settles a later refusal`, async t => {
+  let separate = false, pending;
+  const f = opened(fixture({ placement: { async acquire(request, owner) {
+    if (!separate) return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+    pending = { kind: 'pending', scope: request.scope, reason: 'Waiting for assigned editor' }; return pending;
+  } } }));
+  t.after(() => f.app.dispose());
+  const successor = segment('successor');
+  f.behavior.observation = async () => ({ kind: 'concluded', cause: 'cancelled' });
+  let started = false;
+  f.behavior.continuation = async input => {
+    if (input.action === 'start') started = true;
+    return input.scope.conversationId === scope.conversationId ? { ...none, closure: 'cancelled', successor: started ? { kind: 'confirmed', scope: successor } : null } : none;
+  };
+  await f.app.start(); await eventually(() => Boolean(f.app.getSnapshot().continuation?.view));
+  const original = f.app.getSnapshot().active; separate = true;
+  await f.app.conversationActions(original)[action]();
+  assert.ok(pending); assert.equal(f.app.getSnapshot().lastPlacement, pending);
+  assert.equal(f.app.getSnapshot().active, original);
+  assert.equal(f.app.settlePlacement(pending, { kind: 'refused', reason: 'Destination could not open' }), true);
+  assert.equal(f.app.getSnapshot().lastPlacement.kind, 'refused');
+  assert.equal(f.app.getSnapshot().error, 'Destination could not open');
+  if (action === 'continueConversation') assert.equal(f.app.getSnapshot().continuation.error, 'Destination could not open');
+});

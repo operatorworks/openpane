@@ -73,7 +73,7 @@ export function parseQueryReservation(value: unknown): QueryReservation {
   const common = { scope: parseScope(input.scope), publicationId: identifier(input.publicationId, 128), attempt, query: boundedText(input.query, 4096),
     fromSeconds, toSeconds, executable: identifier(input.executable, 4096), version: identifier(input.version, 128), site: identifier(input.site, 253) };
   switch (kind) {
-    case 'reserved': case 'running': return { ...common, kind };
+    case 'reserved': case 'running': case 'abandoned': return { ...common, kind };
     case 'failed': case 'interrupted': return { ...common, kind, reason: identifier(input.reason, 128) };
     case 'published': case 'removed': {
       const sequence = count(input.sequence); if (!sequence) throw new Error('Invalid published query sequence');

@@ -42,6 +42,10 @@ export interface Theme {
   readonly chart: Readonly<Record<'background' | 'grid' | 'axis' | 'trace1' | 'trace2' | 'trace3' | 'trace4' | 'trace5' | 'trace6' | 'trace7' | 'trace8', string>>;
   readonly motion: Readonly<{ quick: number; standard: number }>;
 }
+const chartTraces = {
+  light: { trace1: '#3158b5', trace2: '#a5324e', trace3: '#16816b', trace4: '#8458a8', trace5: '#a85d15', trace6: '#59751d', trace7: '#8d4c79', trace8: '#347e9b' },
+  dark: { trace1: '#94b6ff', trace2: '#ff9fae', trace3: '#83d5b3', trace4: '#d7b2ff', trace5: '#ffc17d', trace6: '#c4d98a', trace7: '#edaddc', trace8: '#8dd8ef' },
+} as const;
 export function createTheme(options: ThemeOptions = {}, parent?: Theme): Theme {
   const appearance = options.appearance ?? parent?.appearance ?? 'light';
   if (appearance !== 'light' && appearance !== 'dark') {
@@ -67,8 +71,7 @@ export function createTheme(options: ThemeOptions = {}, parent?: Theme): Theme {
     treatments: { ...(parent?.treatments ?? { borderWidth: 1, shadow: 'none' }), ...options.treatments },
     chart: { ...(parent?.appearance === appearance ? parent.chart : {
       background: palettes[appearance].surface, grid: palettes[appearance].border, axis: palettes[appearance].muted,
-      trace1: palettes[appearance].accent, trace2: palettes[appearance].danger, trace3: palettes[appearance].text, trace4: palettes[appearance].muted,
-      trace5: palettes[appearance].focus, trace6: palettes[appearance].controlBorder, trace7: palettes[appearance].accent, trace8: palettes[appearance].text,
+      ...chartTraces[appearance],
     }), ...options.chart },
     motion: reducedMotion ? { quick: 0, standard: 0 } : motion,
   };

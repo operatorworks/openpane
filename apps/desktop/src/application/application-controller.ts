@@ -13,7 +13,7 @@ import { conversationPreview, transcriptProjection } from '@openpane/contracts/c
 import type { Transcript } from '@openpane/contracts/conversation';
 import type { AgentDescriptor, ContinuationView, ConversationCatalogEntry, ConversationSearchPage, ExtensionCallRequest, ExtensionCallValue, ServiceConnection, ServiceMetadata } from '@openpane/contracts/service';
 import type { ConversationCommands, ConversationModuleProps } from '@openpane/sdk/react';
-import type { OwnedViewStorage, SavedView, ViewStorageFactory } from './view-state.js';
+import type { OwnedViewStorage, SavedDraftRecovery, SavedView, ViewStorageFactory } from './view-state.js';
 import { agentPresentation } from './agent-presentation.js';
 import { createFrontendSends, createGenerationSource } from './frontend-sends.js';
 import type { CapturedSend, FrontendSends, GenerationSink } from './frontend-sends.js';
@@ -85,6 +85,7 @@ export interface ApplicationSnapshot {
   readonly saved: SavedView;
   readonly savedViews: Page<string>;
   readonly savedViewNotice: string;
+  readonly savedDraftRecovery: SavedDraftRecovery | null;
   readonly active: OpenConversation | null;
   readonly observation: ConversationObservation | null;
   readonly continuation: ConversationContinuation | null;
@@ -122,11 +123,12 @@ export interface ApplicationController {
   dispose(): Promise<void>;
   reconnect(): Promise<void>;
   reopenView(viewId: string): Promise<void>;
+  dismissSavedDraftRecovery(expected: SavedDraftRecovery): void;
   moreConversations(): Promise<void>;
   refreshCatalog(): Promise<void>;
   search(query: string, after: string | null, signal: AbortSignal): Promise<ConversationSearchPage>;
   moreSavedViews(): Promise<void>;
-  create(agentId?: string): Promise<ConversationOpenResult>;
+  create(agentId?: string, initialDraft?: string): Promise<ConversationOpenResult>;
   /** Native allocation has already persisted this scope and agent. */
   createReserved(scope: ConversationScope, agentId: string): Promise<ConversationOpenResult>;
   openReserved(scope: ConversationScope): Promise<ConversationOpenResult>;
@@ -154,8 +156,8 @@ interface ActiveStoreOwner { readonly borrow: StoreBorrow; readonly target: Open
 interface Session { catalog: ViewBorrow | null; readonly pool: ReturnType<typeof createViewLeasePool>; activeOwner: ActiveStoreOwner | null; view: OwnedView | null; readonly connection: ServiceConnection; readonly frontend: FrontendSends; readonly images: ImageTransfers }
 const EMPTY_SAVED_VIEW: SavedView = { version: 2, route: null, pendingCreation: null };
 const DETACHED_VIEW = {
-  observation: null, continuation: null, permissionState: { kind: 'stale', listing: null, reason: 'Open a conversation to read permissions.' }, catalog: { items: [], after: null }, workspaces: {}, savedViews: { items: [], after: null }, savedViewNotice: '',
-} satisfies Pick<ApplicationSnapshot, 'observation' | 'continuation' | 'permissionState' | 'catalog' | 'workspaces' | 'savedViews' | 'savedViewNotice'>;
+  observation: null, continuation: null, permissionState: { kind: 'stale', listing: null, reason: 'Open a conversation to read permissions.' }, catalog: { items: [], after: null }, workspaces: {}, savedViews: { items: [], after: null }, savedViewNotice: '', savedDraftRecovery: null,
+} satisfies Pick<ApplicationSnapshot, 'observation' | 'continuation' | 'permissionState' | 'catalog' | 'workspaces' | 'savedViews' | 'savedViewNotice' | 'savedDraftRecovery'>;
 function compatibleAgent(agent: AgentDescriptor): AgentDescriptor {
   if ('kind' in agent) return agent;
   return SOLO_CLIENT_COMPATIBILITY.supportedNativeRuntimes.some(runtime => runtime.engine === agent.runtime.engine &&
@@ -358,7 +360,7 @@ export function createApplicationController(deps: {
     const ownedId = viewId ?? deps.ownedViewStorage.catalogViewId;
     let borrow = ownedId === undefined ? null : owner.pool.reserve(ownedId);
     if (!borrow) {
-      if (ownedId !== undefined && owner.pool.holds(ownedId)) await owner.pool.closed(ownedId);
+      if (ownedId !== undefined) await owner.pool.closed(ownedId);
       let storage: OwnedViewStorage | null = null;
       const failed = (cause: unknown) => storage ? owner.pool.failed(storage, cause) : failStorage(owner, null, cause);
       storage = await (viewId === null ? deps.ownedViewStorage.open(failed) : deps.ownedViewStorage.reopen(viewId, failed));
@@ -376,7 +378,7 @@ export function createApplicationController(deps: {
       return borrow.storage;
     } catch (cause) { borrow.release(); throw cause; }
   }
-  async function place(owner: Session, scope: ConversationScope, agent: AgentDescriptor, creation: boolean, carryFrom: ConversationScope | null = null): Promise<ConversationOpenResult> {
+  async function place(owner: Session, scope: ConversationScope, agent: AgentDescriptor, creation: boolean, carryFrom: ConversationScope | null = null, initialDraft: string | null = null): Promise<ConversationOpenResult> {
     if (!deps.placement) return { kind: 'inline', scope };
     const source = local(owner);
     let released = false, quiesced = false;
@@ -395,7 +397,7 @@ export function createApplicationController(deps: {
       owner.view = null; previous?.borrow.release(); publish({});
       await current(owner, closed);
     };
-    const result = await current(owner, deps.placement.acquire({ scope, agentId: agent.id, agentLabel: agent.label, creation, carryFrom }, { storage: source, holds: owner.pool.holds, quiesce, release }));
+    const result = await current(owner, deps.placement.acquire({ scope, agentId: agent.id, agentLabel: agent.label, creation, carryFrom, initialDraft }, { storage: source, holds: owner.pool.holds, quiesce, release }));
     if (result.kind !== 'inline') {
       if (released) { await acquire(owner, null); await refresh(owner); }
       return result;
@@ -510,7 +512,7 @@ export function createApplicationController(deps: {
     await continuations.moveDraft(owner, route);
     if (!sameScope(newest, route)) await save(owner, { ...requireSaved(owner).saved, route: newest });
   }
-  async function createConversation(owner: Session, agentId?: string, carried?: ConversationScope, arrived: ConversationContinuation['arrived'] = null, reserved?: ConversationScope): Promise<ConversationOpenResult> {
+  async function createConversation(owner: Session, agentId?: string, carried?: ConversationScope, arrived: ConversationContinuation['arrived'] = null, reserved?: ConversationScope, initialDraft: string | null = null): Promise<ConversationOpenResult> {
     const host = requireHost(owner);
     const { saved } = requireSaved(owner);
     if (saved.pendingCreation) throw new Error('Recover the pending creation before creating another conversation.');
@@ -518,12 +520,17 @@ export function createApplicationController(deps: {
     if (selected === null) throw new Error('No agent is available to start a conversation.');
     const agent = host.agents.find(agent => agent.id === selected);
     if (!agent || agent.availability.kind !== 'ready') throw new Error('Choose an available agent.');
-    const delegated = await deps.placement?.delegateCreate?.(selected, carried !== undefined);
+    const delegated = await deps.placement?.delegateCreate?.(selected, carried !== undefined, initialDraft);
     if (delegated) return delegated;
     const scope = reserved ?? { hostId: host.hostId, conversationId: deps.createId() };
     if (scope.hostId !== host.hostId) throw new Error('Reserved conversation belongs to another host.');
-    const placement = await place(owner, scope, agent, true);
+    const placement = await place(owner, scope, agent, true, null, initialDraft);
     if (placement.kind !== 'inline') return placement;
+    if (initialDraft !== null) {
+      const storage = local(owner);
+      if (!storage.saveInitialDraft) throw new Error('This editor cannot prepare an initial draft');
+      await current(owner, storage.saveInitialDraft(scope, selected, initialDraft));
+    }
     await save(owner, { ...requireSaved(owner).saved, pendingCreation: { scope, agentId: selected } });
     await owner.catalog?.storage.saveNavigation?.(scope.hostId, scope);
     requireHost(owner);
@@ -704,13 +711,17 @@ export function createApplicationController(deps: {
       owner.view = { borrow, saved, hostId: metadata.hostId };
       publish({ host: { kind: 'ready', metadata } });
       const { hostId } = metadata;
-      if (saved.route && storage.viewId === deps.ownedViewStorage.catalogViewId &&
-        await current(owner, deps.placement?.restoresInline?.(saved.route) ?? Promise.resolve(true))) {
-        const editor = await current(owner, deps.ownedViewStorage.locate?.(saved.route) ?? Promise.resolve(null));
-        if (editor && editor !== storage.viewId) { await acquire(owner, editor); await refresh(owner); return; }
+      let restoreFailed = false;
+      if (saved.route && storage.viewId === deps.ownedViewStorage.catalogViewId) {
+        try {
+          if (await current(owner, deps.placement?.restoresInline?.(saved.route) ?? Promise.resolve(true))) {
+            const editor = await current(owner, deps.ownedViewStorage.locate?.(saved.route) ?? Promise.resolve(null));
+            if (editor && editor !== storage.viewId) { await acquire(owner, editor); await refresh(owner); return; }
+          }
+        } catch (cause) { restoreFailed = true; fail(owner, cause); }
       }
       const results = await Promise.allSettled([readCatalog(owner, hostId), readSavedViews(owner, hostId),
-        (!deps.placement || !saved.pendingCreation) && saved.route ? deps.fixedScope ? sameScope(saved.route, deps.fixedScope) ? install(owner, deps.fixedScope).then(() => {}) : Promise.reject(new Error('This window cannot replace its assigned conversation.')) : reopenNewest(owner, saved.route) : Promise.resolve()]);
+        !restoreFailed && (!deps.placement || !saved.pendingCreation) && saved.route ? deps.fixedScope ? sameScope(saved.route, deps.fixedScope) ? install(owner, deps.fixedScope).then(() => {}) : Promise.reject(new Error('This window cannot replace its assigned conversation.')) : reopenNewest(owner, saved.route) : Promise.resolve()]);
       const failed = results.find(result => result.status === 'rejected');
       if (failed?.status === 'rejected') fail(owner, failed.reason);
     } catch (cause) { fail(owner, cause, 'handshake'); }
@@ -838,8 +849,11 @@ export function createApplicationController(deps: {
       return closing;
     },
     reconnect: () => run(refresh),
+    dismissSavedDraftRecovery(expected) { if (state.savedDraftRecovery === expected) publish({ savedDraftRecovery: null }); },
     reopenView: viewId => run(async owner => {
-      requireHost(owner);
+      const host = requireHost(owner);
+      const recovery = await current(owner, deps.ownedViewStorage.readLegacyDraft?.(viewId, host.hostId) ?? Promise.resolve(null));
+      if (recovery) { publish({ savedDraftRecovery: recovery }); return; }
       const previous = owner.view;
       const next = await current(owner, acquire(owner, viewId));
       if (previous?.borrow.storage === next) { await refresh(owner); return; }
@@ -869,7 +883,7 @@ export function createApplicationController(deps: {
       const host = requireHost(owner);
       if (state.savedViews.after !== null) await readSavedViews(owner, host.hostId, state.savedViews.after);
     }),
-    create: agentId => opening(owner => createConversation(owner, agentId)),
+    create: (agentId, initialDraft) => opening(owner => createConversation(owner, agentId, undefined, null, undefined, initialDraft ?? null)),
     createReserved: (scope, agentId) => opening(owner => createConversation(owner, agentId, undefined, null, scope)),
     openReserved: scope => opening(async owner => {
       if (requireHost(owner).hostId !== scope.hostId) throw new Error('Conversation belongs to another host.');
@@ -879,7 +893,8 @@ export function createApplicationController(deps: {
     }),
     settlePlacement(expected, result) {
       if (!session || state.lastPlacement !== expected) return false;
-      publish({ lastPlacement: result }); return true;
+      continuations.settlePlacement(expected, result);
+      publish({ lastPlacement: result, ...(result.kind === 'refused' ? { error: result.reason } : {}) }); return true;
     },
     async inspectConversation(scope) {
       const owner = session;
@@ -912,7 +927,7 @@ export function createApplicationController(deps: {
         await save(owner, { ...saved, pendingCreation: { scope: pending.scope, agentId } });
       }
       const agent = existing ?? requireHost(owner).agents.find(agent => agent.id === agentId);
-      if (!agent) throw new Error('The saved agent is unavailable. Restore it before recovering this creation.');
+      if (!agent) { await completeCreation(owner, pending.scope, agentId); return; }
       const placement = await place(owner, pending.scope, agent, true);
       if (placement.kind !== 'inline') { publish({ lastPlacement: placement, ...(placement.kind === 'refused' ? { error: placement.reason } : {}) }); return; }
       await completeCreation(owner, pending.scope, agentId);
@@ -973,11 +988,13 @@ export function createApplicationController(deps: {
         },
         continueConversation: () => run(async active => { if (active === owner) await continuations.act(active, target, 'start'); }),
         checkContinuation: () => run(async active => { if (active === owner) await continuations.act(active, target, 'check'); }),
-        startNewChat: () => run(async active => {
-          if (active !== owner) return;
-          requireTarget(active, target);
-          await createConversation(active, target.agent.id, target.scope, 'new-chat');
-        }),
+        startNewChat: async () => {
+          if (session !== owner) return;
+          await opening(async active => {
+            requireTarget(active, target);
+            return createConversation(active, target.agent.id, target.scope, 'new-chat');
+          });
+        },
         async loadEarlierSegment() {
           if (owner && session === owner) await continuations.readEarlier(owner, target);
         },

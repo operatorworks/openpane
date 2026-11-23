@@ -47,7 +47,7 @@ test('paint and placement are independent; refresh captures fixed incarnations a
   assert.equal((await f.store.execute({ ...ack, session: hidden.documentIncarnation })).outcome, 'all-rendered');
   const next = await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: 1 });
   assert.equal(next.receipt.selectionRevision, 1); assert.equal(next.receipt.deliveryGeneration, receipt.deliveryGeneration + 1);
-  const replacement = { ...one, documentIncarnation: randomUUID() }; await f.state(replacement);
+  const replacement = { ...one, documentIncarnation: randomUUID() }; await f.state(replacement, true, 3);
   await assert.rejects(f.store.execute(ack), /Unknown|superseded/);
   const status = await f.store.execute({ op: 'status', requestId: next.receipt.requestId });
   assert.equal(status.receipt.participants[0].visual.kind, 'departed');
@@ -140,7 +140,7 @@ test('a native transition stays pending after main paints and resolves once to t
   await ready(child, 2, 3, true); await paint(child);
   assert.equal((await f.store.execute({ op: 'ack', session: child.documentIncarnation, envelope: env, result: { kind: 'rendered' } })).outcome, 'all-rendered');
   const reloaded = { ...child, documentIncarnation: randomUUID() };
-  const late = await ready(reloaded, 1, 3, true); assert.equal(late.children[0].envelope, null);
+  const late = await ready(reloaded, 3, 3, true); assert.equal(late.children[0].envelope, null);
   await assert.rejects(f.store.execute({ op: 'ack', session: reloaded.documentIncarnation, envelope: env, result: { kind: 'rendered' } }), /participant/);
 });
 
@@ -158,4 +158,76 @@ test('an empty native catalog must paint before confirming unchanged placement; 
   const next = await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: 1 });
   f.restart(); const stopped = await f.store.execute({ op: 'status', requestId: next.receipt.requestId });
   assert.equal(stopped.receipt.participants.find(item => item.slot.kind === 'transition').placement.kind, 'failed'); assert.notEqual(stopped.outcome, 'all-rendered'); assert.notEqual(stopped.outcome, 'pending');
+});
+
+test('reserved builtin recovery still commits with all 64 admitted documents present', async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 64; i++) await f.state(f.window(`window-${i}`));
+  const context = f.store.context(), requestId = `recovery:${context.recoveryGeneration}:${randomUUID()}`;
+  const result = await f.store.execute({ op: 'restore', requestId, expectedRevision: context.revision, expectedRecoveryGeneration: context.recoveryGeneration });
+  assert.equal(f.store.context().selection.selected.kind, 'builtin');
+  assert.equal(result.receipt.participants.length, 64);
+  assert.equal((await f.store.execute({ op: 'status', requestId })).receipt.participants.length, 64);
+  f.restart(); assert.equal((await f.store.execute({ op: 'status', requestId })).receipt.participants.length, 64);
+});
+
+test('builtin recovery does not depend on the selected artwork still being readable', async t => {
+  const f = await fixture(t), selected = bundle('removed-artwork');
+  await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: selected });
+  const database = new DatabaseSync(f.path); database.prepare('DELETE FROM ui_bundles WHERE digest=?').run(selected.digest); database.close();
+  const context = f.store.context();
+  await f.store.execute({ op: 'restore', requestId: `recovery:${context.recoveryGeneration}:${randomUUID()}`, expectedRevision: context.revision, expectedRecoveryGeneration: context.recoveryGeneration });
+  assert.equal(f.store.context().selection.selected.kind, 'builtin');
+});
+
+test('superseded appearance deliveries terminalize their unfinished native placement', async t => {
+  const f = await fixture(t), main = f.window();
+  await f.store.execute({ op: 'state', context: main, visible: true, presenceSequence: 1, after: null, waitMs: 0, nativePlacement: true });
+  const base = bundle('superseded-placement'), separate = createExperienceBundle({ ...base.manifest, presentation: { ...base.manifest.presentation, chats: 'separate' } }, null, []);
+  const first = await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: separate });
+  await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: 1 });
+  const previous = await f.store.execute({ op: 'status', requestId: first.receipt.requestId });
+  assert.equal(previous.outcome, 'superseded');
+  assert.equal(previous.receipt.participants.find(p => p.slot.kind === 'transition').placement.kind, 'failed');
+});
+
+test('unchanged state and relay polls reuse the validated immutable manifest', async t => {
+  const f = await fixture(t), main = f.window(); await f.state(main);
+  await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: bundle('cached-manifest') });
+  const prepare = f.store.db.prepare.bind(f.store.db); let reads = 0;
+  f.store.db.prepare = function(sql, ...args) { if (sql.startsWith('SELECT value FROM ui_bundles')) reads++; return prepare(sql, ...args); };
+  await f.state(main, true, 2); await f.state(main, true, 3);
+  const child = { ...f.window('child'), role: 'chat', scope: { hostId: 'host', conversationId: 'child' } };
+  await f.store.execute({ op: 'relay', main, children: [{ context: child, visible: true, presenceSequence: 1 }], departed: [] });
+  assert.equal(reads, 0, 'polling already validated immutable data must not re-read and decode its artwork');
+});
+
+test('an older native document report cannot replace a reloaded window, even if its first report was delayed', async t => {
+  const f = await fixture(t), old = f.window(), current = { ...old, documentIncarnation: randomUUID() };
+  await f.state(current, true, 4);
+  await assert.rejects(f.state(old, true, 3), /Stale/);
+  const receipt = await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: 0 });
+  assert.deepEqual(receipt.receipt.participants.map(item => item.slot.context.documentIncarnation), [current.documentIncarnation]);
+  await f.state(current, true, 5);
+  await assert.rejects(f.state(old, true, 2), /Stale/);
+});
+
+test('late nonparticipant paint does not bless an appearance that the fixed cohort failed', async t => {
+  const f = await fixture(t), main = f.window(); await f.state(main);
+  const selected = await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: bundle('unconfirmed') });
+  const late = f.window('late'); await f.state(late);
+  await f.store.execute({ op: 'paint', session: late.documentIncarnation, ...envelope(selected.receipt) });
+  await f.store.execute({ op: 'ack', session: main.documentIncarnation, envelope: envelope(selected.receipt), result: { kind: 'failed', reason: 'Could not paint' } });
+  await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: 1 });
+  assert.deepEqual(f.store.context().selection.previousHealthy, { kind: 'builtin' });
+});
+
+test('a valid returning heartbeat preserves its own pending receipt after a delayed poll', async t => {
+  const f = await fixture(t), main = f.window(); await f.state(main);
+  const selected = await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: 0 });
+  const now = Date.now; Date.now = () => now() + 16000;
+  try {
+    await f.state(main, true, 2);
+    assert.equal((await f.store.execute({ op: 'ack', session: main.documentIncarnation, envelope: envelope(selected.receipt), result: { kind: 'rendered' } })).outcome, 'all-rendered');
+  } finally { Date.now = now; }
 });

@@ -409,3 +409,15 @@ test('unsupported captured image releases only its provisional hold and original
   assert.deepEqual(f.drafts.value.image, before.image); assert.equal(f.drafts.value.draft, 'Caption');
   assert.deepEqual(f.calls, []);
 });
+
+test('a fresh writer for a reopened view captures tools while the retired admission remains fenced', async t => {
+  const f = await fixture(t), prior = f.frontend.capture('before-move');
+  assert.ok(prior); assert.equal(f.held(f.owner), true);
+  await f.owner.releaseView('view'); assert.equal(f.held(f.owner), false);
+  assert.throws(() => f.frontend.capture('late-old-writer'), /moving to another window/);
+  const reopened = f.owner.forStore({ recoveryNeeded() {}, viewId: 'view', scope, capture: f.captureFor(f.owner), eligibility: () => 'ag-ui-capture-and-bind' });
+  const fresh = reopened.capture('reopened-writer');
+  assert.ok(fresh); assert.equal(fresh.offer.tools.length, 1); assert.equal(f.held(f.owner), true);
+  fresh.release(); assert.equal(f.held(f.owner), false);
+  assert.throws(() => f.frontend.capture('still-retired'), /moving to another window/);
+});

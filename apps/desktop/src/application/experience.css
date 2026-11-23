@@ -18,3 +18,7 @@
   [data-openpane-navigation="pages"] .desktop-shell:has(.view-rail) { grid-template-columns: 100px 108px minmax(0, 1fr); }
   [data-openpane-navigation="pages"] .view-rail button { padding-inline: 4px; gap: 4px; }
 }
+
+[data-openpane-navigation="pages"] .desktop-shell[data-workspace-open="true"]:has(.view-rail) { grid-template-columns: 140px 0 minmax(0, 1fr); }
+@media (max-width: 900px) { [data-openpane-navigation="pages"] .desktop-shell[data-workspace-open="true"]:has(.view-rail) { grid-template-columns: 112px 0 minmax(0, 1fr); } }
+@media (max-width: 640px) { [data-openpane-navigation="pages"] .desktop-shell[data-workspace-open="true"]:has(.view-rail) { grid-template-columns: 100px 0 minmax(0, 1fr); } }

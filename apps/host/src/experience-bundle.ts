@@ -105,8 +105,9 @@ function png(bytes: Buffer): void {
   if (!width || !height || width > EXPERIENCE_LIMITS.imageDimension || height > EXPERIENCE_LIMITS.imageDimension) throw new Error('PNG dimensions exceed limit');
   if (verifyImageUpload('experience.png', bytes).metadata.mediaType !== 'image/png') throw new Error('Invalid PNG asset');
 }
+const assetOrder = (a: ExperienceBundle['assets'][number], b: ExperienceBundle['assets'][number]): number => a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 export function createExperienceBundle(manifest: ExperienceV1, stylesheet: string | null, assets: ExperienceBundle['assets']): ExperienceBundle {
-  const content = { manifest, stylesheet, assets: [...assets].sort((a, b) => a.name.localeCompare(b.name)) };
+  const content = { manifest, stylesheet, assets: [...assets].sort(assetOrder) };
   return parseExperienceBundle({ ...content, digest: sha256(canonicalJson(content)) });
 }
 export function parseExperienceBundle(value: unknown): ExperienceBundle {
@@ -126,7 +127,7 @@ export function parseExperienceBundle(value: unknown): ExperienceBundle {
     if (bytes.length !== declared.bytes || sha256(bytes) !== declared.sha256) throw new Error('Artwork bytes mismatch');
     png(bytes);
     return { name, base64 };
-  }).sort((a, b) => a.name.localeCompare(b.name));
+  }).sort(assetOrder);
   if (assets.length !== manifest.assets.filter(asset => asset.mimeType === 'image/png').length) throw new Error('Missing artwork bytes');
   const declaredCss = manifest.assets.find(asset => asset.mimeType === 'text/css');
   if (stylesheet === null ? declaredCss !== undefined : !declaredCss || Buffer.byteLength(stylesheet) !== declaredCss.bytes || sha256(stylesheet) !== declaredCss.sha256) throw new Error('Stylesheet bytes mismatch');
@@ -140,10 +141,11 @@ export async function readExperienceDirectory(directory: string): Promise<Experi
   const read = async (name: string, limit: number): Promise<Buffer> => {
     const path = await realpath(join(root, name));
     if (!path.startsWith(root + sep)) throw new Error('Experience asset escapes source directory');
-    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const stat = await file.stat();
-      if (!stat.isFile() || stat.size > limit) throw new Error('Experience file exceeds limit');
+      if (!stat.isFile()) throw new Error('Experience asset must be a regular file');
+      if (stat.size > limit) throw new Error('Experience file exceeds limit');
       const bytes = Buffer.alloc(limit + 1);
       const { bytesRead } = await file.read(bytes, 0, limit + 1, 0);
       if (bytesRead > limit) throw new Error('Experience file exceeds limit');
@@ -151,7 +153,7 @@ export async function readExperienceDirectory(directory: string): Promise<Experi
     } finally { await file.close(); }
   };
   const manifest = parseExperience(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await read('experience.json', EXPERIENCE_LIMITS.manifestBytes))));
-  const stylesheet = manifest.stylesheet === null ? null : new TextDecoder('utf-8', { fatal: true }).decode(await read(manifest.stylesheet, EXPERIENCE_LIMITS.stylesheetBytes));
+  const stylesheet = manifest.stylesheet === null ? null : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await read(manifest.stylesheet, EXPERIENCE_LIMITS.stylesheetBytes));
   const assets = await Promise.all(manifest.assets.filter(asset => asset.mimeType === 'image/png').map(async asset => ({ name: asset.name, base64: (await read(asset.name, asset.bytes)).toString('base64') })));
   return createExperienceBundle(manifest, stylesheet, assets);
 }

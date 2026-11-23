@@ -149,10 +149,10 @@ test('discovery reports independent legacy view IDs and never silently selects o
   const page = await fixture(t);
   const result = await page.evaluate(async () => {
     const Storage = globalThis.BrowserViewStorage, scope = { hostId: 'host', conversationId: 'scope' };
-    for (const viewId of ['first', 'second']) { const owner = await Storage.reopen(viewId, () => {}); await owner.drafts(() => {}).save({ scope, draft: viewId }); await owner.close(); }
+    for (const viewId of ['1:first', '1:second']) { const owner = await Storage.reopen(viewId, () => {}); await owner.drafts(() => {}).save({ scope, draft: viewId }); await owner.close(); }
     return Storage.locateEditor(scope);
   });
-  assert.equal(result.binding, null); assert.deepEqual(result.legacyViewIds, ['first', 'second']);
+  assert.equal(result.binding, null); assert.deepEqual(result.legacyViewIds, ['1:first', '1:second']);
 });
 
 for (const changed of [false, true]) test(`durable carry ${changed ? 'preserves a newer source draft' : 'clears only its captured source draft'} without replaying outboxes or copying images`, async t => {
@@ -171,22 +171,21 @@ for (const changed of [false, true]) test(`durable carry ${changed ? 'preserves 
       { put: { selectionId: image.selectionId, bytes: new Uint8Array([7, 8]) } });
     sourceStore = makeStore(source, sourceScope); await sourceStore.ready; await sourceStore.setDraft('Carry me');
     const expected = await sourceStore.captureDraft(), binding = source.editorBinding();
-    await carries.offerDraftCarry({ source: sourceScope, sourceViewId: source.viewId, requestId: 'carry-request', writerGeneration: binding.writerGeneration, expected });
-    const duplicate = await carries.offerDraftCarry({ source: sourceScope, sourceViewId: source.viewId, requestId: 'different-request', writerGeneration: binding.writerGeneration, expected }).then(() => 'offered', error => error.message);
-    await carries.bindDraftCarry(sourceScope, 'carry-request', targetScope);
-    const conflict = await carries.bindDraftCarry(sourceScope, 'carry-request', { ...targetScope, conversationId: 'other' }).then(() => 'bound', error => error.message);
+    await carries.offerDraftCarry({ source: sourceScope, sourceViewId: source.viewId, requestId: '1:carry-request', writerGeneration: binding.writerGeneration, expected });
+    const duplicate = await carries.offerDraftCarry({ source: sourceScope, sourceViewId: source.viewId, requestId: '1:different-request', writerGeneration: binding.writerGeneration, expected }).then(() => 'offered', error => error.message);
+    await carries.bindDraftCarry(sourceScope, '1:carry-request', targetScope);
+    const conflict = await carries.bindDraftCarry(sourceScope, '1:carry-request', { ...targetScope, conversationId: 'other' }).then(() => 'bound', error => error.message);
     const target = await Storage.claimEditor(claim(targetScope), () => {}), targetStore = makeStore(target, targetScope); await targetStore.ready; await targetStore.setDraft('Already typed');
     const [offer] = await carries.targetCarries(targetScope);
-    // The target's durable save can finish just before its process crashes, leaving the offer unacknowledged.
-    await targetStore.setDraft(`${offer.expected.text}${targetStore.getSnapshot().draft}`);
-    const [replayed] = await carries.targetCarries(targetScope), current = await targetStore.captureDraft();
-    if (!current.text.includes(replayed.expected.text)) await targetStore.replaceDraft(current, `${replayed.expected.text}${current.text}`);
-    await carries.updateDraftCarry(replayed, 'applied');
+    const current = await targetStore.captureDraft();
+    await targetStore.transferDraft(current, `${offer.expected.text}${current.text}`, { kind: 'receive', source: offer.source, requestId: offer.requestId });
+    // A lost success reply leaves both the destination text and applied marker committed together.
+    const [replayed] = await carries.targetCarries(targetScope);
+    if (replayed.kind !== 'applied') throw new Error('Applied transfer was not durable');
     await sourceStore.dispose(); await source.close();
     source = await Storage.claimEditor({ ...claim(sourceScope), creation: null }, () => {}); sourceStore = makeStore(source, sourceScope); await sourceStore.ready;
     if (changed) await sourceStore.setDraft('Changed while the target opens');
-    const [applied] = await carries.sourceCarries(sourceScope), cleared = await sourceStore.replaceDraft(applied.expected, '');
-    await carries.updateDraftCarry(applied, cleared ? 'cleared' : 'changed');
+    const [applied] = await carries.sourceCarries(sourceScope), cleared = await sourceStore.transferDraft(applied.expected, '', { kind: 'release', source: applied.source, requestId: applied.requestId }) === 'committed';
     const sourceRead = source.drafts(() => {}), sourceRecords = await sourceRead.load(sourceScope), sourceImage = [...await sourceRead.loadImage(sourceScope, image.selectionId)];
     const targetRecords = await target.drafts(() => {}).load(targetScope), settled = await carries.sourceCarries(sourceScope), remaining = await carries.targetCarries(targetScope);
     await sourceStore.dispose(); await targetStore.dispose(); await source.close(); await target.close();
@@ -242,4 +241,109 @@ test('native restoration keeps separate policy, live windows and foreign handoff
     return { initial, active, separate, reserved, browser: await new globalThis.WindowCoordinator(null).restoresInline(scope) };
   });
   assert.deepEqual(result, { initial: true, active: false, separate: false, reserved: false, browser: true });
+});
+
+test('Keep draft and destination/source writes each commit against the current carry state atomically', async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const Storage = globalThis.BrowserViewStorage, carries = globalThis.carries;
+    const sourceScope = { hostId: 'host', conversationId: 'source' }, targetScope = { hostId: 'host', conversationId: 'target' };
+    const claim = scope => ({ scope, viewId: scope.conversationId, label: scope.conversationId, creation: { agentId: 'agent' }, transitionId: null });
+    const source = await Storage.claimEditor(claim(sourceScope), () => {}), target = await Storage.claimEditor(claim(targetScope), () => {});
+    const port = target.drafts(() => {}); let release, entered;
+    const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { entered = resolve; });
+    const make = (owner, scope, drafts = owner.drafts(() => {})) => globalThis.createConversationStore({ scope, drafts, projection: globalThis.transcriptProjection,
+      port: { scope, async receipt() { return null; }, async submit() { throw new Error('No send requested'); }, watch() { return { close() {}, ended: new Promise(() => {}) }; } } });
+    const sourceStore = make(source, sourceScope), targetStore = make(target, targetScope, { ...port, async commitTransfer(records, transfer) { entered(); await gate; return port.commitTransfer(records, transfer); } });
+    await Promise.all([sourceStore.ready, targetStore.ready]); await sourceStore.setDraft('Carry this'); await targetStore.setDraft('Existing');
+    const offer = async requestId => {
+      const expected = await sourceStore.captureDraft();
+      await carries.offerDraftCarry({ source: sourceScope, sourceViewId: source.viewId, requestId, writerGeneration: source.editorBinding().writerGeneration, expected });
+      await carries.bindDraftCarry(sourceScope, requestId, targetScope); return (await carries.sourceCarries(sourceScope)).find(carry => carry.requestId === requestId);
+    };
+    const first = await offer('1:first'), before = await targetStore.captureDraft();
+    const receiving = targetStore.transferDraft(before, `Carry this${before.text}`, { kind: 'receive', source: sourceScope, requestId: first.requestId });
+    await started; const keptBeforeWrite = await carries.cancelDraftCarry(first); release();
+    const cancelled = await receiving, afterCancel = await targetStore.captureDraft();
+    const second = await offer('1:second');
+    const received = await targetStore.transferDraft(afterCancel, `Carry this${afterCancel.text}`, { kind: 'receive', source: sourceScope, requestId: second.requestId });
+    const [applied] = (await carries.sourceCarries(sourceScope)).filter(carry => carry.requestId === '1:second');
+    const keptBeforeClear = await carries.cancelDraftCarry(applied);
+    const clearedAfterKeep = await sourceStore.transferDraft(applied.expected, '', { kind: 'release', source: sourceScope, requestId: applied.requestId });
+    const sourceText = sourceStore.getSnapshot().draft;
+    const third = await offer('1:third'), current = await targetStore.captureDraft();
+    await targetStore.transferDraft(current, current.text, { kind: 'receive', source: sourceScope, requestId: third.requestId });
+    const clearedFirst = await sourceStore.transferDraft(third.expected, '', { kind: 'release', source: sourceScope, requestId: third.requestId });
+    const keptTooLate = await carries.cancelDraftCarry(third);
+    const sourceSaved = await source.drafts(() => {}).load(sourceScope), targetSaved = await target.drafts(() => {}).load(targetScope);
+    await Promise.all([sourceStore.dispose(), targetStore.dispose()]); await Promise.all([source.close(), target.close()]);
+    return { keptBeforeWrite, cancelled, afterCancel, received, keptBeforeClear, clearedAfterKeep, sourceText, clearedFirst, keptTooLate, sourceSaved, targetSaved };
+  });
+  assert.equal(result.keptBeforeWrite, true); assert.equal(result.cancelled, 'cancelled'); assert.equal(result.afterCancel.text, 'Existing');
+  assert.equal(result.received, 'committed'); assert.equal(result.keptBeforeClear, true); assert.equal(result.clearedAfterKeep, 'cancelled'); assert.equal(result.sourceText, 'Carry this');
+  assert.equal(result.clearedFirst, 'committed'); assert.equal(result.keptTooLate, false);
+  assert.equal(result.sourceSaved.draft, ''); assert.equal(result.targetSaved.draft, 'Carry thisExisting');
+  assert.deepEqual(result.sourceSaved.outbox, []); assert.deepEqual(result.targetSaved.outbox, []);
+});
+
+test('carry history frees terminal capacity at a native epoch boundary and preserves unresolved work', async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const Storage = globalThis.BrowserViewStorage, carries = globalThis.carries;
+    const scope = { hostId: 'host', conversationId: 'source' }, pendingScope = { hostId: 'host', conversationId: 'pending' };
+    const claim = scope => ({ scope, viewId: scope.conversationId, label: scope.conversationId, creation: { agentId: 'agent' }, transitionId: null });
+    const owner = await Storage.claimEditor(claim(scope), () => {}), pendingOwner = await Storage.claimEditor(claim(pendingScope), () => {});
+    const opening = indexedDB.open('openpane-browser-views', 1), db = await new Promise(resolve => { opening.onsuccess = () => resolve(opening.result); });
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('records', 'readwrite'), records = tx.objectStore('records');
+      for (let n = 0; n < 1023; n++) records.put({ version: 1, kind: 'cancelled', source: scope, sourceViewId: owner.viewId, requestId: `1:retired-${n}`, target: null, outcome: 'kept-at-source' }, ['draft-carry',scope.hostId,scope.conversationId,`1:retired-${n}`]);
+      records.put({ version: 1, kind: 'offered', source: pendingScope, sourceViewId: pendingOwner.viewId, requestId: '1:pending', target: null, expected: { text: 'Unresolved text', revision: 1 } }, ['draft-carry',pendingScope.hostId,pendingScope.conversationId,'1:pending']);
+      tx.oncomplete = resolve; tx.onabort = () => reject(tx.error);
+    }); db.close();
+    const input = requestId => ({ source: scope, sourceViewId: owner.viewId, writerGeneration: owner.editorBinding().writerGeneration, requestId, expected: { text: 'New text', revision: 1 } });
+    const before = await carries.pruneDraftCarryHistory(1);
+    const full = await carries.offerDraftCarry(input('1:new')).then(() => 'accepted', error => error.message);
+    const after = await carries.pruneDraftCarryHistory(2);
+    const retired = await carries.offerDraftCarry(input('1:retired-0')).then(() => 'accepted', error => error.message);
+    await carries.offerDraftCarry(input('2:new'));
+    const pending = await carries.sourceCarries(pendingScope);
+    await Promise.all([owner.close(), pendingOwner.close()]);
+    const persisted = await carries.pruneDraftCarryHistory(2);
+    return { before, full, after, retired, pending, persisted };
+  });
+  assert.equal(result.before, 1024); assert.match(result.full, /history is full/); assert.equal(result.after, 1);
+  assert.match(result.retired, /epoch expired/); assert.equal(result.pending[0].expected.text, 'Unresolved text'); assert.equal(result.persisted, 2);
+});
+
+test('a detached creation saves its launch text and pending creation in the assigned editor before launch', async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const Storage = globalThis.BrowserViewStorage, sourceScope = { hostId: 'host', conversationId: 'source' }, scope = { hostId: 'host', conversationId: 'new' };
+    const source = await Storage.claimEditor({ scope: sourceScope, viewId: 'source', label: 'main', creation: { agentId: 'agent' }, transitionId: null }, () => {});
+    const sourceDrafts = source.drafts(() => {}); await sourceDrafts.load(sourceScope);
+    const original = { version: 3, scope: sourceScope, draft: 'Leave the active editor alone', draftRevision: 1, image: null, outbox: [], frontendSends: [] }; await sourceDrafts.save(original);
+    const reservation = { scope, viewId: 'new-view', label: 'chat-new', transitionId: 'new-transition', creationAgentId: 'agent', phase: 'requested', bindingRevision: null, writerGeneration: null };
+    let atLaunch, launches = 0;
+    const port = { context: { role: 'main', label: 'main', liveRelay: true }, async request(request) {
+      if (request.kind === 'lookup') return { reservation: null, live: false };
+      if (request.kind === 'reserve') return reservation;
+      if (request.kind === 'launch') {
+        launches++;
+        const target = await Storage.claimEditor({ scope, viewId: reservation.viewId, label: reservation.label, creation: { agentId: 'agent' }, transitionId: reservation.transitionId }, () => {});
+        atLaunch = { view: await target.readView(scope.hostId), draft: await target.drafts(() => {}).load(scope) }; await target.close();
+        return { kind: 'detached', scope, label: reservation.label };
+      }
+      throw new Error('Unexpected native request');
+    } };
+    const coordinator = new globalThis.WindowCoordinator(port);
+    coordinator.setPresentation({ navigation: 'rail', chats: 'separate', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } });
+    const placement = await coordinator.acquire({ scope, agentId: 'agent', agentLabel: 'Agent', creation: true, carryFrom: null, initialDraft: 'First launch text' },
+      { storage: source, holds: () => true, quiesce: async () => { throw new Error('Unrelated editor quiesced'); }, release: async () => { throw new Error('Unrelated editor released'); } });
+    const sourceAfter = await sourceDrafts.load(sourceScope); await source.close();
+    return { placement, atLaunch, sourceAfter, original, launches };
+  });
+  assert.equal(result.placement.kind, 'detached'); assert.equal(result.launches, 1);
+  assert.equal(result.atLaunch.view.pendingCreation.scope.conversationId, 'new'); assert.equal(result.atLaunch.view.pendingCreation.agentId, 'agent');
+  assert.equal(result.atLaunch.draft.scope.conversationId, 'new'); assert.equal(result.atLaunch.draft.draft, 'First launch text');
+  assert.deepEqual(result.atLaunch.draft.outbox, []); assert.equal(result.atLaunch.draft.image, null); assert.deepEqual(result.sourceAfter, result.original);
 });

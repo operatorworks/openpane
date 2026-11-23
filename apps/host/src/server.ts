@@ -337,6 +337,17 @@ export async function startBrowserHost(options: BrowserHostOptions) {
       ? { kind: 'extensions' }
       : { kind: 'native', defaultInstallation, agents: configured ? agents : [{ installation: recordedInstallation, availability: { kind: 'ready' } }] };
     const isClosing = () => closing;
+    try {
+      uiControl = await startUiControl(join(owner.directory, 'ui.sock'), async (request, session) => {
+        const startTime = performance.timeOrigin + performance.now(); let outcome: 'ok' | 'unavailable' = 'ok';
+        try { if (closing) throw new UiRefusal('unavailable', 'UI service is shutting down'); if (!uiStore) throw new UiRefusal('unavailable', uiFault ?? 'UI database unavailable'); return await uiStore.execute(request, session); }
+        catch (error) { outcome = 'unavailable'; throw error; }
+        finally { observability.record({ operation: 'ui', client: 'local-ui', outcome, startTime, statusCode: null }); }
+      }, { disconnected: owner => uiStore?.endUiSession(owner) });
+    } catch {
+      uiStore?.close(); uiStore = undefined;
+      uiFault = 'UI control socket unavailable; repair ui.sock without deleting conversation data. Builtin appearance remains available.';
+    }
     const api = createApi({ host, compatibility, feeds: registry, providers, agentSelection, isClosing,
       extensions: { describe: providers.extensions, call: providers.callOperation } });
     const handler = serviceEndpoint({ client: 'browser-development', hostId, api, files: browser.files, isClosing, observability });
@@ -364,12 +375,6 @@ export async function startBrowserHost(options: BrowserHostOptions) {
     if (!address || typeof address === 'string') throw new Error('Invalid host address');
     const origin = `http://127.0.0.1:${address.port}`;
     control = await startControl(join(owner.directory, 'control.sock'), isClosing, selectionControl, providers.discover, refresh);
-    uiControl = await startUiControl(join(owner.directory, 'ui.sock'), async (request, session) => {
-      const startTime = performance.timeOrigin + performance.now(); let outcome: 'ok' | 'unavailable' = 'ok';
-      try { if (closing) throw new UiRefusal('unavailable', 'UI service is shutting down'); if (!uiStore) throw new UiRefusal('unavailable', uiFault ?? 'UI database unavailable'); return await uiStore.execute(request, session); }
-      catch (error) { outcome = 'unavailable'; throw error; }
-      finally { observability.record({ operation: 'ui', client: 'local-ui', outcome, startTime, statusCode: null }); }
-    }, { disconnected: owner => uiStore?.endUiSession(owner) });
     return { origin, hostId, close, fatal, discoverProviders: providers.discover,
       extensionStatus: providers.status, callOperation: providers.callOperation,
       async replaceProviderExtensions(selected: readonly BrowserProviderExtension[]) {

@@ -38,3 +38,35 @@ test('a new card preserves an earlier scroll position and offers a reachable not
   assert.ok(await scroll.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop <= 48));
   assert.equal(await notice.count(), 0);
 });
+
+test('the original-values table keeps distinct millisecond timestamps in UTC', { timeout: 30000 }, async t => {
+  const host = await fixture(t), page = await host.page();
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  const f = await publishCard(host, page, 'Initial snapshot'), publicationId = `${f.context.requestEpoch}:${randomUUID()}`;
+  const event = metricsEvent('Millisecond samples');
+  event.value.series = [{ label: 'Precise samples', unit: 'count', points: [[1795374000123, 1], [1795374000456, 2]] }];
+  await requestUi(f.socket, { op: 'display-publish', scope: f.scope, publicationId, event });
+  const card = page.locator(`[data-publication-id="${publicationId}"]`); await card.waitFor();
+  await card.getByText('Read values table', { exact: true }).click();
+  await card.getByRole('region', { name: 'Metrics values', exact: true }).waitFor();
+  assert.equal(await card.getByRole('cell', { name: '2026-11-22T19:00:00.123Z', exact: true }).count(), 1);
+  assert.equal(await card.getByRole('cell', { name: '2026-11-22T19:00:00.456Z', exact: true }).count(), 1);
+});
+
+test('the builtin eight-series plot gives every legend key a distinct trace color', { timeout: 30000 }, async t => {
+  const host = await fixture(t), page = await host.page();
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  const f = await publishCard(host, page, 'Initial snapshot'), publicationId = `${f.context.requestEpoch}:${randomUUID()}`;
+  const event = metricsEvent('Eight distinct series');
+  event.value.series = Array.from({ length: 8 }, (_, i) => ({ label: `Series ${i + 1}`, unit: 'count', points: [[1795374000000, i], [1795374040000, i + 1]] }));
+  await requestUi(f.socket, { op: 'display-publish', scope: f.scope, publicationId, event });
+  const card = page.locator(`[data-publication-id="${publicationId}"]`); await card.waitFor();
+  for (const colorScheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme });
+    await wait(() => card.evaluate((node, appearance) => node.closest('.aui-theme').getAttribute('data-appearance') === appearance, colorScheme), `${colorScheme} card theme`);
+    const colors = await card.locator('.metrics-legend-key').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor));
+    assert.equal(new Set(colors).size, 8, 'color-coded legend entries must distinguish all eight supported series');
+    const axis = await card.locator('.metrics-axis').evaluate(node => getComputedStyle(node).stroke);
+    assert.equal(colors.includes(axis), false, 'a series must remain distinguishable from the axis');
+  }
+});

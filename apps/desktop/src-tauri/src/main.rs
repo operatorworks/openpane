@@ -167,7 +167,13 @@ fn main() {
                             });
                             return false;
                         }
-                        bundled(url) || browser_url.as_ref() == Some(url)
+                        let admitted = bundled(url) || browser_url.as_ref() == Some(url);
+                        if admitted {
+                            setup_app
+                                .state::<chat_windows::ChatWindows>()
+                                .navigating(&setup_app, "main");
+                        }
+                        admitted
                     })
                     .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny);
             if live_relay && host_url.is_some() {

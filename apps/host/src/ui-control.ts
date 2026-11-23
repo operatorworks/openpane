@@ -53,8 +53,14 @@ export async function startUiControl(path: string, execute: (request: UiRequest,
       } catch (error) { if (!socket.destroyed) socket.end(uiFrame(uiFailure(error))); }
     })();
   });
-  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(path, () => { server.off('error', reject); resolve(); }); });
-  chmodSync(path, 0o600);
+  try {
+    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(path, () => { server.off('error', reject); resolve(); }); });
+    chmodSync(path, 0o600);
+  } catch (error) {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>(resolve => { server.close(() => resolve()); });
+    throw error;
+  }
   return { close() {
     closing = true;
     const deadline = setTimeout(() => { for (const socket of sockets) socket.destroy(); }, 6000);

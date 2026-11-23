@@ -70,10 +70,12 @@ test('query sessions reserve fixed bounds once and fence raw publication, old ow
 
 test('a restarted or failed query remains explicit and retry uses a compare-and-set generation', async t => {
   const f = await fixture(t), publicationId = f.id(), reserve = { op: 'display-query-reserve', scope, publicationId, input: input() };
-  await f.execute(reserve, 'original'); f.restart();
+  const original = await f.execute(reserve, 'original'); f.restart();
   const interrupted = await f.execute({ op: 'display-status', scope, publicationId }); assert.equal(interrupted.reservation.kind, 'interrupted');
   assert.equal((await f.execute(reserve, 'duplicate')).granted, false);
   await assert.rejects(f.execute({ op: 'display-query-retry', scope, publicationId, expectedAttempt: 2 }, 'new'), /current failed/);
+  await assert.rejects(f.execute({ op: 'display-query-retry', scope, publicationId, expectedAttempt: 1 }, 'new'), /draining/);
+  t.mock.method(Date, 'now', () => original.executeUntilMs + 2001);
   await f.execute({ op: 'display-query-retry', scope, publicationId, expectedAttempt: 1 }, 'new');
   const failed = await f.execute({ op: 'display-query-fail', scope, publicationId, attempt: 2, reason: 'pup-timeout' }, 'new');
   assert.equal(failed.reservation.kind, 'failed'); assert.equal(failed.reservation.reason, 'pup-timeout');
@@ -105,9 +107,10 @@ test('bounded snapshots have a fixed high-water mark and reset after deletion or
 test('32 cards include live query reservations, and removal frees one slot without evicting saved cards', async t => {
   const f = await fixture(t), ids = [];
   for (let n = 0; n < 31; n++) { const publicationId = f.id(); ids.push(publicationId); await f.execute({ op: 'display-publish', scope, publicationId, event: event() }); }
-  const reserved = f.id(); await f.execute({ op: 'display-query-reserve', scope, publicationId: reserved, input: input() }, 'query');
+  const reserved = f.id(); const grant = await f.execute({ op: 'display-query-reserve', scope, publicationId: reserved, input: input() }, 'query');
   await assert.rejects(f.execute({ op: 'display-publish', scope, publicationId: f.id(), event: event() }), /Display capacity/);
   f.store.endUiSession('query');
+  t.mock.method(Date, 'now', () => grant.executeUntilMs + 2001);
   await f.execute({ op: 'display-publish', scope, publicationId: f.id(), event: event() });
   await assert.rejects(f.execute({ op: 'display-query-retry', scope, publicationId: reserved, expectedAttempt: 1 }, 'retry'), /Display capacity/);
   await f.execute({ op: 'display-remove', scope, publicationId: ids[0], requestId: f.id() });
@@ -173,4 +176,57 @@ test('native relay fairly pages eight visible scoped children under one combined
   }
   assert.equal(seen.get('child-7').size, 12);
   assert.throws(() => f.execute({ op: 'relay', main, children: [{ ...children[0], display: children[1].display }], departed: [] }), /Foreign relay display/);
+});
+
+test('a fresh cursorless read advances completed snapshots without leaking subscription capacity', async t => {
+  const f = await fixture(t), subscription = f.subscription(null, scope, 'repeated-cli-reader');
+  assert.equal((await f.execute({ op: 'display-list', subscription })).publications.length, 0);
+  const publicationId = f.id(); await f.execute({ op: 'display-publish', scope, publicationId, event: event() });
+  for (let i = 0; i < 140; i++) {
+    const page = await f.execute({ op: 'display-list', subscription });
+    assert.deepEqual(page.publications.map(p => p.publicationId), [publicationId]);
+    assert.equal(page.next.kind, 'live');
+  }
+});
+
+test('active cards remain removable at the shared metadata limit after repeated compaction', { timeout: 60000 }, async t => {
+  const f = await fixture(t); let published = 0, first;
+  for (let cycle = 0; cycle < 20; cycle++) {
+    let added = 0;
+    for (;;) {
+      const target = { ...scope, conversationId: `metadata-${Math.floor(published / 32)}` }; f.members.add(JSON.stringify(target));
+      const publicationId = f.id();
+      try { await f.execute({ op: 'display-publish', scope: target, publicationId, event: event() }); }
+      catch (error) { assert.match(error.message, /capacity/i); break; }
+      first ??= { scope: target, publicationId }; published++; added++;
+    }
+    if (!added) break;
+    await f.execute({ op: 'compact', expectedEpoch: f.store.context().requestEpoch });
+  }
+  assert.ok(published > 1000, 'the fixture must saturate metadata across many scopes');
+  const removed = await f.execute({ op: 'display-remove', ...first, requestId: f.id() });
+  assert.equal(removed.kind, 'removed');
+  await f.execute({ op: 'compact', expectedEpoch: f.store.context().requestEpoch });
+  assert.equal(f.store.db.prepare('SELECT count(*) AS count FROM ui_display_cards').get().count, published - 1);
+  await f.execute({ op: 'display-publish', scope: first.scope, publicationId: f.id(), event: event() });
+});
+
+test('compaction retains interrupted query attempts until explicit removal abandons them', async t => {
+  const f = await fixture(t), publicationId = f.id(), request = { op: 'display-query-reserve', scope, publicationId, input: input() };
+  const initial = await f.execute(request, 'first-owner'); f.store.endUiSession('first-owner');
+  await f.execute({ op: 'compact', expectedEpoch: f.store.context().requestEpoch });
+  const status = await f.execute({ op: 'display-status', scope, publicationId });
+  assert.equal(status.reservation.kind, 'interrupted'); assert.equal(status.reservation.attempt, 1);
+  await assert.rejects(f.execute({ op: 'display-query-retry', scope, publicationId, expectedAttempt: 1 }, 'retry-owner'), /draining/);
+  t.mock.method(Date, 'now', () => initial.executeUntilMs + 2001);
+  const retry = await f.execute({ op: 'display-query-retry', scope, publicationId, expectedAttempt: 1 }, 'retry-owner');
+  assert.deepEqual([retry.reservation.fromSeconds, retry.reservation.toSeconds], [initial.reservation.fromSeconds, initial.reservation.toSeconds]);
+  f.store.endUiSession('retry-owner');
+  const requestId = f.id(), removed = await f.execute({ op: 'display-remove', scope, publicationId, requestId });
+  assert.equal(removed.kind, 'removed'); assert.deepEqual(await f.execute({ op: 'display-remove', scope, publicationId, requestId }), removed);
+  assert.equal((await f.execute({ op: 'display-status', scope, publicationId })).reservation.kind, 'abandoned');
+  assert.deepEqual((await f.execute({ op: 'display-list', subscription: f.subscription() })).publications, []);
+  await f.execute({ op: 'compact', expectedEpoch: f.store.context().requestEpoch });
+  assert.equal((await f.execute({ op: 'display-status', scope, publicationId })).mode, 'missing');
+  await assert.rejects(f.execute(request, 'new-owner'), /epoch expired/);
 });

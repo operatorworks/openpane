@@ -95,6 +95,7 @@ export class ChildUiConnection implements UiTransport {
   private requested = false;
   private confirmed: string | null = null;
   private painted: UiClientSnapshot | null = null;
+  private failure: { readonly state: UiClientSnapshot; readonly reason: string } | null = null;
   constructor(private readonly port: DesktopWindowPort) {
     if (port.context.role !== 'chat') throw new Error('A chat UI cache requires a registered child context');
   }
@@ -135,6 +136,8 @@ export class ChildUiConnection implements UiTransport {
           const advanced = this.cards.accept(state?.display ?? null);
           this.update({ state, cards: this.cards.getSnapshot(), localBuiltin: value.localBuiltin, diagnostic: state?.fault ?? null });
           if (advanced) await this.presence();
+          if (state && this.failure && this.failure.state.selection.deliveryGeneration !== state.selection.deliveryGeneration) this.failure = null;
+          if (this.failure && document.visibilityState === 'visible') await this.reportFailure();
           if (state && this.painted?.selection.deliveryGeneration === state.selection.deliveryGeneration && document.visibilityState === 'visible') await this.rendered(state);
         } catch (error) { this.update({ diagnostic: error instanceof Error ? error.message : 'Native UI relay unavailable' }); }
       }
@@ -152,7 +155,16 @@ export class ChildUiConnection implements UiTransport {
     if (this.confirmed === key) return;
     await this.report(state, null); this.confirmed = key;
   }
-  failed(state: UiClientSnapshot, reason: string): Promise<void> { return this.report(state, reason.slice(0, 500)); }
+  async failed(state: UiClientSnapshot, reason: string): Promise<void> {
+    this.painted = null; this.failure = { state, reason: reason.slice(0, 500) };
+    await this.reportFailure();
+  }
+  private async reportFailure(): Promise<void> {
+    const failure = this.failure;
+    if (!failure) return;
+    await this.report(failure.state, failure.reason);
+    if (this.failure === failure) this.failure = null;
+  }
   async restore(): Promise<void> {
     this.update({ localBuiltin: true, diagnostic: 'OpenPane appearance is active locally. Main will save builtin selection.' });
     await this.port.request({ kind: 'restore-builtin' });

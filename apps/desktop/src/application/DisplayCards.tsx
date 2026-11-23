@@ -6,13 +6,14 @@ import { MetricsCard } from './MetricsCard.js';
 export function useDisplayCards(scope: ConversationScope) {
   const { view, refresh } = useDisplayView(scope);
   const root = useRef<HTMLDivElement>(null), bottom = useRef(true), previous = useRef<Set<string> | null>(null);
+  const unseen = useRef(new Set<string>()), announced = useRef(0);
   const [newCount, setNewCount] = useState(0), [announcement, setAnnouncement] = useState('');
   const publications = view.kind === 'none' ? null : view.publications;
   useLayoutEffect(() => {
-    previous.current = null; setNewCount(0); setAnnouncement('');
+    previous.current = null; unseen.current.clear(); announced.current = 0; setNewCount(0); setAnnouncement('');
     const scroll = root.current?.closest('.conversation-content');
     if (!(scroll instanceof HTMLElement)) return;
-    const track = () => { bottom.current = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 48; if (bottom.current) setNewCount(0); };
+    const track = () => { bottom.current = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 48; if (bottom.current) { unseen.current.clear(); setNewCount(0); } };
     track(); scroll.addEventListener('scroll', track, { passive: true });
     return () => scroll.removeEventListener('scroll', track);
   }, [scope.hostId, scope.conversationId]);
@@ -21,15 +22,17 @@ export function useDisplayCards(scope: ConversationScope) {
     const known = previous.current, current = new Set(publications.map(publication => publication.publicationId));
     previous.current = current;
     if (!known) return;
-    const added = [...current].filter(id => !known.has(id)).length;
-    if (!added) return;
+    unseen.current = new Set([...unseen.current].filter(id => current.has(id)));
+    const additions = [...current].filter(id => !known.has(id)), added = additions.length;
+    if (!added) { setNewCount(unseen.current.size); return; }
     if (bottom.current) {
       const scroll = root.current?.closest('.conversation-content');
       if (scroll instanceof HTMLElement) scroll.scrollTop = scroll.scrollHeight;
-      setAnnouncement(`${added === 1 ? 'New card' : `${added} new cards`} added.`);
-    } else setNewCount(count => count + added);
+      announced.current += added;
+      setAnnouncement(`${added === 1 ? 'New card' : `${added} new cards`} added. ${announced.current} received in this chat.`);
+    } else { for (const id of additions) unseen.current.add(id); setNewCount(unseen.current.size); }
   }, [publications, view.kind]);
-  const showNew = () => { const scroll = root.current?.closest('.conversation-content'); if (scroll instanceof HTMLElement) scroll.scrollTop = scroll.scrollHeight; setNewCount(0); };
+  const showNew = () => { const scroll = root.current?.closest('.conversation-content'); if (scroll instanceof HTMLElement) scroll.scrollTop = scroll.scrollHeight; unseen.current.clear(); setNewCount(0); };
   return { view, refresh, root, newCount, announcement, showNew };
 }
 type Cards = ReturnType<typeof useDisplayCards>;

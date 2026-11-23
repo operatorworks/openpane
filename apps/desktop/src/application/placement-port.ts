@@ -6,7 +6,7 @@ export type PlacementAcquisition =
   | Exclude<ConversationOpenResult, { readonly kind: 'inline' }>;
 export interface PlacementPort {
   restoresInline?(scope: ConversationScope): Promise<boolean>;
-  delegateCreate?(agentId: string, carry: boolean): Promise<ConversationOpenResult | null>;
-  acquire(request: { readonly scope: ConversationScope; readonly agentId: string; readonly agentLabel: string; readonly carryFrom: ConversationScope | null; readonly creation: boolean },
+  delegateCreate?(agentId: string, carry: boolean, initialDraft: string | null): Promise<ConversationOpenResult | null>;
+  acquire(request: { readonly scope: ConversationScope; readonly agentId: string; readonly agentLabel: string; readonly carryFrom: ConversationScope | null; readonly initialDraft: string | null; readonly creation: boolean },
     owner: { readonly storage: OwnedViewStorage; readonly quiesce: () => Promise<void>; readonly release: () => Promise<void>; readonly holds: (viewId: string) => boolean }): Promise<PlacementAcquisition>;
 }

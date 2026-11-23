@@ -3,7 +3,7 @@ import { access, realpath, stat } from 'node:fs/promises';
 import { delimiter, isAbsolute, join } from 'node:path';
 import { METRICS_EVENT_NAME, parseDisplayReceipt, parseQueryReservation, parseUiContext, sameScope } from '@openpane/contracts';
 import type { ConversationScope, QueryReservation } from '@openpane/contracts';
-import { record } from '@openpane/contracts/decode';
+import { count, record } from '@openpane/contracts/decode';
 import { openUiQuerySession, requestUi } from './ui-control.js';
 import type { UiQuerySession } from './ui-control.js';
 import { parseDisplayQueryInput, validateDisplayEvent } from './ui-display-protocol.js';
@@ -63,7 +63,10 @@ export async function publishDatadog(command: DatadogCommand): Promise<{ readonl
       const configured = action.pup ?? (process.env.OPENPANE_PUP || null), executableHint = configured ?? 'PATH:pup', siteHint = process.env.DD_SITE || 'configured';
       if (configured !== null && !isAbsolute(configured)) throw new Error('Configure an absolute --pup executable path');
       let input: DisplayQueryInput;
-      if (status.mode === 'query') input = { ...status.input, query: action.query, title: action.title, from: action.from, to: action.to, executableHint, siteHint };
+      if (status.mode === 'query') {
+        if (action.pup !== null && action.pup !== status.input.executableHint && action.pup !== status.input.executable) throw new UiRefusal('conflict', 'Query publication ID has a different explicit pup executable');
+        input = { ...status.input, query: action.query, title: action.title, from: action.from, to: action.to };
+      }
       else {
         const context = parseUiContext(await requestUi(socket, { op: 'context' }));
         if (!new RegExp(`^${context.requestEpoch}:[\\da-f]{8}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{12}$`, 'i').test(publicationId)) throw new UiRefusal('expired', 'Use an EPOCH:UUID publication ID from the current ui context');
@@ -73,7 +76,7 @@ export async function publishDatadog(command: DatadogCommand): Promise<{ readonl
       request = { op: 'display-query-reserve', scope, publicationId, input: parseDisplayQueryInput(input) };
     }
     session = await openUiQuerySession(socket, request);
-    const first = record(session.first, ['input', 'reservation', 'granted']);
+    const first = record(session.first, ['input', 'reservation', 'granted', 'executeUntilMs']);
     if (typeof first.granted !== 'boolean') throw new Error('Invalid query session grant');
     const granted = queryData(first, scope, publicationId);
     if (!first.granted) return { reservation: granted.reservation, replayed: true };
@@ -89,7 +92,7 @@ export async function publishDatadog(command: DatadogCommand): Promise<{ readonl
     }
     if (!session.alive() || controller.signal.aborted) throw new UiRefusal('unavailable', 'Query owner disconnected before execution');
     const result = await runPup(granted.input.executable, ['--no-agent', '--output=json', 'metrics', 'query', `--query=${granted.input.query}`,
-      `--from=${granted.reservation.fromSeconds}`, `--to=${granted.reservation.toSeconds}`], { signal: controller.signal, env: { ...process.env, DD_SITE: granted.input.site } });
+      `--from=${granted.reservation.fromSeconds}`, `--to=${granted.reservation.toSeconds}`], { signal: controller.signal, deadlineMs: count(first.executeUntilMs), env: { ...process.env, DD_SITE: granted.input.site } });
     if (result.kind === 'failed') {
       await fail(result.reason);
       throw new UiRefusal('unavailable', `Pup query failed (${result.reason}). Inspect display status before an explicit retry.`);

@@ -33,6 +33,6 @@
     }
   },
   "dependencies": {
-    "@openpane/contracts": "*"
+    "@openpane/contracts": "0.0.0"
   }
 }

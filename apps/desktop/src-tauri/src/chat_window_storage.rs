@@ -24,7 +24,7 @@ struct Records {
 }
 impl Records {
     fn validate(&self) -> Result<(), &'static str> {
-        if self.schema_version != 1 || self.profiles.len() > 16 {
+        if self.schema_version != 1 {
             return Err("unsupported-native-records");
         }
         for (key, value) in &self.profiles {
@@ -114,24 +114,37 @@ impl Storage {
         })
     }
     pub fn profile(&self, origin: &str) -> Result<&Profile, &'static str> {
+        if let Some(fault) = self.fault {
+            return Err(fault);
+        }
         self.records
             .profiles
             .get(origin)
             .ok_or("unknown-native-profile")
     }
     pub fn ensure_profile(&mut self, origin: &str) -> Result<(), &'static str> {
-        if self.records.profiles.contains_key(origin) {
-            return Ok(());
-        }
-        let catalog_view_id = random_id()?;
         if let Some(fault) = self.fault {
             return Err(fault);
         }
+        if self.records.profiles.contains_key(origin) {
+            let mut next = self.records.clone();
+            if next
+                .profiles
+                .get_mut(origin)
+                .ok_or("unknown-native-profile")?
+                .reconcile_inline_completions()?
+            {
+                self.commit(next)?;
+            }
+            return Ok(());
+        }
+        let catalog_view_id = random_id()?;
         let mut next = self.records.clone();
         next.profiles.insert(
             origin.into(),
             Profile {
                 origin: origin.into(),
+                intent_epoch: 1,
                 catalog_view_id,
                 windows: BTreeMap::new(),
                 intents: BTreeMap::new(),
@@ -157,6 +170,13 @@ impl Storage {
         Ok(result)
     }
     fn commit(&mut self, next: Records) -> Result<(), &'static str> {
+        self.commit_with_sync(next, |directory| File::open(directory)?.sync_all())
+    }
+    fn commit_with_sync(
+        &mut self,
+        next: Records,
+        sync: impl FnOnce(&Path) -> std::io::Result<()>,
+    ) -> Result<(), &'static str> {
         next.validate()?;
         let bytes = serde_json::to_vec(&next).map_err(|_| "native-records-unavailable")?;
         if bytes.len() as u64 > MAX_BYTES {
@@ -165,6 +185,7 @@ impl Storage {
         let temporary = self
             .directory
             .join(format!(".chat-windows-{}.tmp", random_id()?));
+        let mut replaced = false;
         let write = || -> Result<(), &'static str> {
             let mut file = OpenOptions::new()
                 .write(true)
@@ -177,9 +198,8 @@ impl Storage {
             file.sync_all().map_err(|_| "native-records-unavailable")?;
             std::fs::rename(&temporary, self.directory.join("chat-windows-v1.json"))
                 .map_err(|_| "native-records-unavailable")?;
-            File::open(&self.directory)
-                .and_then(|directory| directory.sync_all())
-                .map_err(|_| "native-records-unavailable")?;
+            replaced = true;
+            sync(&self.directory).map_err(|_| "native-records-commit-uncertain")?;
             Ok(())
         };
         let result = write();
@@ -187,7 +207,10 @@ impl Storage {
             let _ = std::fs::remove_file(&temporary);
         }
         if let Err(error) = result {
-            self.fault = Some(error);
+            if replaced {
+                self.records = next;
+                self.fault = Some(error);
+            }
             return Err(error);
         }
         self.records = next;
@@ -258,6 +281,149 @@ mod tests {
             std::fs::read(dir.join("chat-windows-v1.json")).unwrap()
         );
         drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn failed_rename_can_retry_and_uncertain_directory_sync_never_serves_stale_memory() {
+        let dir = temp();
+        let mut store = Storage::open(&dir).unwrap();
+        store.ensure_profile("origin").unwrap();
+        let canonical = dir.join("chat-windows-v1.json");
+        let backup = dir.join("backup.json");
+        std::fs::rename(&canonical, &backup).unwrap();
+        std::fs::create_dir(&canonical).unwrap();
+        assert!(store
+            .mutate("origin", |profile| {
+                profile.catalog_view_id = "retry".into();
+                Ok(())
+            })
+            .is_err());
+        std::fs::remove_dir(&canonical).unwrap();
+        std::fs::rename(&backup, &canonical).unwrap();
+        store
+            .mutate("origin", |profile| {
+                profile.catalog_view_id = "retry".into();
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(store.profile("origin").unwrap().catalog_view_id, "retry");
+        let mut next = store.records.clone();
+        next.profiles.get_mut("origin").unwrap().catalog_view_id = "renamed".into();
+        assert_eq!(
+            store.commit_with_sync(next, |_| Err(std::io::Error::other("sync failed"))),
+            Err("native-records-commit-uncertain")
+        );
+        let disk: Records = serde_json::from_slice(&std::fs::read(&canonical).unwrap()).unwrap();
+        assert_eq!(
+            store.records.profiles["origin"].catalog_view_id,
+            disk.profiles["origin"].catalog_view_id
+        );
+        assert!(matches!(
+            store.profile("origin"),
+            Err("native-records-commit-uncertain")
+        ));
+        drop(store);
+        assert_eq!(
+            Storage::open(&dir)
+                .unwrap()
+                .profile("origin")
+                .unwrap()
+                .catalog_view_id,
+            "renamed"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn additional_origins_use_the_file_byte_budget_and_preserve_catalog_identity() {
+        let dir = temp();
+        let mut store = Storage::open(&dir).unwrap();
+        let mut ids = Vec::new();
+        for n in 0..20 {
+            let origin = format!("http://127.0.0.1:{}", 17000 + n);
+            store.ensure_profile(&origin).unwrap();
+            ids.push((
+                origin.clone(),
+                store.profile(&origin).unwrap().catalog_view_id.clone(),
+            ));
+        }
+        drop(store);
+        let reopened = Storage::open(&dir).unwrap();
+        for (origin, id) in ids {
+            assert_eq!(reopened.profile(&origin).unwrap().catalog_view_id, id);
+        }
+        drop(reopened);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn reopening_reconciles_legacy_inline_completion_without_rewinding_a_newer_transition() {
+        use crate::chat_window_records::{Action, Phase, Reservation, Scope};
+        let dir = temp();
+        let mut store = Storage::open(&dir).unwrap();
+        store.ensure_profile("origin").unwrap();
+        let scope = Scope {
+            host_id: "host".into(),
+            conversation_id: "target".into(),
+        };
+        let source = Scope {
+            host_id: "host".into(),
+            conversation_id: "source".into(),
+        };
+        store
+            .mutate("origin", |profile| {
+                profile.intent(
+                    source.clone(),
+                    "1:old".into(),
+                    Action::Open {
+                        scope: scope.clone(),
+                        carry: false,
+                    },
+                )?;
+                profile.assign_intent(
+                    &source,
+                    "1:old",
+                    Reservation {
+                        scope: scope.clone(),
+                        view_id: "view".into(),
+                        label: "chat".into(),
+                        transition_id: "original".into(),
+                        creation_agent_id: None,
+                        phase: Phase::Requested,
+                        binding_revision: None,
+                        writer_generation: None,
+                    },
+                )?;
+                profile
+                    .intents
+                    .get_mut(&Profile::intent_key(&source, "1:old"))
+                    .unwrap()
+                    .result = Some(serde_json::json!({"kind":"inline","scope":scope}));
+                Ok(())
+            })
+            .unwrap();
+        drop(store);
+        let mut reopened = Storage::open(&dir).unwrap();
+        reopened.ensure_profile("origin").unwrap();
+        assert_eq!(
+            reopened.profile("origin").unwrap().windows[&scope.key()].phase,
+            Phase::TargetReady
+        );
+        reopened
+            .mutate("origin", |profile| {
+                let entry = profile.windows.get_mut(&scope.key()).unwrap();
+                entry.phase = Phase::Requested;
+                entry.transition_id = "newer".into();
+                Ok(())
+            })
+            .unwrap();
+        drop(reopened);
+        let mut later = Storage::open(&dir).unwrap();
+        later.ensure_profile("origin").unwrap();
+        assert_eq!(
+            later.profile("origin").unwrap().windows[&scope.key()].phase,
+            Phase::Requested
+        );
+        drop(later);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

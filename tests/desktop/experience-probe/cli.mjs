@@ -32,7 +32,7 @@ await writeFile(entry, `import {createConnection} from 'node:net';\nconst [mode,
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'AZURE_OPENAI_API_KEY'].includes(key)));
 const child = spawn(process.execPath, [join(root, 'apps/host/dist/main.js'), 'codex', '--data-dir', join(directory, 'profile'), '--workspace', workspace, '--executable', executable, '--port', '0'], { cwd: root, env, stdio: 'pipe' });
 let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
-const browser = await chromium.launch();
+const browser = await chromium.launch({ headless: false });
 let result;
 try {
   const info = await new Promise((resolveInfo, reject) => {
@@ -58,9 +58,10 @@ try {
     const cards = page.getByRole('region', { name: 'Approval required', exact: true });
     for (const card of await cards.all()) {
       const text = await card.textContent();
-      if (!text.includes(directory) && !text.includes('probe.txt') && !(pup && text.includes(pup))) throw new Error('Unexpected approval outside probe intent');
-      approvals.push(text);
-      await card.getByRole('button', { name: /^(approve|accept|allow)$/i }).first().click();
+      if (!approvals.includes(text)) {
+        approvals.push(text);
+        console.log('Review and answer the ordinary approval in the visible OpenPane window. The probe does not approve requests.');
+      }
     }
     let edited = false, queried = !pup;
     try { edited = (await readFile(join(workspace, 'probe.txt'), 'utf8')).trim() === 'approved UI probe'; } catch {}

@@ -228,3 +228,34 @@ The directory notification acceptance fixture was changed to observe the durable
 file directly. A timing-sensitive inherited-pipe fixture passed independently
 after the eight-window exercise; the final full gate used four test processes.
 Both review-gauntlet passes follow this implementation checkpoint.
+
+
+## Correctness hardening verification
+
+The first review panel identified retry, process cleanup, native history, and
+saved-draft edge cases. The fixes preserve native window identity across document
+replacement, scope pending work to the current host, and retire completed history
+with its replay epoch. Draft copies and source clearing now commit atomically
+with their recovery records. Duplicate legacy drafts have a read-only recovery
+view. A first message that changes placement remains an unsent target draft.
+
+`npm run verify -- -- --test-concurrency=4` passed with 4,093 passes, five existing
+skips, and zero failures, out of 4,098 tests. The final native changes passed all
+57 Rust tests and formatting. The production Mac bundle succeeded at 15.18 MiB.
+Logs are `/tmp/openpane-gauntlet-correctness-full-verify-r2.log` and
+`/tmp/openpane-gauntlet-native-final-{tests,fmt,bundle}.log`.
+
+The rebuilt native app preserved two distinct unsent drafts through detachment
+and builtin restore. A retained child created a main-window chat and reported a
+completed request. Its persisted reservation was target-ready. Closing and
+reopening another child preserved its draft. A second app instance reported the
+profile lock without acquiring an editor and quit normally. The first instance
+also quit normally. The default native View menu has no Reload command.
+
+The exported editor schema documents a remaining runtime validation requirement
+for UTF-16 identifier limits and ownership. Generated identifiers use ASCII.
+The shutdown test's fixed playback delay remains a test precision limitation;
+it does not alone prove that shutdown overlaps an active response drain.
+
+Fresh correctness and maintainability reviews of these fixes are still required
+before the review-gauntlet checkpoints.

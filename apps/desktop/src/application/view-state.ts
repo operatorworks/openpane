@@ -13,6 +13,7 @@ export interface OwnedViewStorage {
   select(): void;
   readView(hostId: string): Promise<SavedView>;
   saveView(hostId: string, state: SavedView): Promise<void>;
+  saveInitialDraft?(scope: ConversationScope, agentId: string, text: string): Promise<void>;
   saveNavigation?(hostId: string, scope: ConversationScope): Promise<void>;
   savedViews(hostId: string, after: string | null): Promise<{
     readonly ids: readonly string[]; readonly unreadable: number; readonly after: string | null;
@@ -21,7 +22,9 @@ export interface OwnedViewStorage {
   drafts(onFailure: (error: unknown) => void): DraftStoragePort;
   close(): void | Promise<void>;
 }
+export interface SavedDraftRecovery { readonly viewId: string; readonly scope: ConversationScope; readonly text: string }
 export interface ViewStorageFactory {
+  readLegacyDraft?(viewId: string, hostId: string): Promise<SavedDraftRecovery | null>;
   recoverClosedView?(viewId: string, onFailure: (error: unknown) => void): Promise<OwnedViewStorage | null>;
   locate?(scope: ConversationScope): Promise<string | null>;
   readonly catalogViewId?: string | undefined;

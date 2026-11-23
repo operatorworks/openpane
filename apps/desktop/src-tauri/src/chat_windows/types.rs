@@ -93,6 +93,12 @@ pub enum Command {
         ids: Vec<String>,
     },
     #[serde(rename_all = "camelCase")]
+    IntentContext {
+        incarnation: String,
+        #[serde(default)]
+        retire_after: Option<u64>,
+    },
+    #[serde(rename_all = "camelCase")]
     PlacementIntent {
         incarnation: String,
         request_id: String,

@@ -371,3 +371,6 @@
 .application-chat-window .conversation-approvals .decision-card h2 { margin-bottom: 4px; }
 .application-chat-window .conversation-approvals .decision-card p { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 4px 0 8px; overscroll-behavior: contain; }
 .application-chat-window .conversation-panel:has(.conversation-approvals) .conversation-content { min-height: 0; }
+
+.saved-draft-recovery { flex: none; max-height: 40vh; overflow: auto; padding: 12px; border: 1px solid var(--aui-color-border); }
+.saved-draft-recovery textarea { display: block; width: 100%; min-height: 5rem; max-height: 12rem; resize: vertical; font: inherit; color: inherit; background: var(--aui-color-surface); }

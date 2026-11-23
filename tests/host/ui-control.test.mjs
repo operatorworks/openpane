@@ -47,3 +47,23 @@ test('installed UI chunks include runtime CSS validation without importing host 
   const response = await fetch(`${host.origin}/api/ui/v1`, { method: 'POST', headers: { Origin: 'http://other', 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'context' }) });
   assert.equal(response.status, 400);
 });
+
+test('an unavailable UI socket leaves the conversation host and builtin recovery available', async t => {
+  const { writeFile, readFile } = await import('node:fs/promises');
+  const { startBrowserHost } = await import('../../apps/host/build/tsc/server.js');
+  const directory = await mkdtemp('/tmp/op-ui-optional-'); let host;
+  t.after(async () => { await host?.close(); await rm(directory, { recursive: true, force: true }); });
+  await writeFile(join(directory, 'ui.sock'), 'preserve this regular file', { mode: 0o600 });
+  host = await startBrowserHost({ directory, port: 0, hostArtifactDirectory: join(root, 'apps/host/dist'), hostSdkDirectory: join(root, 'apps/host/dist'), assetsDirectory: join(root, 'apps/desktop/web-dist-browser'), agentStartup: { kind: 'recorded' } });
+  const api = async input => {
+    const response = await fetch(`${host.origin}/api/v1`, { method: 'POST', headers: { Origin: host.origin, 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+    const result = await response.json(); assert.equal(result.ok, true, JSON.stringify(result)); return result.value;
+  };
+  const metadata = await api({ op: 'metadata' });
+  const scope = { hostId: metadata.hostId, conversationId: 'ui-fallback-conversation' };
+  await api({ op: 'create', scope, agentId: metadata.defaultAgentId });
+  await api({ op: 'submit', command: { version: 1, scope, clientCommandId: 'ui-fallback-send', body: { kind: 'send', text: 'Conversation service remains usable.' } } });
+  assert.equal(await readFile(join(directory, 'ui.sock'), 'utf8'), 'preserve this regular file');
+  const response = await fetch(`${host.origin}/api/ui/v1`, { method: 'POST', headers: { Origin: host.origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'context' }) });
+  const result = await response.json(); assert.equal(result.ok, false); assert.match(result.error, /UI control socket unavailable/);
+});

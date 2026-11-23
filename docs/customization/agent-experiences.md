@@ -163,7 +163,7 @@ of provider history and commands. Restyling, reload and restart do not query pup
 returned cursor with `--cursor-json CURSOR` and the same `--subscription-id ID` (choose one before starting, or retain the CLI’s default for that scope).
 Each reply is at most 8 items and 512 KiB. Complete the fixed snapshot before
 reading later changes. Unknown or expired cursors request a reset. `--after N`
-resumes only a cursor already issued to that subscription; it cannot assert that
+is a shorthand within the current request epoch; it cannot resume a cursor from an earlier epoch. Use the complete `--cursor-json` value and its subscription ID to resume across reconnects. Within an epoch it accepts only a live cursor already issued to that subscription; it cannot assert that
 an arbitrary suffix is complete.
 
 There are 32 cards per conversation and 32 MiB total retained display data.
@@ -175,9 +175,11 @@ remove a card to release its slot:
   --publication-id 'EPOCH:PUBLICATION_UUID' --request-id 'EPOCH:REMOVE_UUID'
 ```
 
-Removal emits a tombstone. Replaying the old publication does not resurrect it.
+Removal emits a tombstone. Removing a failed or interrupted query explicitly
+abandons that attempt and its retry option; it never creates a card. Running
+queries must settle before removal. Replaying the old publication does not resurrect it.
 Administrative `maintenance compact --expected-epoch EPOCH` abandons old UI
-receipts and replay history while keeping active cards and running query
+receipts and replay history while keeping active cards and all non-abandoned query
 attempts. Unknown retries from older epochs are rejected. Use it only after
 checking outstanding work. `experience prune --keep N --request-id EPOCH:UUID`
 reclaims unselected, unreferenced bundles; it does not erase drafts or cards.

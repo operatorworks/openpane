@@ -1,6 +1,6 @@
 import { parseUiClientSnapshot, parseUiContext, parseApplyReceipt } from '@openpane/contracts';
 import type { ConversationScope, DeliveryEnvelope, NativePlacementTarget, PlacementTransition, UiClientSnapshot, UiContextV1, WindowContext } from '@openpane/contracts';
-import { record } from '@openpane/contracts/decode';
+import { count, record } from '@openpane/contracts/decode';
 import { parseUiRecovery, reserveRecovery, UI_RECOVERY_KEY } from './ui-recovery.js';
 import type { UiRecovery } from './ui-recovery.js';
 import { DisplayClient, NO_DISPLAY } from './display-client.js';
@@ -42,6 +42,7 @@ export class UiConnection {
   private started = false;
   private painted: UiClientSnapshot | null = null;
   private confirmed: string | null = null;
+  private failure: { readonly state: UiClientSnapshot; readonly reason: string } | null = null;
   private recovery: UiRecovery | null = null;
   private lastContext: UiContextV1 | null = null;
   private recoveryFloor: number | null = null;
@@ -70,6 +71,16 @@ export class UiConnection {
   }
   selectScope(scope: ConversationScope | null): void { if (this.cards.select(scope)) this.update({ cards: this.cards.getSnapshot() }); }
   refreshCards(): void { if (this.cards.refresh()) this.update({ cards: this.cards.getSnapshot() }); }
+  protected async nextPresenceSequence(): Promise<number> {
+    const context = this.window;
+    if (!this.identify || !context?.brokerInstance.startsWith('browser:')) return ++this.sequence;
+    const key = `openpane.uiPresence:${JSON.stringify([context.hostId, context.profileId, context.viewId])}`;
+    return navigator.locks.request(key, () => {
+      const prior = localStorage.getItem(key), sequence = prior === null ? 0 : count(Number(prior));
+      if (sequence === Number.MAX_SAFE_INTEGER) throw new Error('Window presence sequence exhausted');
+      localStorage.setItem(key, String(sequence + 1)); return sequence + 1;
+    });
+  }
   private async readLoop(): Promise<void> {
     let delay = 300;
     while (!this.abort.signal.aborted) {
@@ -84,7 +95,7 @@ export class UiConnection {
           }
         }
         if (this.recovery?.kind === 'reserved') await this.finishRecovery();
-        const state = parseUiClientSnapshot(await this.post({ op: 'state', context: this.window, presenceSequence: ++this.sequence,
+        const state = parseUiClientSnapshot(await this.post({ op: 'state', context: this.window, presenceSequence: await this.nextPresenceSequence(),
           visible: document.visibilityState === 'visible', nativePlacement: this.nativePlacement, display: this.cards.subscription(), after: this.snapshot.state?.change ?? null, waitMs: this.cards.needsPaging() || this.relayPaging ? 50 : 2000 }));
         if (this.context) this.lastContext = { ...this.context, revision: state.selection.revision, selection: state.selection };
         if (!this.recovery && (state.selection.selected.kind === 'builtin' || this.recoveryFloor !== null && state.selection.deliveryGeneration >= this.recoveryFloor)) this.update({ localBuiltin: false });
@@ -92,6 +103,8 @@ export class UiConnection {
         this.cards.accept(state.display);
         this.update({ state, cards: this.cards.getSnapshot(), diagnostic: state.fault ?? recoveryNotice });
         this.relayPaging = await this.relay.publish(state, this.window, request => this.post(request));
+        if (this.failure && this.failure.state.selection.deliveryGeneration !== state.selection.deliveryGeneration) this.failure = null;
+        if (this.failure && document.visibilityState === 'visible') await this.reportFailure().catch(() => {});
         if (this.painted?.selection.deliveryGeneration === state.selection.deliveryGeneration && document.visibilityState === 'visible' && !this.snapshot.localBuiltin) await this.reportPaint(state).catch(() => {});
         delay = 300;
       } catch (error) {
@@ -140,7 +153,15 @@ export class UiConnection {
   }
   async failed(state: UiClientSnapshot, reason: string): Promise<void> {
     this.update({ diagnostic: reason });
-    if (state.envelope) await this.ack(state.envelope, { kind: 'failed', reason: reason.slice(0, 500) });
+    this.painted = null;
+    this.failure = { state, reason: reason.slice(0, 500) };
+    await this.reportFailure();
+  }
+  private async reportFailure(): Promise<void> {
+    const failure = this.failure;
+    if (!failure) return;
+    if (failure.state.envelope) await this.ack(failure.state.envelope, { kind: 'failed', reason: failure.reason });
+    if (this.failure === failure) this.failure = null;
   }
   private async ack(envelope: DeliveryEnvelope, result: { readonly kind: 'rendered' } | { readonly kind: 'failed'; readonly reason: string }): Promise<void> {
     if (!this.window) return;

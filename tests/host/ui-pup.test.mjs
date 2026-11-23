@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -82,4 +84,43 @@ test('pup version discovery accepts the qualified version line without exposing 
   assert.equal(await pupVersion(f.path, new AbortController().signal), '2.0.1');
   const invalid = await executable(t, "console.log('PRIVATE_AUTHENTICATION_MARKER');");
   await assert.rejects(pupVersion(invalid.path, new AbortController().signal), error => !error.message.includes('PRIVATE_AUTHENTICATION_MARKER'));
+});
+
+test('qualified rate units retain the numerator and denominator without rescaling raw values', () => {
+  const raw = structuredClone(source);
+  raw.series[0].unit = [
+    { family: 'bytes', id: 2, name: 'byte', plural: 'bytes', scale_factor: 1, short_name: 'B' },
+    { family: 'time', id: 11, name: 'second', plural: 'seconds', scale_factor: 1, short_name: 's' },
+  ];
+  const card = normalize(raw);
+  assert.equal(card.series[0].unit, 'B/s');
+  assert.deepEqual(card.series[0].points, source.series[0].pointlist);
+});
+test('a raw response must match its fixed reservation query and range, allowing only interval-aligned boundary buckets', () => {
+  for (const mutate of [raw => raw.query = 'another query', raw => raw.from_date += 1000, raw => raw.to_date -= 1000,
+    raw => { raw.series[0].start -= 600000; raw.series[0].pointlist = raw.series[0].pointlist.map(([at, value]) => [at - 600000, value]); }]) {
+    const raw = structuredClone(source); mutate(raw); assert.throws(() => normalize(raw));
+  }
+});
+
+test('the independent pup guardian drains a SIGTERM-resistant child after its CLI owner is killed', { timeout: 15000 }, async t => {
+  const f = await executable(t, "const fs=require('node:fs'); process.on('SIGTERM',()=>{}); fs.writeFileSync(process.argv[2],String(process.pid)); setInterval(()=>{},1000);");
+  const ready = join(f.directory, 'guardian-ready');
+  const module = process.env.OPENPANE_PUP_REPRO_MODULE ?? new URL('../../apps/host/build/tsc/ui-pup-process.js', import.meta.url).href;
+  const owner = spawn(process.execPath, ['--input-type=module', '-e', `import {runPup} from ${JSON.stringify(module)}; await runPup(${JSON.stringify(f.path)},[${JSON.stringify(ready)}],{signal:new AbortController().signal,timeoutMs:10000});`], { stdio: 'ignore' });
+  let pid;
+  t.after(() => { if (owner.exitCode === null && owner.signalCode === null) owner.kill('SIGKILL'); if (pid) try { process.kill(-pid, 'SIGKILL'); } catch {} });
+  const until = Date.now() + 5000;
+  while (!await access(ready).then(() => true, () => false)) { if (Date.now() > until) throw new Error('Supervised pup did not start'); await new Promise(resolve => setTimeout(resolve, 20)); }
+  pid = Number(await readFile(ready, 'utf8'));
+  const exit = once(owner, 'exit'); owner.kill('SIGKILL'); await exit;
+  const drained = Date.now() + 3500;
+  while (Date.now() < drained) { try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; throw error; } await new Promise(resolve => setTimeout(resolve, 20)); }
+  assert.fail('Pup survived the death of its publishing CLI');
+});
+test('an expired execution grant cannot start a late pup process', async t => {
+  const f = await executable(t, "require('node:fs').writeFileSync(process.argv[2],'started');");
+  const ready = join(f.directory, 'late-start');
+  assert.deepEqual(await runPup(f.path, [ready], { signal: new AbortController().signal, deadlineMs: Date.now() - 1 }), { kind: 'failed', reason: 'pup-timeout' });
+  await assert.rejects(access(ready), { code: 'ENOENT' });
 });

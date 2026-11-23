@@ -1,7 +1,8 @@
+import { pruneDraftCarryHistory } from './draft-carry.js';
 import { parseConversationOpenResult } from '@openpane/contracts';
 import type { ConversationOpenResult, ConversationScope, EditorBinding, ExperienceV1 } from '@openpane/contracts';
 import { sameScope } from '@openpane/contracts';
-import { record } from '@openpane/contracts/decode';
+import { count, record } from '@openpane/contracts/decode';
 import { BrowserViewStorage } from './browser-storage.js';
 import type { PlacementAcquisition, PlacementPort } from './placement-port.js';
 import { DesktopWindowPort, parseNativeReservation } from './window-context.js';
@@ -23,8 +24,8 @@ export class WindowCoordinator implements PlacementPort {
   trackPlacement(handler: (reservation: NativeReservation, binding: EditorBinding) => Promise<void>): void { this.track = handler; }
   private notice: (result: ConversationOpenResult, requestId: string) => void = () => {};
   observeIntent(handler: (result: ConversationOpenResult, requestId: string) => void): void { this.notice = handler; }
-  private capture: (requestId: string) => Promise<boolean> = async () => false;
-  captureCarry(handler: (requestId: string) => Promise<boolean>): void { this.capture = handler; }
+  private capture: (requestId: string) => Promise<{ readonly cancel: () => Promise<void> } | null> = async () => null;
+  captureCarry(handler: (requestId: string) => Promise<{ readonly cancel: () => Promise<void> } | null>): void { this.capture = handler; }
   private readonly browserLabel: () => string;
   constructor(private readonly port: DesktopWindowPort | null, browserLabel?: () => string) {
     const id = crypto.randomUUID(); this.browserLabel = browserLabel ?? (() => `browser:${id}`);
@@ -38,15 +39,24 @@ export class WindowCoordinator implements PlacementPort {
     const { binding } = await BrowserViewStorage.locateEditor(scope);
     return binding?.kind !== 'handoff-reserved' || binding.targetLabel === this.port.context.label;
   }
-  delegateCreate = async (agentId: string, carry: boolean): Promise<ConversationOpenResult | null> => {
+  delegateCreate = async (agentId: string, carry: boolean, initialDraft: string | null = null): Promise<ConversationOpenResult | null> => {
     if (this.port?.context.role !== 'chat') return null;
+    if (initialDraft) return { kind: 'refused', reason: 'This message stays here. Start the new chat from main, then copy it to that chat.' };
     return this.intent({ kind: 'create', agentId, carry }, null);
   };
   private async intent(action: NativePlacementIntent['action'], scope: ConversationScope | null): Promise<Exclude<ConversationOpenResult, { readonly kind: 'inline' }>> {
     if (!this.port) return { kind: 'refused', reason: 'Native placement is unavailable.' };
-    const requestId = crypto.randomUUID();
+    let requestId: string = crypto.randomUUID(), captured: { readonly cancel: () => Promise<void> } | null = null;
     try {
-      const canonical = { ...action, carry: action.carry ? await this.capture(requestId) : false };
+      let context = record(await this.port.request({ kind: 'intent-context' }), ['epoch']), epoch = count(context.epoch);
+      if (!epoch) throw new Error('Invalid native request epoch');
+      if (action.carry && await pruneDraftCarryHistory(epoch) >= 1000) {
+        context = record(await this.port.request({ kind: 'intent-context', retireAfter: epoch }), ['epoch']); epoch = count(context.epoch);
+        await pruneDraftCarryHistory(epoch);
+      }
+      requestId = `${epoch}:${requestId}`;
+      captured = action.carry ? await this.capture(requestId) : null;
+      const canonical = { ...action, carry: captured !== null };
       const intent = record(await this.port.request({ kind: 'placement-intent', requestId, action: canonical }));
       if (intent.result !== null && intent.result !== undefined) {
         const result = parseConversationOpenResult(intent.result);
@@ -54,7 +64,11 @@ export class WindowCoordinator implements PlacementPort {
       }
       const target = intent.target === null ? null : parseNativeReservation(intent.target);
       const pending = { kind: 'pending', scope: target?.scope ?? scope, reason: 'Main is coordinating the requested chat.' } as const; this.notice(pending, requestId); return pending;
-    } catch (error) { const result = { kind: 'refused', reason: error instanceof Error ? error.message : String(error) } as const; this.notice(result, requestId); return result; }
+    } catch (error) {
+      let reason = error instanceof Error ? error.message : String(error);
+      try { await captured?.cancel(); } catch { reason += ' The draft remains pending in its source; recover local storage before retrying.'; }
+      const result = { kind: 'refused', reason } as const; this.notice(result, requestId); return result;
+    }
   }
   private geometry(request: Request): object {
     const policy = this.presentation.chatWindow;
@@ -110,7 +124,10 @@ export class WindowCoordinator implements PlacementPort {
       const separate = this.port?.context.role === 'main' && this.port.context.liveRelay && (this.forced.get(JSON.stringify(request.scope)) ?? this.presentation.chats) === 'separate';
       if (separate) {
         const reservation = parseNativeReservation(await this.port.request({ kind: 'reserve', scope: request.scope, viewId, creationAgentId: request.creation ? request.agentId : null, newTransition: binding?.kind === 'editing' }));
-        if (request.creation && !binding && sourceViewId === null) return this.launch(request);
+        if (request.creation && !binding && sourceViewId === null) {
+          if (request.initialDraft !== null && request.initialDraft !== undefined) await BrowserViewStorage.prepareCreationDraft({ scope: request.scope, viewId: reservation.viewId, label: reservation.label, transitionId: reservation.transitionId, agentId: request.agentId }, request.initialDraft);
+          return this.launch(request);
+        }
         let committed: EditorBinding;
         if (binding?.kind === 'handoff-reserved') {
           if (binding.viewId !== reservation.viewId || binding.targetLabel !== reservation.label || binding.transitionId !== reservation.transitionId) throw new Error('The saved handoff and native reservation disagree. Recover the recorded target before retrying.');

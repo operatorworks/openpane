@@ -81,10 +81,12 @@ async function run() {
       for (const action of ['send', 'stop', 'approve']) {
         const button = document.createElement('button'); button.textContent = action;
         button.onclick = async () => {
+          try {
           const start = performance.now();
           const result = await command<{ slot: number; action: string }>({ kind: 'interaction', action });
           if (result.slot !== context.slot || result.action !== action) throw new Error('Wrong interaction scope');
           await report('interaction', { ...result, elapsedMs: performance.now() - start });
+          } catch (error) { await report('failure', String(error)); }
         };
         controls.append(button);
       }

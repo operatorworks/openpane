@@ -35,12 +35,13 @@ interface ContinuationRecord<Owner extends ContinuationOwner> {
   /** Check again returned no view. A click zeroes this with the budgets; settling a view clears it. */
   checkFailed: boolean;
   stopped: boolean;
+  placement: Extract<ConversationOpenResult, { readonly kind: 'pending' }> | null;
 }
 interface ContinuationPort<Owner extends ContinuationOwner> {
   owner(): Owner | null;
   active(): OpenConversation | null;
   busy(): boolean;
-  publish(update: Partial<Pick<ApplicationSnapshot, 'continuation' | 'catalog' | 'workspaces'>>): void;
+  publish(update: Partial<Pick<ApplicationSnapshot, 'continuation' | 'catalog' | 'workspaces' | 'lastPlacement' | 'error'>>): void;
   current<T>(owner: Owner, operation: Promise<T>): Promise<T>;
   recoverDraft(owner: Owner, scope: ConversationScope): Promise<StoreBorrow | null>;
   install(owner: Owner, scope: ConversationScope, arrived?: ConversationContinuation['arrived']): Promise<ConversationOpenResult>;
@@ -128,16 +129,16 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
   }
   /** Background reads; a click owns the record while its action runs. */
   async function refreshContinuation(record: ContinuationRecord<Owner>): Promise<void> {
-    if (!liveContinuation(record) || record.action) return;
+    if (!liveContinuation(record) || record.action || record.placement) return;
     let view: ContinuationView;
     try { view = await readContinuation(record.owner, record.target.scope); }
     catch {
-      if (!liveContinuation(record) || record.action) return;
+      if (!liveContinuation(record) || record.action || record.placement) return;
       if (++record.failures < CONTINUATION_READ_ATTEMPTS) pollContinuation(record);
       else publishContinuation(record);
       return;
     }
-    if (!liveContinuation(record) || record.action) return;
+    if (!liveContinuation(record) || record.action || record.placement) return;
     const successor = await settleContinuation(record, view);
     if (!successor || !liveContinuation(record) || record.action || stalled(record)) return;
     if (port.busy()) pollContinuation(record);
@@ -150,7 +151,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     }
     stop();
     const record: ContinuationRecord<Owner> = { owner, target, chain: [{ scope: target.scope, view: null }], arrived, earlier: [], action: null,
-      error: '', earlierError: '', timer: undefined, delay: CONTINUATION_POLL_MS, failures: 0, moves: 0, checkFailed: false, stopped: false };
+      error: '', earlierError: '', timer: undefined, delay: CONTINUATION_POLL_MS, failures: 0, moves: 0, checkFailed: false, stopped: false, placement: null };
     continuation = record;
     publishContinuation(record);
     void refreshContinuation(record);
@@ -188,8 +189,10 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     try {
       const newest = await newestSegment(owner, successor);
       const opened = await port.install(owner, newest, 'continue');
+      port.publish({ lastPlacement: opened });
       if (opened.kind !== 'inline') {
-        record.action = null; record.stopped = opened.kind !== 'refused';
+        record.placement = opened.kind === 'pending' ? opened : null;
+        record.action = null; record.stopped = opened.kind === 'detached';
         record.error = opened.kind === 'detached' ? 'Continuation opened in its own window.' : opened.reason;
         publishContinuation(record); return;
       }
@@ -221,7 +224,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
   async function act(owner: Owner, target: OpenConversation, action: 'start' | 'check'): Promise<void> {
     port.requireTarget(owner, target);
     const record = continuation;
-    if (!record || !liveContinuation(record) || record.action) return;
+    if (!record || !liveContinuation(record) || record.action || record.placement) return;
     clearTimeout(record.timer);
     record.action = action;
     record.error = '';
@@ -289,5 +292,13 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
       }
     }
   }
-  return { stop, watch, newestSegment, moveDraft, act, readEarlier };
+  function settlePlacement(expected: Extract<ConversationOpenResult, { readonly kind: 'pending' }>, result: Exclude<ConversationOpenResult, { readonly kind: 'pending' }>): void {
+    const record = continuation;
+    if (!record || record.placement !== expected || !liveContinuation(record)) return;
+    record.placement = null;
+    record.stopped = result.kind !== 'refused';
+    record.error = result.kind === 'refused' ? result.reason : 'Continuation opened in its assigned editor.';
+    publishContinuation(record);
+  }
+  return { stop, watch, newestSegment, moveDraft, act, readEarlier, settlePlacement };
 }

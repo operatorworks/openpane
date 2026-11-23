@@ -38,10 +38,12 @@ export function parsePlacementOutcome(value: unknown): PlacementOutcome {
 export function parseApplyReceipt(value: unknown): ApplyReceipt {
   const input = record(value, ['requestId', 'deliveryGeneration', 'selectionRevision', 'digest', 'requestDigest', 'participants']);
   const envelope = parseDelivery({ requestId: input.requestId, deliveryGeneration: input.deliveryGeneration, selectionRevision: input.selectionRevision, digest: input.digest });
-  if (!Array.isArray(input.participants) || input.participants.length > 32) throw new Error('Invalid receipt cohort');
+  const cohortLimit = envelope.requestId.startsWith('recovery:') ? 64 : 32;
+  if (!Array.isArray(input.participants) || input.participants.length > cohortLimit) throw new Error('Invalid receipt cohort');
   const participants = input.participants.map(value => {
     const input = record(value, ['slot', 'visual', 'placement']), slot = parseCohortSlot(input.slot), placement = parsePlacementOutcome(input.placement);
     if (slot.kind === 'transition' && 'transitionId' in placement && placement.transitionId !== slot.transitionId) throw new Error('Placement outcome names another transition');
+    if (slot.kind === 'transition' && placement.kind === 'ready' && (!slot.target || placement.bindingRevision !== slot.target.bindingRevision)) throw new Error('Ready placement does not match its reserved binding');
     return { slot, visual: parseVisualOutcome(input.visual), placement };
   });
   return { ...envelope, requestDigest: hex(input.requestDigest, 64), participants };

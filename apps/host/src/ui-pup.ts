@@ -25,19 +25,28 @@ export function normalizePup(input: unknown, query: string, title: string, range
     throw new Error('Unsupported pup response schema: expected raw Datadog v1 time_series success');
   }
   if (response.series.length > METRICS_CARD_LIMITS.series) throw new Error('Metrics response exceeds the series limit');
-  if (count(response.from_date) > count(response.to_date)) throw new Error('Invalid pup v1 returned range');
+  const fromMs = range.fromSeconds * 1000, toMs = range.toSeconds * 1000;
+  if (response.query !== query || count(response.from_date) !== fromMs || count(response.to_date) !== toMs) throw new Error('Pup response does not match the reserved query and range');
   return parseMetricsCard({ schemaVersion: 1, title, query, fromMs: range.fromSeconds * 1000, toMs: range.toSeconds * 1000, fetchedAtMs,
     series: response.series.map((value: unknown) => {
       const series = record(value);
       const start = count(series.start), end = count(series.end);
       if (start > end || !count(series.interval) || !Array.isArray(series.pointlist) || series.pointlist.length !== count(series.length) || series.pointlist.length > METRICS_CARD_LIMITS.points) throw new Error('Invalid pup v1 series metadata');
+      const bucketMs = count(series.interval) * 1000;
+      if (start < fromMs - bucketMs || end > toMs + bucketMs || start > toMs || end < fromMs) throw new Error('Pup series is outside the reserved range');
       for (const point of series.pointlist) {
         if (!Array.isArray(point) || point.length !== 2 || count(point[0]) < start || count(point[0]) > end) throw new Error('Pup v1 point timestamp disagrees with its epoch-millisecond series bounds');
       }
-      if (!Array.isArray(series.unit) || series.unit.length !== 2 || series.unit[1] !== null) throw new Error('Unsupported pup v1 unit metadata');
-      const unit = series.unit[0] === null ? null : record(series.unit[0]);
-      const label = unit === null ? null : typeof unit.short_name === 'string' && unit.short_name.length ? unit.short_name : unit.name;
-      return { label: boundedText(series.display_name, 200), unit: label === null ? null : boundedText(label, 200), points: series.pointlist };
+      if (!Array.isArray(series.unit) || series.unit.length !== 2) throw new Error('Unsupported pup v1 unit metadata');
+      const unitLabel = (value: unknown): string | null => {
+        if (value === null) return null;
+        const unit = record(value);
+        if (typeof unit.family !== 'string' || !Number.isSafeInteger(unit.id) || typeof unit.name !== 'string' || typeof unit.plural !== 'string' || typeof unit.scale_factor !== 'number' || !Number.isFinite(unit.scale_factor) || unit.scale_factor <= 0 || typeof unit.short_name !== 'string') throw new Error('Unsupported pup v1 unit metadata');
+        return boundedText(unit.short_name.length ? unit.short_name : unit.name, 200);
+      };
+      const numerator = unitLabel(series.unit[0]), denominator = unitLabel(series.unit[1]);
+      const unit = denominator === null ? numerator : numerator === null ? `per ${denominator}` : `${numerator}/${denominator}`;
+      return { label: boundedText(series.display_name, 200), unit, points: series.pointlist };
     }),
   });
 }

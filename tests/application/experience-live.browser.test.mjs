@@ -89,3 +89,63 @@ test('offline builtin recovery survives reload and never overwrites a newer sele
   assert.equal((await requestUi(socket, { op: 'context' })).revision, 3);
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Offline recovery keeps this draft');
 });
+
+test('superseding an unpainted candidate restores the last validated appearance when the successor fails', { timeout: 30000 }, async t => {
+  const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  await draft(page, 'Keep the validated editor');
+  const editor = page.getByRole('textbox', { name: 'Message', exact: true }), original = await editor.elementHandle();
+  const context = await requestUi(socket, { op: 'context' }), id = () => `${context.requestEpoch}:${randomUUID()}`;
+  const a = experience('#3355aa'), b = experience('#aa5533'), c = experience('#338855');
+  const first = { op: 'apply', requestId: id(), expectedRevision: 0, bundle: a };
+  await requestUi(socket, first); assert.equal((await completed(socket, first.requestId)).outcome, 'all-rendered');
+  await page.evaluate(digest => {
+    const frame = window.requestAnimationFrame;
+    window.requestAnimationFrame = callback => frame(time => {
+      if (document.querySelector('.experience-content')?.getAttribute('data-openpane-experience') === digest) (window.heldAppearanceFrames ??= []).push(() => callback(time));
+      else callback(time);
+    });
+  }, b.digest);
+  await requestUi(socket, { op: 'apply', requestId: id(), expectedRevision: 1, bundle: b });
+  await wait(() => page.locator('.experience-content').evaluate((node, digest) => node.getAttribute('data-openpane-experience') === digest, b.digest), 'unvalidated B in the frame');
+  await page.route(`**/ui-assets/${c.digest}/style.css`, route => route.fulfill({ status: 404, body: 'missing' }));
+  const failed = { op: 'apply', requestId: id(), expectedRevision: 2, bundle: c };
+  await requestUi(socket, failed); assert.equal((await completed(socket, failed.requestId)).outcome, 'failed');
+  assert.equal(await page.locator('.experience-content').getAttribute('data-openpane-experience'), a.digest);
+  assert.equal(await page.locator('.composer').evaluate(node => getComputedStyle(node).borderTopColor), 'rgb(51, 85, 170)');
+  assert.equal(await editor.inputValue(), 'Keep the validated editor');
+  assert.equal(await editor.evaluate((node, old) => node === old, original), true);
+});
+
+test('a lost failed-render acknowledgement retries the same delivery without a refresh', { timeout: 45000 }, async t => {
+  const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  const context = await requestUi(socket, { op: 'context' });
+  const failed = { op: 'apply', requestId: `${context.requestEpoch}:${randomUUID()}`, expectedRevision: 0, bundle: experience('#aa5533') };
+  await page.route(`**/ui-assets/${failed.bundle.digest}/style.css`, route => route.fulfill({ status: 404, body: 'missing' }));
+  let dropped = 0;
+  await page.route('**/api/ui/v1', route => {
+    const request = route.request().postDataJSON();
+    if (request.op === 'ack' && request.result.kind === 'failed' && !dropped++) return route.abort('connectionfailed');
+    return route.continue();
+  });
+  await requestUi(socket, failed);
+  assert.equal((await completed(socket, failed.requestId)).outcome, 'failed');
+  assert.ok(dropped >= 2, 'the rejected appearance is retried after the lost reply');
+});
+test('an open application picker does not fail a visual delivery or builtin recovery', { timeout: 45000 }, async t => {
+  const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
+  await page.setViewportSize({ width: 640, height: 720 });
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  await page.getByRole('button', { name: 'Harness, Recorded', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Choose harness', exact: true }).waitFor();
+  const context = await requestUi(socket, { op: 'context' });
+  const command = { op: 'apply', requestId: `${context.requestEpoch}:${randomUUID()}`, expectedRevision: 0, bundle: experience('#3355aa') };
+  await requestUi(socket, command); const painted = await completed(socket, command.requestId);
+  const controls = await page.locator('[data-openpane-essential]').evaluateAll(nodes => nodes.map(n => { const b=n.getBoundingClientRect(),hit=document.elementFromPoint(Math.max(0,Math.min(innerWidth-1,b.x+b.width/2)),Math.max(0,Math.min(innerHeight-1,b.y+b.height/2))); return {control:n.getAttribute('data-openpane-essential'),hit:hit?.outerHTML.slice(0,300)}; }));
+  assert.equal(painted.outcome, 'all-rendered', JSON.stringify({painted,controls}));
+  const recovery = await requestUi(socket, { op: 'context' });
+  const restored = { op: 'restore', requestId: `recovery:${recovery.recoveryGeneration}:${randomUUID()}`, expectedRevision: recovery.revision, expectedRecoveryGeneration: recovery.recoveryGeneration };
+  await requestUi(socket, restored); assert.equal((await completed(socket, restored.requestId)).outcome, 'all-rendered');
+  assert.equal(await page.locator('.experience-content').getAttribute('data-openpane-experience'), null);
+});

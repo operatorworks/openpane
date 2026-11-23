@@ -1,3 +1,4 @@
+import { assessNativeProbe } from './result.mjs';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, copyFile, writeFile, appendFile } from 'node:fs/promises';
@@ -48,14 +49,7 @@ const done = setInterval(() => {
 await once(child, 'exit'); clearTimeout(deadline); clearInterval(done);
 for (const timer of timers) clearTimeout(timer);
 server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-const paints = reports.filter(report => report.kind === 'paint'), interactions = reports.filter(report => report.kind === 'interaction');
-const result = { timedOut, failures: reports.filter(report => report.kind === 'failure'), minimized: reports.some(report => report.kind === 'minimized'),
-  wrongDocumentDenied: reports.some(report => report.kind === 'wrong-document-denied'), recoveredDraft: reports.some(report => report.kind === 'child-ready' && report.detail.recovered),
-  mainComplete: reports.some(report => report.kind === 'main-complete'),
-  childrenComplete: new Set(reports.filter(report => report.kind === 'child-complete').map(report => report.detail.label)).size,
-  lastGenerationByLabel: Object.fromEntries(paints.map(report => [report.detail.label, report.detail.generation])),
-  interactions: interactions.length, maxInteractionMs: Math.max(0, ...interactions.map(report => report.detail.elapsedMs)),
-  evidence: directory };
+const result = { ...assessNativeProbe(reports, timedOut), evidence: directory };
 await writeFile(join(directory, 'result.json'), JSON.stringify(result, null, 2));
 console.log(JSON.stringify(result, null, 2));
-process.exitCode = !timedOut && !result.failures.length && result.mainComplete && result.childrenComplete === 8 ? 0 : 1;
+process.exitCode = result.passed ? 0 : 1;

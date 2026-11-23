@@ -544,3 +544,14 @@ test('an unconfirmed selection reloads as interrupted and retry re-uploads its s
   assert.equal(store.getSnapshot().image.status, 'ready');
   assert.deepEqual(drafts.imageWrites, []);
 });
+
+
+test('draft capture observes an edit already submitted without awaiting its save', async () => {
+  const { store } = fixture();
+  await store.ready;
+  const writing = store.setDraft('latest submitted edit');
+  const capture = await store.captureDraft();
+  await writing;
+  assert.deepEqual(capture, { text: 'latest submitted edit', revision: 1 });
+  await store.dispose();
+});

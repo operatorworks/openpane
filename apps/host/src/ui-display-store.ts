@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { canonicalJson, metricsEventSchema, parseScope } from '@openpane/contracts';
 import type { ConversationScope, DisplayPage, DisplayReceipt, DisplaySubscription } from '@openpane/contracts';
 import { count } from '@openpane/contracts/decode';
-import { DisplayDatabase, displayDigest, displayEventReservation, displayMetadataReservation, displayPayloadReservation, displayScope, displayText, publicationReceipt } from './ui-display-db.js';
+import { DisplayDatabase, displayDigest, displayEventReservation, displayMetadataReservation, displayPayloadReservation, displayRemovalReservation, DISPLAY_REMOVAL_ENTRIES, displayScope, displayText, publicationReceipt } from './ui-display-db.js';
 import { DisplayPages } from './ui-display-pages.js';
 import { queryReservation } from './ui-display-records.js';
 import type { DisplayKey } from './ui-display-records.js';
@@ -24,10 +24,11 @@ const queryKey = (key: DisplayKey | null): Extract<DisplayKey, { readonly mode: 
   if (key.mode !== 'query') throw new UiRefusal('conflict', 'Publication ID belongs to a raw display event');
   return key;
 };
-function publishedReceipt(key: DisplayKey): DisplayReceipt {
+function publishedReceipt(key: DisplayKey): DisplayReceipt | null {
   if (key.mode === 'raw') return key.receipt;
   if (key.outcome.kind === 'published' || key.outcome.kind === 'removed') return key.outcome.receipt;
-  throw new UiRefusal('not-found', 'No published card exists for this ID');
+  if (key.outcome.kind === 'failed' || key.outcome.kind === 'interrupted' || key.outcome.kind === 'abandoned') return null;
+  throw new UiRefusal('conflict', 'Wait for the running query to settle before removing it');
 }
 export class UiDisplayStore {
   private readonly data: DisplayDatabase;
@@ -40,7 +41,7 @@ export class UiDisplayStore {
     options.transaction(() => {
       for (const row of options.db.prepare("SELECT scope,id FROM ui_display_keys WHERE state='running'").all()) {
         const scope = parseScope(JSON.parse(displayText(row.scope))), id = displayText(row.id), key = queryKey(this.data.key(scope, id));
-        this.data.putKey(scope, id, { ...key, outcome: { kind: 'interrupted', reason: 'host-restarted' } }, 0, 0);
+        this.data.putKey(scope, id, { ...key, executeUntilMs: key.executeUntilMs || Date.now() + 45000, outcome: { kind: 'interrupted', reason: 'host-restarted' } }, 0, 0);
       }
     });
   }
@@ -83,7 +84,7 @@ export class UiDisplayStore {
           const publication = this.data.preparePublication(scope, publicationId, request.event), payloadBytes = Buffer.byteLength(canonicalJson(publication));
           const created: DisplayKey = { version: 1, mode: 'raw', inputDigest, removed: false, receipt: publicationReceipt(publication) };
           this.data.reserveCapacity(scope, payloadBytes);
-          this.options.capacity(displayMetadataReservation(scope, publicationId, created) + displayEventReservation(scope, publicationId), 2);
+          this.options.capacity(displayMetadataReservation(scope, publicationId, created) + displayEventReservation(scope, publicationId) + displayRemovalReservation(scope, publicationId), 2 + DISPLAY_REMOVAL_ENTRIES);
           this.data.putKey(scope, publicationId, created, payloadBytes, 0); this.data.savePublication(publication);
           committed = this.options.notify;
           return { mode: 'raw', kind: 'published', receipt: created.receipt };
@@ -93,26 +94,27 @@ export class UiDisplayStore {
           if (key) {
             const existing = queryKey(key);
             if (existing.inputDigest !== inputDigest) throw new UiRefusal('conflict', 'Query publication ID has different arguments');
-            return { input: existing.input, reservation: queryReservation(scope, publicationId, existing), granted: false };
+            return { input: existing.input, reservation: queryReservation(scope, publicationId, existing), granted: false, executeUntilMs: null };
           }
           this.epoch(publicationId);
           const created: Extract<DisplayKey, { readonly mode: 'query' }> = { version: 1, mode: 'query', inputDigest, input: request.input,
-            range: resolvePupRange(request.input.from, request.input.to, Date.now()), attempt: 1, outcome: { kind: 'running' } };
+            range: resolvePupRange(request.input.from, request.input.to, Date.now()), executeUntilMs: Date.now() + 30000, attempt: 1, outcome: { kind: 'running' } };
           const payloadBytes = displayPayloadReservation(scope, publicationId), eventBytes = displayEventReservation(scope, publicationId);
-          this.data.reserveCapacity(scope, payloadBytes); this.options.capacity(displayMetadataReservation(scope, publicationId, created) + eventBytes, 2);
+          this.data.reserveCapacity(scope, payloadBytes); this.options.capacity(displayMetadataReservation(scope, publicationId, created) + eventBytes + displayRemovalReservation(scope, publicationId), 2 + DISPLAY_REMOVAL_ENTRIES);
           this.data.putKey(scope, publicationId, created, payloadBytes, eventBytes);
           committed = () => { this.owners.set(operationKey(scope, publicationId), { scope, publicationId, attempt: created.attempt, connection }); };
-          return { input: created.input, reservation: queryReservation(scope, publicationId, created), granted: true };
+          return { input: created.input, reservation: queryReservation(scope, publicationId, created), granted: true, executeUntilMs: created.executeUntilMs };
         }
         case 'display-query-retry': {
           const connection = this.connection(owner), existing = queryKey(key);
           if (existing.attempt !== request.expectedAttempt || !['failed', 'interrupted'].includes(existing.outcome.kind)) throw new UiRefusal('conflict', 'Retry requires the current failed or interrupted attempt');
+          if (existing.outcome.kind === 'interrupted' && Date.now() < existing.executeUntilMs + 2000) throw new UiRefusal('conflict', `Previous query attempt is draining. Retry after ${new Date(existing.executeUntilMs + 2000).toISOString()}`);
           if (existing.attempt >= Number.MAX_SAFE_INTEGER) throw new UiRefusal('capacity', 'Query attempt generation exhausted');
-          const updated = { ...existing, attempt: existing.attempt + 1, outcome: { kind: 'running' } } satisfies DisplayKey;
+          const updated = { ...existing, executeUntilMs: Date.now() + 30000, attempt: existing.attempt + 1, outcome: { kind: 'running' } } satisfies DisplayKey;
           const payloadBytes = displayPayloadReservation(scope, publicationId), eventBytes = displayEventReservation(scope, publicationId);
           this.data.reserveCapacity(scope, payloadBytes); this.options.capacity(eventBytes, 1); this.data.putKey(scope, publicationId, updated, payloadBytes, eventBytes);
           committed = () => { this.owners.set(operationKey(scope, publicationId), { scope, publicationId, attempt: updated.attempt, connection }); };
-          return { input: updated.input, reservation: queryReservation(scope, publicationId, updated), granted: true };
+          return { input: updated.input, reservation: queryReservation(scope, publicationId, updated), granted: true, executeUntilMs: updated.executeUntilMs };
         }
         case 'display-query-finalize': {
           const existing = this.owned(scope, publicationId, request.attempt, owner), card = request.event.value;
@@ -139,14 +141,15 @@ export class UiDisplayStore {
           this.epoch(request.requestId);
           if (!key) throw new UiRefusal('not-found', 'No published card exists for this ID');
           const receipt = publishedReceipt(key);
-          const removed = key.mode === 'raw' ? key.removed : key.outcome.kind === 'removed';
+          const removed = key.mode === 'raw' ? key.removed : key.outcome.kind === 'removed' || key.outcome.kind === 'abandoned';
           const resultBytes = Buffer.byteLength(canonicalJson({ scope, publicationId, sequence: Number.MAX_SAFE_INTEGER, kind: 'removed' })) + 256;
-          this.options.capacity(resultBytes + (removed ? 0 : displayEventReservation(scope, publicationId)), removed ? 1 : 2);
+          // The first removal consumes the two entries and bytes reserved with the active card.
+          if (removed) this.options.capacity(resultBytes, 1);
           const sequence = removed ? count(this.options.db.prepare("SELECT max(sequence) AS sequence FROM ui_display_events WHERE scope=? AND id=? AND kind='removed'").get(displayScope(scope), publicationId)?.sequence)
             : this.data.removePublication(scope, publicationId);
           if (!sequence) throw new UiRefusal('unavailable', 'Removal history is unavailable');
           if (!removed) {
-            const updated: DisplayKey = key.mode === 'raw' ? { ...key, removed: true } : { ...key, outcome: { kind: 'removed', receipt } };
+            const updated: DisplayKey = key.mode === 'raw' ? { ...key, removed: true } : { ...key, outcome: receipt ? { kind: 'removed', receipt } : { kind: 'abandoned' } };
             this.data.putKey(scope, publicationId, updated, 0, 0); committed = () => { this.pages.invalidate(scope); this.options.notify(); };
           }
           const result = { kind: 'removed', scope, publicationId, sequence }, serialized = canonicalJson(result);

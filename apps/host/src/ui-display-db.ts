@@ -23,6 +23,10 @@ export function displayPayloadReservation(scope: ConversationScope, publicationI
 export function displayMetadataReservation(scope: ConversationScope, publicationId: string, key: DisplayKey): number {
   return Buffer.byteLength(canonicalJson(key)) + 256 + (key.mode === 'query' ? Buffer.byteLength(canonicalJson(maxReceipt(scope, publicationId))) : 0);
 }
+export const DISPLAY_REMOVAL_ENTRIES = 2, DISPLAY_REMOVAL_OVERHEAD = 1024;
+export function displayRemovalReservation(scope: ConversationScope, publicationId: string): number {
+  return DISPLAY_REMOVAL_ENTRIES * (Buffer.byteLength(displayScope(scope)) + Buffer.byteLength(publicationId)) + DISPLAY_REMOVAL_OVERHEAD;
+}
 export function displayEventReservation(scope: ConversationScope, publicationId: string): number {
   return Buffer.byteLength(canonicalJson({ scope, publicationId, sequence: Number.MAX_SAFE_INTEGER, kind: 'published' }));
 }
@@ -105,6 +109,6 @@ export class DisplayDatabase {
     if (!row || row.expected !== row.actual) throw new UiRefusal('unavailable', 'Stored display payload is unavailable; remove the affected card or repair UI data');
   }
   compact(): void {
-    this.db.exec(`DELETE FROM ui_display_keys WHERE slot=0; DELETE FROM ui_display_events; DELETE FROM ui_display_removals;`);
+    this.db.exec(`DELETE FROM ui_display_keys WHERE state IN ('removed','abandoned'); DELETE FROM ui_display_events; DELETE FROM ui_display_removals;`);
   }
 }

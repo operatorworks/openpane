@@ -12,8 +12,10 @@ export function WindowApplication({ runtime }: { readonly runtime: WindowRuntime
   const state = useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot);
   useEffect(() => {
     runtime.start();
-    const close = () => runtime.close(); window.addEventListener('pagehide', close);
-    return () => window.removeEventListener('pagehide', close);
+    const close = () => runtime.close();
+    const resume = (event: PageTransitionEvent) => { if (event.persisted) window.location.reload(); };
+    window.addEventListener('pagehide', close); window.addEventListener('pageshow', resume);
+    return () => { window.removeEventListener('pagehide', close); window.removeEventListener('pageshow', resume); };
   }, [runtime]);
   const notice = state.placementNotice ?? state.capabilityNotice;
   return <ExperienceScope connection={runtime.ui}><PersonalizationProvider><DesktopCustomizationProvider>

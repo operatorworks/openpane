@@ -1,12 +1,14 @@
+import { initializeDraft } from './initial-draft.js';
+import { commitCarriedDraft } from './draft-carry-records.js';
 import type { ConversationScope, EditorBinding } from '@openpane/contracts';
 import { parseEditorBinding, parseScope, sameScope } from '@openpane/contracts';
-import { identifier } from '@openpane/contracts/decode';
+import { identifier, record } from '@openpane/contracts/decode';
 import type { DraftStoragePort } from '@openpane/client';
 
 import { activateEditor, conversationLock, editorBindingKey, editorViewKey, readEditorBinding, recoverEditor, transferEditor } from './editor-bindings.js';
 import type { EditorClaim, EditorRecoveryGrant, HandoffPlan } from './editor-bindings.js';
 import { decodeView } from './view-state.js';
-import type { OwnedViewStorage, SavedView, ViewStorageFactory } from './view-state.js';
+import type { OwnedViewStorage, SavedDraftRecovery, SavedView, ViewStorageFactory } from './view-state.js';
 
 export class SupersededDraftsError extends Error {
   constructor() { super('This conversation was reopened in a newer view.'); this.name = 'SupersededDrafts'; }
@@ -87,6 +89,29 @@ export class BrowserViewStorage implements OwnedViewStorage {
     } catch (error) { db?.close(); release(); throw error; }
   }
 
+  static async readLegacyDraft(viewId: string, hostId: string): Promise<SavedDraftRecovery | null> {
+    const db = await openViewDatabase(); let release: (() => void) | null = null;
+    const read = (key: IDBValidKey): Promise<unknown> => new Promise((resolve, reject) => {
+      const tx = db.transaction('records'), request = tx.objectStore('records').get(key);
+      tx.oncomplete = () => resolve(request.result); tx.onabort = () => reject(tx.error ?? new Error('Saved draft recovery interrupted'));
+    });
+    try {
+      if (await read(editorViewKey(viewId)) !== undefined) return null;
+      release = await claim(viewId);
+      if (!release) throw new Error('This saved view is open. Recover its draft in that window before copying.');
+      if (await read(editorViewKey(viewId)) !== undefined) return null;
+      const saved = decodeView(await read(['view', viewId, hostId]), hostId), scope = saved.route ?? saved.pendingCreation?.scope;
+      if (!scope) return null;
+      const binding = await readEditorBinding(db, scope);
+      if (!binding || binding.viewId === viewId) return null;
+      const value = await read(['draft', viewId, hostId, scope.conversationId]);
+      if (value === undefined) return null;
+      const draft = record(value);
+      if (typeof draft.draft !== 'string' || !sameScope(parseScope(draft.scope), scope)) throw new Error('Unsupported saved draft. Its original records are preserved.');
+      return { viewId, scope, text: draft.draft };
+    } finally { db.close(); release?.(); }
+  }
+
   static async bindingForView(viewId: string): Promise<EditorBinding | null> {
     const db = await openViewDatabase();
     try {
@@ -138,6 +163,34 @@ export class BrowserViewStorage implements OwnedViewStorage {
   }
 
   editorBinding(): EditorBinding | null { return this.editor; }
+
+  static async prepareCreationDraft(target: { readonly scope: ConversationScope; readonly viewId: string; readonly label: string; readonly transitionId: string; readonly agentId: string }, text: string): Promise<void> {
+    const releaseConversation = await conversationLock(target.scope);
+    if (!releaseConversation) throw new Error('The new conversation already has an editor');
+    let release: (() => void) | null = null, db: IDBDatabase | undefined;
+    try {
+      release = await claim(target.viewId); if (!release) throw new Error('The destination saved view is already open');
+      db = await openViewDatabase();
+      await new Promise<void>((resolve, reject) => {
+        if (!db) { reject(new Error('Initial draft storage unavailable')); return; }
+        const tx = db.transaction('records', 'readwrite'), store = tx.objectStore('records');
+        const binding = store.get(editorBindingKey(target.scope)), owner = store.get(editorViewKey(target.viewId)); let remaining = 2, failure: unknown;
+        const fail = (error: unknown) => { failure = error; tx.abort(); };
+        const commit = () => {
+          try {
+            const previous = binding.result === undefined ? null : parseEditorBinding(binding.result);
+            if (owner.result !== undefined && !sameScope(parseScope(owner.result), target.scope)) throw new Error('The destination belongs to another conversation');
+            if (previous && (previous.kind !== 'handoff-reserved' || previous.viewId !== target.viewId || previous.transitionId !== target.transitionId || previous.targetLabel !== target.label)) throw new Error('The destination editor already changed');
+            const reserved: EditorBinding = previous ?? { schemaVersion: 1, kind: 'handoff-reserved', scope: target.scope, viewId: target.viewId, transitionId: target.transitionId, targetLabel: target.label, revision: 1, writerGeneration: 1 };
+            store.put(reserved, editorBindingKey(target.scope)); store.put(target.scope, editorViewKey(target.viewId));
+            initializeDraft(store, target.viewId, target.scope, target.agentId, text, () => {}, fail);
+          } catch (error) { fail(error); }
+        };
+        for (const request of [binding, owner]) request.onsuccess = () => { if (--remaining === 0) commit(); };
+        tx.oncomplete = () => resolve(); tx.onabort = () => reject(failure ?? tx.error ?? new Error('Initial draft preparation interrupted'));
+      });
+    } finally { db?.close(); release?.(); releaseConversation(); }
+  }
 
   static async claimEditor(claimed: EditorClaim, onFailure: (error: unknown) => void): Promise<BrowserViewStorage> {
     const releaseConversation = await conversationLock(claimed.scope);
@@ -301,6 +354,13 @@ export class BrowserViewStorage implements OwnedViewStorage {
     return decodeView(await this.transaction('readonly', store => store.get(['view', this.viewId, hostId])), hostId);
   }
 
+  saveInitialDraft(scope: ConversationScope, agentId: string, text: string): Promise<void> {
+    if (this.catalog) return Promise.reject(new Error('A catalog cannot own an initial draft'));
+    return this.fenced<void>(scope, 'readwrite', this.editor?.writerGeneration ?? null, (store, result, fail) => {
+      initializeDraft(store, this.viewId, scope, agentId, text, () => result(undefined), fail);
+    });
+  }
+
   async saveNavigation(hostId: string, scope: ConversationScope): Promise<void> {
     if (!this.catalog || scope.hostId !== hostId) throw new Error('This view does not own catalog navigation.');
     await this.transaction('readwrite', store => store.put(scope, ['catalog-route', this.viewId, hostId]));
@@ -351,7 +411,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
   }
 
   private fenced<T>(scope: ConversationScope, mode: IDBTransactionMode, generation: number | null,
-    operation: (store: IDBObjectStore, result: (value: T) => void) => void): Promise<T> {
+    operation: (store: IDBObjectStore, result: (value: T) => void, fail: (error: unknown) => void) => void): Promise<T> {
     if (this.frozen.has(JSON.stringify(scope))) return Promise.reject(new SupersededDraftsError());
     return new Promise((resolve, reject) => {
       const transaction = this.begin(mode), store = transaction.objectStore('records'), binding = store.get(editorBindingKey(scope));
@@ -359,7 +419,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
       binding.onsuccess = () => {
         try {
           this.checkWriter(scope, binding.result, generation);
-          operation(store, value => { result = value; });
+          operation(store, value => { result = value; }, error => { failure = error; transaction.abort(); });
         } catch (error) { failure = error; transaction.abort(); }
       };
       transaction.oncomplete = () => resolve(result);
@@ -395,6 +455,12 @@ export class BrowserViewStorage implements OwnedViewStorage {
           if (image?.put) store.put(image.put.bytes, key(image.put.selectionId));
           store.put(records, ['draft', this.viewId, records.scope.hostId, records.scope.conversationId]);
           result(undefined);
+        }));
+      },
+      commitTransfer: async (records, transfer) => {
+        current(records.scope);
+        return protect(() => this.fenced<boolean>(records.scope, 'readwrite', generation(records.scope), (store, result, fail) => {
+          commitCarriedDraft(store, this.viewId, records, transfer, result, fail);
         }));
       },
       loadImage: async (scope, selectionId) => {

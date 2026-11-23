@@ -60,7 +60,7 @@ export function createFrontendSends(deps: {
     return authority = { session, lifetime: new AbortController() };
   }
   const failedViews = new Set<string>();
-  const retiredViews = new Set<string>();
+  const writers = new Map<string, Set<{ retired: boolean }>>();
   const entries = new Map<string, Entry>(), provisional = new Map<object, ScopeHold & { retained: RetainedFrontendTools; borrow: CaptureBorrow }>();
   const recent = new Map<string, CapturedSend & { ownerId: string }>();
   const keyFor = (viewId: string, command: OfferedCommand) => canonicalJson([viewId, command.scope, command.clientCommandId]);
@@ -171,10 +171,12 @@ export function createFrontendSends(deps: {
       syncRows(); schedule();
     },
     forStore({ viewId, scope, eligibility, capture, recoveryNeeded }: { readonly recoveryNeeded: () => void; readonly viewId: string; readonly scope: ConversationScope; readonly capture: CaptureStore; readonly eligibility: () => FrontendEligibility }): FrontendAdmission {
+      const writer = { retired: false };
+      const admitted = writers.get(viewId) ?? new Set(); admitted.add(writer); writers.set(viewId, admitted);
       return {
         capture() {
           const current = authority, session = current.session;
-          if (retiredViews.has(viewId)) throw new Error('This editor is moving to another window.');
+          if (writer.retired) throw new Error('This editor is moving to another window.');
           if (failedViews.has(viewId)) throw new Error('Local storage failed. Reload before capturing tools.');
           if (closed || !session || session.hostId !== scope.hostId) throw new Error('Reconnect before capturing tools.');
           if (eligibility() !== 'ag-ui-capture-and-bind') return null;
@@ -228,7 +230,8 @@ export function createFrontendSends(deps: {
     pause(): void { clearTimeout(timer); authority.lifetime.abort(); },
     async release(key: string): Promise<void> { const entry = entries.get(key); if (entry) await unavailable(entry); },
     async releaseView(viewId: string): Promise<void> {
-      retiredViews.add(viewId);
+      for (const writer of writers.get(viewId) ?? []) writer.retired = true;
+      writers.delete(viewId);
       for (const [key, item] of provisional) if (item.viewId === viewId) { item.retained.release(); item.borrow.release(); provisional.delete(key); }
       await Promise.all([...entries.values()].filter(entry => entry.viewId === viewId).map(unavailable));
     },

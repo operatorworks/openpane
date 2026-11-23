@@ -109,10 +109,12 @@ test('committed production browser captures both actual send paths and retains o
   await other.close();
   await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
   await page.getByRole('button', { name: 'Chats', exact: true }).click();
-  await page.getByRole('button', { name: `Reopen saved view ${otherView}`, exact: true }).click(); await connected(page);
+  await page.getByRole('button', { name: `Reopen saved view ${otherView}`, exact: true }).click();
+  await wait(async () => await page.locator('.scope-label').count() === 1 && await activeViewId(page) === otherView, 'the other editor is selected'); await connected(page);
   assert.ok((await page.evaluate(() => navigator.locks.query())).held.some(lock => lock.name === `openpane-view:${originalView}`));
-  await page.getByRole('button', { name: `Reopen saved view ${originalView}`, exact: true }).click(); await connected(page);
-  assert.equal(await activeViewId(page), originalView);
+  await page.getByRole('button', { name: `Reopen saved view ${originalView}`, exact: true }).click();
+  await wait(async () => await page.locator('.scope-label').count() === 1 && await activeViewId(page) === originalView, 'the original editor is selected'); await connected(page);
+  assert.equal(await activeViewId(page), originalView, JSON.stringify({ alerts: await page.getByRole('alert').allTextContents(), scope: await page.locator('.scope-label').textContent(), locks: await page.evaluate(() => navigator.locks.query()) }));
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Composer capture');
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -272,7 +274,7 @@ test('production browser switches recovery views and releases the old lock befor
   await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
   await wait(() => page.getByRole('button', { name: 'Reconnect', exact: true }).isEnabled(), 'saved view listing');
   await page.getByRole('button', { name: 'Chats', exact: true }).click();
-  const oldRequest = page.waitForRequest(request => request.postDataJSON()?.op === 'frontend-binding' && request.postDataJSON()?.action === 'unavailable', { timeout: 5_000 });
+  const oldRequest = page.waitForRequest(request => request.postDataJSON()?.op === 'frontend-binding' && request.postDataJSON()?.action === 'unavailable' && request.postDataJSON()?.id === original.command.clientCommandId, { timeout: 5_000 });
   await page.locator(`[data-captured-command="${original.command.clientCommandId}"]`).getByRole('button', { name: 'Release captured tools', exact: true }).click();
   await oldRequest;
   await page.getByRole('button', { name: `Reopen saved view ${nextView}`, exact: true }).click();
@@ -284,16 +286,42 @@ test('production browser switches recovery views and releases the old lock befor
       if (lock) await new Promise(release => { window.releaseOldViewProbe = release; });
     });
   }), oldView), 'another owner can acquire the old view while host replies remain held');
+  await page.evaluate(id => {
+    window.oldViewRecoveryOwners = 0; window.oldViewHeld = 0; window.oldViewWrites = [];
+    const request = navigator.locks.request.bind(navigator.locks);
+    navigator.locks.request = (name, ...args) => {
+      const callback = args.pop();
+      if (name !== `openpane-view:${id}`) return request(name, ...args, callback);
+      return request(name, ...args, async lock => {
+        if (!lock) return callback(lock);
+        window.oldViewHeld++; window.oldViewRecoveryOwners++;
+        try { return await callback(lock); } finally { window.oldViewHeld--; }
+      });
+    };
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function(value, key) {
+      if (Array.isArray(key) && key[0] === 'draft' && key[1] === id) window.oldViewWrites.push({ held: window.oldViewHeld, value });
+      return put.call(this, value, key);
+    };
+    window.releaseOldViewProbe();
+  }, oldView);
   const before = (await records(page)).flatMap(row => row.frontendSends ?? []);
+  const oldResponse = page.waitForResponse(response => { const body = response.request().postDataJSON(); return body?.op === 'frontend-binding' && body?.action === 'unavailable' && body?.id === original.command.clientCommandId; });
   releaseOld();
+  await (await oldResponse).finished();
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await wait(() => f.inspect(db => db.prepare('SELECT state FROM frontend_send_owners WHERE command_id=?').get(original.command.clientCommandId).state) === 'unavailable', 'late original host response');
-  assert.deepEqual((await records(page)).flatMap(row => row.frontendSends ?? []), before);
   releaseNext();
   await wait(async () => (await records(page)).flatMap(row => row.frontendSends ?? []).find(row => row.command.clientCommandId === successor.command.clientCommandId).state === 'unavailable-confirmed', 'successor view acknowledgment');
   const after = (await records(page)).flatMap(row => row.frontendSends ?? []);
-  assert.equal(after.find(row => row.command.clientCommandId === original.command.clientCommandId).state, 'unavailable-pending');
+  const ownership = await page.evaluate(() => ({ owners: window.oldViewRecoveryOwners, writes: window.oldViewWrites }));
+  assert.ok(ownership.writes.every(write => write.held > 0), 'only a newly acquired physical owner may advance the retired journal');
+  assert.ok(['unavailable-pending', 'unavailable-confirmed'].includes(after.find(row => row.command.clientCommandId === original.command.clientCommandId).state));
   assert.deepEqual(after.map(({ command, ownerId }) => ({ command, ownerId })), before.map(({ command, ownerId }) => ({ command, ownerId })));
-  assert.deepEqual([...new Set(requests.map(request => request.id))].sort(), [original.command.clientCommandId, successor.command.clientCommandId].sort());
+  const ids = [original.command.clientCommandId, successor.command.clientCommandId];
+  assert.ok(requests.every(request => ids.includes(request.id)));
+  for (const id of ids) assert.ok(requests.some(request => request.id === id));
+  t.diagnostic(`Unavailable recovery requests: original=${requests.filter(request => request.id === ids[0]).length}, successor=${requests.filter(request => request.id === ids[1]).length}; new original-view owners=${ownership.owners}`);
   assert.equal(f.operations.length, 2); assert.equal(f.translations(), 2); assert.equal(await page.evaluate(() => window.captureFixture.executions), 0);
   for (const table of ['frontend_events', 'frontend_receipts']) assert.equal(f.inspect(db => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n), 0);
 });

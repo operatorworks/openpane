@@ -67,3 +67,33 @@ test('bundle identity preserves authored token bytes including hexadecimal color
   assert.equal(first.manifest.theme.light.colors.accent, '#AABBCC');
   assert.notEqual(first.digest, second.digest);
 });
+
+test('artwork bundle identity remains stable across process collations', () => {
+  const bytes = png(), names = ['aa.png', 'b.png'], value = manifest();
+  value.assets = names.map(name => ({ name, mimeType: 'image/png', bytes: bytes.length, sha256: sha256(bytes) }));
+  const original = String.prototype.localeCompare;
+  try {
+    const danish = new Intl.Collator('da-DK'), english = new Intl.Collator('en-US');
+    String.prototype.localeCompare = function(other) { return danish.compare(String(this), other); };
+    const authored = createExperienceBundle(value, null, names.map(name => ({ name, base64: bytes.toString('base64') })));
+    String.prototype.localeCompare = function(other) { return english.compare(String(this), other); };
+    assert.deepEqual(parseExperienceBundle(authored), authored);
+  } finally { String.prototype.localeCompare = original; }
+});
+
+test('directory ingestion preserves a UTF-8 stylesheet byte-order mark in its identity', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'op-bom-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  const value = bundle('\uFEFF[data-openpane-part="button"] { color: #123456; }');
+  await writeFile(join(directory, 'experience.json'), JSON.stringify(value.manifest)); await writeFile(join(directory, 'style.css'), value.stylesheet);
+  assert.deepEqual(await readExperienceDirectory(directory), value);
+});
+
+test('directory ingestion rejects a named pipe without waiting for a writer', { timeout: 5000 }, async t => {
+  const { execFile } = await import('node:child_process'), { promisify } = await import('node:util');
+  const directory = await mkdtemp(join(tmpdir(), 'op-fifo-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  await promisify(execFile)('mkfifo', [join(directory, 'experience.json')]);
+  const module = new URL('../../apps/host/build/tsc/experience-bundle.js', import.meta.url).href;
+  const source = `import { readExperienceDirectory } from ${JSON.stringify(module)}; try { await readExperienceDirectory(process.argv[1]); process.exitCode=1; } catch(error) { console.log(error.message); }`;
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', source, directory], { timeout: 1000, killSignal: 'SIGKILL' });
+  assert.match(stdout, /regular file/);
+});

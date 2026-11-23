@@ -1,3 +1,5 @@
+import { SavedDraftRecovery } from '../application/SavedDraftRecovery.js';
+import { sameScope } from '@openpane/contracts';
 import { useExperience, useUiActions } from '../application/experience-state.js';
 import { useDisplayScope } from '../application/display-state.js';
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
@@ -123,6 +125,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const metadata = 'metadata' in app.host ? app.host.metadata : null;
   const choices = metadata?.agents ?? [];
   const pi = choices.find(agent => 'runtime' in agent && agent.runtime.engine === 'pi');
+  const [launchNotice, setLaunchNotice] = useState('');
   const setupPi = () => setSelectedView('settings');
   /** Starts a conversation from the new-conversation screen, carrying its text over as the draft or the first message. */
   async function startConversation(agentId: string | undefined, send: boolean): Promise<void> {
@@ -133,10 +136,17 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     let opened = false, carried = !text;
     setOpening(true);
     try {
-      await controller.create(agentId);
+      const result = await controller.create(agentId, text || undefined);
+      if (result.kind !== 'inline') {
+        if (result.kind === 'detached' || result.kind === 'pending' && result.scope) {
+          carried = true;
+          if (text) setLaunchNotice('Your message is saved as an unsent draft in the new chat. Send it there when ready.');
+        }
+        return;
+      }
       const active = controller.getSnapshot().active;
       // A refused creation reports its own error; the typed text stays where it was.
-      if (!active || active === before) return;
+      if (!active || active === before || !sameScope(active.scope, result.scope)) return;
       opened = true;
       if (text) await active.store.setDraft(text);
       carried = true;
@@ -180,11 +190,13 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   // One element, placed in one slot: the Chats view, or the open workspace of the active conversation's namespace.
   const slots = conversationSlots({ row: workspaceOpen ? workspaceRow : null, active: app.active, metadata, custom, modules, agents: choices });
   const customizationNotices = custom.namespaces.some(owner => owner.kind === 'loading' || owner.kind === 'failed');
+  const activeAgent = app.active?.agent;
+  const composerAgents = fixedChat && activeAgent ? slots.composerAgents.filter(choice => ('kind' in choice ? choice.namespace : null) === ('kind' in activeAgent ? activeAgent.namespace : null)) : slots.composerAgents;
   const activeConversation = !catalogOnly && app.active && activeActions
     ? <ConversationView
         key={`${app.active.viewId}/${app.active.scope.hostId}/${app.active.scope.conversationId}`}
         contentPalette={contentPalette} transcript={slots.transcript} activity={custom.activity} contentLayout={slots.contentLayout} modules={slots.modules} permissionState={app.permissionState} observation={app.observation} continuation={app.continuation} actions={activeActions} active={app.active} enabled={enabled} storageFailure={app.storageFailure} agent={agent} customizationNotices={customizationNotices}
-        composerControls={canSwitch => <ComposerAgentControls agents={slots.composerAgents} agent={app.active?.agent ?? null} hasConversation enabled={canSwitch && app.saved.pendingCreation === null} onStartConversation={id => void controller.create(id)} onSetupPi={setupPi} />}
+        composerControls={canSwitch => <ComposerAgentControls agents={composerAgents} agent={app.active?.agent ?? null} hasConversation enabled={canSwitch && app.saved.pendingCreation === null} onStartConversation={id => void controller.create(id)} {...(fixedChat ? {} : { onSetupPi: setupPi })} />}
       />
     : null;
   const workspaceConversation = slots.workspace ? activeConversation : null;
@@ -204,8 +216,11 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
           : app.host.kind !== 'ready' ? 'Connect to your local host, then start a conversation. Your chats and drafts stay here when you come back.' : null}
         canSend={canStart && Boolean(selected?.commands.includes('send')) && Boolean(launchText.trim())}
         onSend={() => void startConversation(selected?.id, true)}
-        controls={<ComposerAgentControls agents={choices} agent={selected ?? null} hasConversation={false} enabled={canStart} onStartConversation={id => void startConversation(id, false)} onSetupPi={setupPi} />} />;
+        controls={<ComposerAgentControls agents={choices} agent={selected ?? null} hasConversation={false} enabled={canStart} onStartConversation={id => void startConversation(id, false)} {...(fixedChat ? {} : { onSetupPi: setupPi })} />} />;
   const hostAlerts = <>
+    {launchNotice && <p role="status">{launchNotice}</p>}
+    {catalogOnly && launchText && !opening && <details><summary>Unsent launch text</summary><textarea readOnly aria-label="Unsent launch text" value={launchText} /></details>}
+    {app.savedDraftRecovery && <SavedDraftRecovery key={`${app.savedDraftRecovery.viewId}/${app.savedDraftRecovery.scope.conversationId}`} recovery={app.savedDraftRecovery} onOpen={() => { if (app.savedDraftRecovery) void controller.open(app.savedDraftRecovery.scope); }} onDismiss={() => { if (app.savedDraftRecovery) controller.dismissSavedDraftRecovery(app.savedDraftRecovery); }} />}
     {app.storageFailure && <div className="application-alert" role="alert"><strong>Local storage unavailable. Commands are blocked.</strong><p>{app.storageFailure}</p><p>Existing records have not been discarded. Restore browser storage access, then reload.</p></div>}
     {app.error && <p className="application-alert" role="alert">{app.error}</p>}
     {!placementNotice && app.lastPlacement?.kind === 'pending' && <p role="status">{app.lastPlacement.reason}</p>}
@@ -311,7 +326,8 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     </button>
   </nav>;
   if (personalization.readiness === 'loading') return <ThemeScope><p role="status">Loading local preferences…</p></ThemeScope>;
-  if (fixedChat) return <ThemeScope variants={experience?.manifest.theme} appearance={experience?.manifest.theme.mode === 'system' ? undefined : experience?.manifest.theme.mode} palette={contentPalette} className="application-chat-window" data-openpane-part="main">
+  const resolvedAppearance = experience ? (experience.manifest.theme.mode === 'system' ? undefined : experience.manifest.theme.mode) : preferences.appearance === 'system' ? undefined : preferences.appearance;
+  if (fixedChat) return <ThemeScope variants={experience?.manifest.theme} appearance={resolvedAppearance} palette={contentPalette} className="application-chat-window" data-openpane-part="main">
     <header className="application-chat-header" data-openpane-part="page-header"><h1>{app.active?.agent.label ?? 'Opening chat'}</h1>
       <button type="button" data-openpane-essential="new-chat" disabled={!enabled || !app.active} onClick={() => void controller.create(app.active?.agent.id)}>New chat</button>
     </header>
@@ -319,7 +335,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     {activeConversation ?? <section aria-label="Chat ownership"><p role="status">Waiting for this window's assigned editor.</p><button data-openpane-essential="retry-editor" type="button" onClick={() => window.location.reload()}>Retry assigned editor</button></section>}
     <footer>{app.active ? <ConversationStatus active={app.active} /> : 'No editor ready'}</footer>
   </ThemeScope>;
-  return <DesktopShell experience={experience?.manifest} contentPalette={experience ? contentPalette : undefined} appearance={experience ? experience.manifest.theme.mode === 'system' ? undefined : experience.manifest.theme.mode : preferences.appearance === 'system' ? undefined : preferences.appearance} onRestoreAppearance={() => { if (experience && uiActions) void uiActions.restore(); else void personalizationSession.resetAppearance(); }} navigation={rail} activeView={selectedView} protectedContent={controls} defaultView={views} settingsView={settings}
+  return <DesktopShell experience={experience?.manifest} contentPalette={experience ? contentPalette : undefined} appearance={resolvedAppearance} onRestoreAppearance={() => { if (experience && uiActions) void uiActions.restore(); else void personalizationSession.resetAppearance(); }} navigation={rail} activeView={selectedView} protectedContent={controls} defaultView={views} settingsView={settings}
     extensionsView={extensionsView} workspaceOpen={workspaceOpen} restoreMode={children === undefined ? 'managed' : 'remount'}
     onRestore={() => { void personalizationSession.restoreDefaultView(); setSelectedView('chats'); }}
     status={app.active ? <ConversationStatus active={app.active} /> : 'No conversation open'}

@@ -2,7 +2,7 @@ import { createBrowserConnection } from '@openpane/client/service';
 import { parseWindowContext, sameScope } from '@openpane/contracts';
 import type { ConversationOpenResult, ConversationScope, UiContextV1 } from '@openpane/contracts';
 import type { AgentDescriptor } from '@openpane/contracts/service';
-import { record } from '@openpane/contracts/decode';
+import { count, record } from '@openpane/contracts/decode';
 import { BrowserViewStorage } from './browser-storage.js';
 import { createApplicationController } from './application-controller.js';
 import type { ApplicationController } from './application-controller.js';
@@ -13,7 +13,7 @@ import type { UiTransport } from './ui-connection.js';
 import { DesktopWindowPort, parseNativePlacementIntent, parseNativeReservation, parseEditorRecoveryGrant } from './window-context.js';
 import type { DesktopWindowContext, NativePlacementIntent, NativeReservation } from './window-context.js';
 import type { DraftCarry } from './draft-carry.js';
-import { bindDraftCarry, offerDraftCarry, sourceCarries, targetCarries, updateDraftCarry } from './draft-carry.js';
+import { bindDraftCarry, offerDraftCarry, sourceCarries, targetCarries, cancelDraftCarry } from './draft-carry.js';
 import { WindowCoordinator } from './window-coordinator.js';
 
 export type WindowRecovery =
@@ -24,10 +24,17 @@ export type WindowRecovery =
 export interface WindowRuntimeSnapshot { readonly recovery: WindowRecovery; readonly catalogOnly: boolean; readonly capabilityNotice: string | null; readonly placementNotice: string | null }
 const namespace = (agent: AgentDescriptor): string | null => 'kind' in agent ? agent.namespace : null;
 class MainUiConnection extends UiConnection {
+  private restoration: Promise<void> | null = null;
   constructor(private readonly port: DesktopWindowPort) {
-    super(new NativeMainUiRelay(port), async context => parseWindowContext(await port.request({ kind: 'bind-ui', hostId: context.hostId, profileId: context.profileId })), true);
+    super(new NativeMainUiRelay(port), async context => parseWindowContext(await port.request({ kind: 'bind-ui', hostId: context.hostId, profileId: context.profileId })), port.context.liveRelay);
   }
-  override async restore(): Promise<void> { try { await this.port.request({ kind: 'restore-builtin' }); } finally { await super.restore(); } }
+  protected override async nextPresenceSequence(): Promise<number> {
+    const reply = record(await this.port.request({ kind: 'presence', visible: document.visibilityState === 'visible', display: null }), ['presenceSequence']);
+    return count(reply.presenceSequence);
+  }
+  override restore(): Promise<void> {
+    return this.restoration ??= (async () => { try { await this.port.request({ kind: 'restore-builtin' }); } finally { await super.restore(); } })().finally(() => { this.restoration = null; });
+  }
 }
 /** One document owns one controller, and only main owns the host UI reader. */
 export class WindowRuntime {
@@ -47,9 +54,11 @@ export class WindowRuntime {
   private recoveryDirty = true;
   private readonly requestHistory = new Map<string, NativePlacementIntent>();
   private historyAfter: string | null = null;
+  private historyEpoch: number | null = null;
   private historyExtended = false;
   private nativeRecoverySeen = false;
   private policyScope: ConversationScope | null = null;
+  private placingPolicy: ConversationScope | null = null;
   private pendingIntent: { readonly requestId: string; readonly result: Extract<ConversationOpenResult, { readonly kind: 'pending' }> } | null = null;
   private lastPlacement: ConversationOpenResult | null = null;
   constructor(readonly context: DesktopWindowContext) {
@@ -58,7 +67,7 @@ export class WindowRuntime {
     let assigned: (viewId: string) => void = () => {};
     const assignedView = new Promise<string>(resolve => { assigned = resolve; });
     const factory: ViewStorageFactory = {
-      ...(context.role !== 'chat' ? { recoverClosedView: async (viewId: string, onFailure: (error: unknown) => void) => {
+      ...(context.role !== 'chat' ? { readLegacyDraft: BrowserViewStorage.readLegacyDraft, recoverClosedView: async (viewId: string, onFailure: (error: unknown) => void) => {
         const locks = await navigator.locks.query();
         if (locks.held?.some(lock => lock.name === `openpane-view:${viewId}`)) return null;
         const binding = await BrowserViewStorage.bindingForView(viewId);
@@ -114,12 +123,12 @@ export class WindowRuntime {
       const active = this.controller.getSnapshot().active, binding = this.childOwner?.editorBinding();
       if (this.context.role !== 'chat' || !active || !binding || active.viewId !== this.childOwner?.viewId || !sameScope(active.scope, this.context.reservation.scope)) throw new Error('The source editor is not ready to carry its draft.');
       const expected = await active.store.captureDraft();
-      if (!expected.text) return false;
+      if (!expected.text) return null;
       await offerDraftCarry({ source: active.scope, sourceViewId: active.viewId, requestId, writerGeneration: binding.writerGeneration, expected });
-      return true;
+      return { cancel: () => this.cancelOfferedCarry(requestId) };
     });
     this.coordinator.trackPlacement(async (reservation, binding) => {
-      if (!(this.ui instanceof UiConnection)) return;
+      if (!(this.ui instanceof UiConnection) || !this.placingPolicy || !sameScope(this.placingPolicy, reservation.scope)) return;
       for (const transition of this.ui.getSnapshot().state?.transitions ?? []) await this.ui.reservePlacement(transition, {
         scope: reservation.scope, viewId: reservation.viewId, label: reservation.label,
         nativeTransitionId: reservation.transitionId, bindingRevision: binding.revision,
@@ -200,7 +209,9 @@ export class WindowRuntime {
       await this.syncDraftCarries();
       if (this.policyScope) {
         const scope = this.policyScope;
-        const placed = await this.controller.openReserved(scope);
+        this.placingPolicy = scope;
+        let placed: ConversationOpenResult;
+        try { placed = await this.controller.openReserved(scope); } finally { this.placingPolicy = null; }
         if (placed.kind === 'detached') this.policyScope = null;
         else if (placed.kind === 'refused') {
           this.policyScope = null;
@@ -276,7 +287,13 @@ export class WindowRuntime {
       return;
     }
     if (this.context.role !== 'chat') return;
-    const value = record(await this.port.request({ kind: 'own-intents', after }), ['pending', 'items', 'after']);
+    const value = record(await this.port.request({ kind: 'own-intents', after }), ['epoch', 'pending', 'items', 'after']);
+    const epoch = count(value.epoch);
+    if (!epoch) throw new Error('Invalid native history epoch');
+    if (this.historyEpoch !== epoch) {
+      this.historyEpoch = epoch; this.requestHistory.clear(); this.historyAfter = null; this.historyExtended = false;
+      if (after !== null) { await this.refreshRecovery(); return; }
+    }
     if (!Array.isArray(value.pending) || value.pending.length > 32 || !Array.isArray(value.items) || value.items.length > 32 || value.after !== null && typeof value.after !== 'string') throw new Error('Invalid native request history');
     const pending = value.pending.map(parseNativePlacementIntent), items = value.items.map(parseNativePlacementIntent);
     if ([...pending, ...items].some(intent => !sameScope(intent.sourceScope, this.context.role === 'chat' ? this.context.reservation.scope : intent.sourceScope))) throw new Error('Foreign source in native request history');
@@ -294,6 +311,7 @@ export class WindowRuntime {
     for (const item of items) this.requestHistory.set(item.requestId, item);
     const completed = this.pendingIntent ? this.requestHistory.get(this.pendingIntent.requestId)?.result : null;
     if (completed && completed.kind !== 'pending' && this.pendingIntent && this.controller.settlePlacement(this.pendingIntent.result, completed)) {
+      if (completed.kind === 'refused') await this.cancelOfferedCarry(this.pendingIntent.requestId);
       this.pendingIntent = null;
       this.update({ placementNotice: completed.kind === 'refused' ? completed.reason : null });
     }
@@ -310,12 +328,17 @@ export class WindowRuntime {
     try { await this.port?.request({ kind: 'retry-intent', requestId: intent.requestId }); this.recoveryDirty = true; await this.refreshRecovery(); }
     catch (error) { this.update({ placementNotice: String(error) }); }
   }
+  private async cancelOfferedCarry(requestId: string): Promise<void> {
+    if (this.context.role !== 'chat') return;
+    const carry = (await sourceCarries(this.context.reservation.scope)).find(carry => carry.requestId === requestId);
+    if (carry?.kind === 'offered') await cancelDraftCarry(carry);
+  }
   async keepDraft(requestId: string): Promise<void> {
     if (this.context.role !== 'chat') return;
     try {
       const carry = (await sourceCarries(this.context.reservation.scope)).find(carry => carry.requestId === requestId);
-      if (carry) await updateDraftCarry(carry, 'cancelled');
-      await this.refreshRecovery(); this.update({ placementNotice: 'The draft stays in this chat. No queued send or image was moved.' });
+      const kept = carry ? await cancelDraftCarry(carry) : false;
+      await this.refreshRecovery(); this.update({ placementNotice: kept ? 'The draft stays in this chat. No queued send or image was moved.' : 'The draft transfer already completed. Its text is available in the destination chat.' });
     } catch (error) { this.update({ placementNotice: String(error) }); }
   }
   async resumeWindow(reservation: NativeReservation, inline = false): Promise<void> {
@@ -354,20 +377,19 @@ export class WindowRuntime {
     if (!active) return;
     for (const carry of await targetCarries(active.scope)) {
       if (carry.kind !== 'offered' || !carry.target) continue;
-      let applied = false;
-      for (let attempt = 0; attempt < 3 && !applied; attempt++) {
+      let outcome: 'committed' | 'changed' | 'cancelled' = 'changed';
+      for (let attempt = 0; attempt < 3 && outcome === 'changed'; attempt++) {
         const current = await active.store.captureDraft(), text = carry.expected.text;
         const merged = !current.text || current.text.includes(text) ? current.text || text : `${text}${current.text}`;
-        applied = merged === current.text || await active.store.replaceDraft(current, merged);
+        outcome = await active.store.transferDraft(current, merged, { kind: 'receive', source: carry.source, requestId: carry.requestId });
       }
-      if (!applied) throw new Error('The destination draft is changing. Its carried text remains pending in the source.');
-      await updateDraftCarry(carry, 'applied');
+      if (outcome === 'cancelled') continue;
+      if (outcome !== 'committed') throw new Error('The destination draft is changing. Its carried text remains pending in the source.');
       await this.port?.request({ kind: 'carry-applied', sourceScope: carry.source, requestId: carry.requestId });
     }
     for (const carry of await sourceCarries(active.scope)) {
       if (carry.kind !== 'applied' || carry.sourceViewId !== active.viewId) continue;
-      const cleared = await active.store.replaceDraft(carry.expected, '');
-      await updateDraftCarry(carry, cleared ? 'cleared' : 'changed');
+      await active.store.transferDraft(carry.expected, '', { kind: 'release', source: carry.source, requestId: carry.requestId });
     }
   }
   close(): void {

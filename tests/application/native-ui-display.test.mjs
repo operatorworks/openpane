@@ -52,7 +52,7 @@ test('the native main relay forwards exact child subscriptions and refuses a cro
 
 test('child placement notices retain the exact durable request ID and pending result for later settlement', async () => {
   let request, noticed;
-  const coordinator = new WindowCoordinator({ context: native, async request(command) { request = command; return { result: null, target: null }; } });
+  const coordinator = new WindowCoordinator({ context: native, async request(command) { if (command.kind === 'intent-context') return { epoch: 1 }; request = command; return { result: null, target: null }; } });
   coordinator.observeIntent((result, requestId) => { noticed = { result, requestId }; });
   const result = await coordinator.delegateCreate('agent', false);
   assert.equal(result.kind, 'pending'); assert.equal(noticed.result, result);

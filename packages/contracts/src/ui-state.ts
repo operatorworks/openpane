@@ -79,7 +79,7 @@ export type QueryReservation = {
   readonly version: string;
   readonly site: string;
 } & (
-  | { readonly kind: 'reserved' | 'running' }
+  | { readonly kind: 'reserved' | 'running' | 'abandoned' }
   | { readonly kind: 'interrupted' | 'failed'; readonly reason: string }
   | { readonly kind: 'published' | 'removed'; readonly sequence: number; readonly digest: string }
 );

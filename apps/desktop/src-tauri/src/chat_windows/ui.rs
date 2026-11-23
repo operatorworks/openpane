@@ -64,7 +64,7 @@ impl ChatWindows {
                     if !broker.documents.values().any(|document| {
                         document.scope.is_some() && document.incarnation == child.incarnation
                     }) {
-                        return Err("stale-child-snapshot");
+                        continue;
                     }
                     if serde_json::to_vec(&child.envelope)
                         .map_err(|_| "invalid-ui-state")?
@@ -173,11 +173,11 @@ impl ChatWindows {
                 let visibility_changed = document.visible != visible;
                 document.display = display;
                 document.visible = visible;
-                document.presence_sequence += 1;
+                let presence_sequence = broker.advance_presence(label)?;
                 if visibility_changed {
                     let _ = app.emit_to("main", "openpane-ui-wakeup", ());
                 }
-                Ok(json!({"ok":true}))
+                Ok(json!({"presenceSequence":presence_sequence}))
             }
             Command::ReportUi {
                 incarnation,
@@ -210,10 +210,14 @@ impl ChatWindows {
             }
             Command::DrainUi { incarnation } => {
                 self.require_main(broker, label, &incarnation)?;
-                for (target, document) in &mut broker.documents {
-                    if target != "main" {
-                        document.presence_sequence += 1;
-                    }
+                let labels: Vec<_> = broker
+                    .documents
+                    .keys()
+                    .filter(|target| target.as_str() != "main")
+                    .cloned()
+                    .collect();
+                for target in labels {
+                    broker.advance_presence(&target)?;
                 }
                 let contexts: Vec<_> = broker.documents.iter().filter(|(target,document)| target.as_str() != "main" && document.ready).filter_map(|(target,document)|self.context(broker,target,document).map(|context|json!({"context":context,"visible":document.visible,"presenceSequence":document.presence_sequence,"display":document.display,"placement":document.scope.as_ref().and_then(|scope|broker.storage.profile(&self.origin).ok()?.windows.get(&scope.key())).and_then(|entry|entry.binding_revision.map(|revision|json!({"nativeTransitionId":entry.transition_id,"bindingRevision":revision})))}))).collect();
                 Ok(

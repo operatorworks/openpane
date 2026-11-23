@@ -18,7 +18,7 @@ function essentialControls(root: HTMLElement): void {
     if (!bounds.width || !bounds.height || style.visibility !== 'visible' || style.display === 'none' || Number(style.opacity) === 0) throw new Error('An essential OpenPane control is hidden');
     const x = Math.max(0, Math.min(innerWidth - 1, bounds.x + bounds.width / 2)), y = Math.max(0, Math.min(innerHeight - 1, bounds.y + bounds.height / 2));
     const hit = document.elementFromPoint(x, y);
-    if (!hit || !control.contains(hit) && !hit.contains(control)) throw new Error('An essential OpenPane control is covered');
+    if (!hit || !control.contains(hit) && !hit.contains(control) && !hit.closest('[data-openpane-transient-overlay]')) throw new Error('An essential OpenPane control is covered');
   }
 }
 async function stage(state: UiClientSnapshot, signal: AbortSignal): Promise<HTMLLinkElement | null> {
@@ -46,6 +46,7 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
   const [connection] = useState(() => supplied ?? new UiConnection());
   const transport = useSyncExternalStore(connection.subscribe, connection.getSnapshot, connection.getSnapshot);
   const installedStylesheet = useRef<HTMLLinkElement | null>(null);
+  const validatedVisual = useRef<VisualSelection | null>(null);
   const [visual, setVisual] = useState<VisualSelection | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [visible, setVisible] = useState(document.visibilityState === 'visible');
@@ -63,7 +64,8 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
   useEffect(() => {
     if (!state || !visible) return;
     const abort = new AbortController(); let link: HTMLLinkElement | null = null;
-    const prior = visual;
+    const prior = validatedVisual.current;
+    let committed = false;
     void (async () => {
       try {
         if (!transport.localBuiltin) link = await stage(state, abort.signal);
@@ -74,10 +76,11 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
         const root = document.querySelector<HTMLElement>('.experience-content');
         if (!root) throw new Error('Experience frame unavailable');
         const deadline = performance.now() + 5000;
-        while (!root.querySelector('[data-openpane-essential]') && performance.now() < deadline && !abort.signal.aborted) await visibleFrame();
+        while (state.bundle && !transport.localBuiltin && !root.querySelector('[data-openpane-essential]') && performance.now() < deadline && !abort.signal.aborted) await visibleFrame();
         if (abort.signal.aborted) return;
-        essentialControls(root);
+        if (state.bundle && !transport.localBuiltin) essentialControls(root);
         installedStylesheet.current?.remove(); installedStylesheet.current = link; link = null;
+        validatedVisual.current = transport.localBuiltin ? null : state.bundle; committed = true;
         setNotice(null);
         await connection.rendered(state).catch(() => setNotice('Appearance is visible locally; waiting for host confirmation.'));
       } catch (error) {
@@ -87,7 +90,7 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
         setNotice(message); await connection.failed(state, message).catch(() => {});
       }
     })();
-    return () => { abort.abort(); link?.remove(); };
+    return () => { abort.abort(); link?.remove(); if (!committed) setVisual(validatedVisual.current); };
     // Appearance delivery is keyed by its envelope, never the editor/controller or poll response object.
   }, [connection, state?.selection.deliveryGeneration, transport.localBuiltin, visible]);
   const applied = transport.localBuiltin ? null : visual;

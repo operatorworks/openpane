@@ -1658,3 +1658,26 @@ test('terminal native placement resolves only its still-current pending outcome 
   assert.equal(f.app.getSnapshot().lastPlacement.kind, 'detached'); assert.equal(f.app.getSnapshot().active, null);
   await f.app.dispose(); assert.equal(f.app.settlePlacement(second, { kind: 'refused', reason: 'Late after close' }), false);
 });
+
+test('recovery asks the host to resolve a stored creation after its agent disappears', async t => {
+  const f = fixture(); t.after(() => f.app.dispose());
+  f.views.set('original-view/host', { version: 2, route: null, pendingCreation: { scope, agentId: 'removed-agent' } });
+  f.behavior.agentLookup = async () => null;
+  f.behavior.create = async () => { throw new ServiceError('create-rejected', 'Agent removed; creation was not accepted'); };
+  await f.app.start();
+  await f.app.recoverCreation();
+  assert.deepEqual(f.created, [scope]);
+  assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
+  assert.match(f.app.getSnapshot().error, /Agent removed/);
+});
+
+test('a catalog route owned by another document leaves the connected catalog usable', async t => {
+  const f = fixture(); t.after(() => f.app.dispose());
+  f.storage.catalogViewId = 'original-view'; f.storage.locate = async () => 'elsewhere';
+  f.behavior.reopen = async () => { throw new Error('This editor is already open in another document'); };
+  f.views.set('original-view/host', { ...empty(), route: scope });
+  await f.app.start();
+  assert.equal(f.app.getSnapshot().host.kind, 'ready'); assert.equal(applicationEnabled(f.app.getSnapshot()), true);
+  assert.equal(f.app.getSnapshot().active, null); assert.match(f.app.getSnapshot().error, /already open/);
+  assert.equal((await f.app.create()).kind, 'inline');
+});

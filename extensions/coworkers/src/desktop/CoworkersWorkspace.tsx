@@ -106,6 +106,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   const chats = entries.filter(entry => !filter || entry.provider.providerAgentId === filter);
   /** Opens or creates a chat. A rejection is shown here; any other failure is in the host status strip. */
   async function attempt(action: () => ReturnType<WorkspaceViewProps['open']>) {
+    if (waiting.current) return;
     const attempt = {}; waiting.current = attempt;
     setNotice(''); setAwaiting({ before: selectedKey });
     try {

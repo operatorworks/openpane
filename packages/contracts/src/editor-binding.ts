@@ -35,7 +35,7 @@ const properties = { schemaVersion: { const: 1 }, scope, viewId: id,
   revision: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
   writerGeneration: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER } };
 export const EDITOR_BINDING_SCHEMA = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema', title: 'OpenPane editor binding v1',
+  $schema: 'https://json-schema.org/draft/2020-12/schema', $comment: 'Structural schema. Admission additionally checks UTF-16 identifier budgets and scoped ownership invariants with parseEditorBinding.', title: 'OpenPane editor binding v1',
   oneOf: [
     { type: 'object', additionalProperties: false, required: [...Object.keys(properties), 'kind'], properties: { ...properties, kind: { const: 'editing' } } },
     { type: 'object', additionalProperties: false, required: [...Object.keys(properties), 'kind', 'transitionId', 'targetLabel'],

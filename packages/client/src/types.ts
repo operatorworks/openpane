@@ -41,11 +41,14 @@ export interface DraftImageChange {
   readonly put?: { readonly selectionId: string; readonly bytes: Uint8Array };
   readonly remove?: readonly string[];
 }
+export interface DraftTransfer { readonly source: ConversationScope; readonly requestId: string; readonly kind: 'receive' | 'release' }
+export interface DraftTransferCommit { readonly source: ConversationScope; readonly requestId: string; readonly outcome: 'received' | 'cleared' | 'changed' }
 /** Image bytes are stored once beside the records and must change in the same transaction as them. */
 export interface DraftStoragePort {
   /** Use one port per store: loading claims the conversation, and saves from a port replaced by a later loader reject without writing. */
   load(scope: ConversationScope): Promise<unknown>;
   save(records: LocalRecords, image?: DraftImageChange): Promise<void>;
+  commitTransfer?(records: LocalRecords, transfer: DraftTransferCommit): Promise<boolean>;
   loadImage(scope: ConversationScope, selectionId: string): Promise<Uint8Array | null>;
 }
 export interface ComposerImage {
@@ -80,6 +83,7 @@ export interface ConversationStore<P> {
   setDraft(text: string): Promise<void>;
   captureDraft(): Promise<{ readonly text: string; readonly revision: number }>;
   replaceDraft(expected: { readonly text: string; readonly revision: number }, text: string): Promise<boolean>;
+  transferDraft(expected: { readonly text: string; readonly revision: number }, text: string, transfer: DraftTransfer): Promise<'committed' | 'changed' | 'cancelled'>;
   /** Upload failures are reported through the view's image status, not by rejecting. */
   selectImage(file: { readonly name: string; readonly bytes: Uint8Array }): Promise<void>;
   retryImage(): Promise<void>;

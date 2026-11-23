@@ -35,8 +35,8 @@ else { process.stdout.write(${JSON.stringify(JSON.stringify(source))}); if(mode.
   const metadata = await api({ op: 'metadata' }), scope = { hostId: host.hostId, conversationId: randomUUID() }; await api({ op: 'create', scope, agentId: metadata.defaultAgentId });
   const id = async () => `${(await requestUi(join(profile, 'ui.sock'), { op: 'context' })).requestEpoch}:${randomUUID()}`;
   const calls = async () => (await readFile(log, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
-  const cli = (args, stdin = '') => {
-    const child = spawn(process.execPath, [entry, 'ui', '--data-dir', profile, ...args], { env: { ...process.env, DD_SITE: 'us3.datadoghq.com', DD_TOKEN_STORAGE: 'file' }, stdio: 'pipe' });
+  const cli = (args, stdin = '', environment = {}) => {
+    const child = spawn(process.execPath, [entry, 'ui', '--data-dir', profile, ...args], { env: { ...process.env, DD_SITE: 'us3.datadoghq.com', DD_TOKEN_STORAGE: 'file', ...environment }, stdio: 'pipe' });
     let stdout = '', stderr = ''; child.stdout.on('data', data => { stdout += data; }); child.stderr.on('data', data => { stderr += data; }); child.stdin.end(stdin);
     const done = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', code => resolve({ code, stdout, stderr })); });
     return { child, done };
@@ -61,7 +61,7 @@ test('packaged display CLI publishes one actual executable response and replays 
   const publication = page.body.value.publications[0]; assert.equal(publication.digest, result.reservation.digest);
   assert.deepEqual(publication.event.value.series[0].points, source.series[0].pointlist); assert.equal(publication.event.value.series[0].unit, '%'); assert.equal(publication.event.value.fromMs, 1795374001000);
   await rm(f.pup);
-  const replay = await f.cli(f.query(publicationId)).done; assert.equal(replay.code, 0, replay.stderr); assert.equal(JSON.parse(replay.stdout).replayed, true);
+  const replay = await f.cli(f.query(publicationId), '', { DD_SITE: 'datadoghq.eu', OPENPANE_PUP: '/missing/ambient/pup' }).done; assert.equal(replay.code, 0, replay.stderr); assert.equal(JSON.parse(replay.stdout).replayed, true);
   assert.equal((await f.calls()).filter(call => call.args.includes('metrics')).length, 1);
   const changed = f.query(publicationId); changed[changed.indexOf('--query') + 1] = 'different';
   assert.equal((await f.cli(changed).done).code, 1);
@@ -113,4 +113,18 @@ test('the packaged CLI enforces the real 30-second child deadline before publica
   assert.equal(result.code, 1); assert.equal((await f.status(publicationId)).reservation.reason, 'pup-timeout');
   assert.deepEqual((await f.page()).body.value.publications, []);
   const pid = Number(await readFile(f.ready, 'utf8')); assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+});
+
+test('killing the packaged CLI leaves no live pup and an interrupted attempt cannot overlap an explicit retry', { timeout: 15000 }, async t => {
+  const f = await fixture(t), publicationId = await f.id(); await writeFile(f.mode, JSON.stringify({ kind: 'hang' }));
+  const query = f.cli(f.query(publicationId));
+  await wait(() => access(f.ready).then(() => true, () => false)); const pid = Number(await readFile(f.ready, 'utf8'));
+  t.after(() => { try { process.kill(-pid, 'SIGKILL'); } catch {} });
+  query.child.kill('SIGKILL'); assert.equal((await query.done).code, null);
+  await wait(() => { try { process.kill(pid, 0); return false; } catch (error) { if (error.code === 'ESRCH') return true; throw error; } });
+  assert.equal((await f.status(publicationId)).reservation.kind, 'interrupted');
+  const retry = await f.cli(['display','retry','--scope-json',JSON.stringify(f.scope),'--publication-id',publicationId,'--expected-attempt','1']).done;
+  assert.equal(retry.code, 1); assert.match(retry.stderr, /draining/);
+  assert.equal((await f.calls()).filter(call => call.args.includes('metrics')).length, 1);
+  assert.deepEqual((await f.page()).body.value.publications, []);
 });
