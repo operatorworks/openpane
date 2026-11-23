@@ -23,11 +23,11 @@ export function CustomizationContent({ contentPalette = palettes, selection, con
     content = <><BuiltinColors><p role="alert">Content layout conflict. {selection.namespaces.join(', ')} claim the layout. The default arrangement remains active.</p></BuiltinColors>{fallback}</>;
   } else if (selection.kind === 'claimed') {
     const Layout = selection.owner.presentation.contentLayout;
-    content = <Suspense fallback={<><BuiltinColors><p role="status">Content layout is loading. Module actions will return when it is ready.</p></BuiltinColors>{nativeTranscript}</>}>
+    content = <Suspense fallback={<><BuiltinColors><p data-openpane-part="status" role="status">Content layout is loading. Module actions will return when it is ready.</p></BuiltinColors>{nativeTranscript}</>}>
       <CustomizationBoundary key={`${selection.owner.lifetime}/${conversationKey}`} fail={selection.owner.fail} fallback={nativeTranscript}>
         <Layout transcript={transcript} modules={modules} />
       </CustomizationBoundary>
     </Suspense>;
   }
-  return <ThemeScope className="conversation-content" palette={contentPalette}>{before}{content}{after}</ThemeScope>;
+  return <ThemeScope data-openpane-part="transcript-surface" className="conversation-content" palette={contentPalette}>{before}{content}{after}</ThemeScope>;
 }

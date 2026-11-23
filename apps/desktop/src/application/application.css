@@ -1,3 +1,5 @@
+@layer openpane-foundation, openpane-application, openpane-authored;
+@layer openpane-application {
 .application-controls { padding: 1.5rem 2rem; background: var(--aui-color-surface); border-bottom: 1px solid var(--aui-color-border); }
 .artifact-identity { margin: .75rem 0; color: var(--aui-color-muted); font-size: .7rem; overflow-wrap: anywhere; }
 .application-controls button, .conversation-panel button { border: 1px solid var(--aui-color-border); border-radius: .5rem; padding: .6rem .9rem; background: var(--aui-color-surface); color: inherit; font: inherit; cursor: pointer; }
@@ -147,16 +149,6 @@
   .message-user { max-width: 100%; }
   .composer-footer span { max-width: 100px; }
 }
-
-.desktop-shell:has(.view-rail) {
-  grid-template-columns: 56px 232px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) 30px;
-}
-.desktop-shell:has(.view-rail) .shell-header {
-  position: absolute; z-index: 4; top: 16px; right: 24px;
-  padding: 0; border: 0; background: transparent;
-}
-.desktop-shell:has(.view-rail) .shell-header .brand { display: none; }
 .view-rail {
   grid-column: 1; grid-row: 1 / -1; display: flex; flex-direction: column;
   align-items: center; gap: 12px; padding: 18px 6px 16px;
@@ -170,10 +162,7 @@
 .view-rail button:focus-visible { outline: 2px solid var(--aui-color-accent); outline-offset: 2px; }
 .view-rail svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .view-rail .settings-view-button { margin-top: auto; }
-.desktop-shell:has(.view-rail) .application-controls { grid-column: 2; grid-row: 1 / -1; padding-top: 18px; }
 .sidebar-title { font-size: 16px; margin: 0 10px 18px; font-weight: 600; }
-.desktop-shell:has(.view-rail) #main-content { grid-column: 3; grid-row: 1; }
-.desktop-shell:has(.view-rail) .shell-footer { grid-column: 3; grid-row: 2; }
 .chat-view { display: flex; width: 100%; height: 100%; min-height: 0; }
 .chat-navigation[hidden] { display: none; }
 .settings-panel { width: min(100%, 720px); margin: 0 auto; padding: 32px 0; overflow-y: auto; }
@@ -185,16 +174,12 @@
 .settings-section button { padding: 8px 14px; background: var(--aui-color-raised); color: inherit; border: 1px solid var(--aui-color-border); border-radius: 8px; font: inherit; cursor: pointer; }
 .settings-link { display: block; color: var(--aui-color-text); text-decoration: none; padding: 10px; border-radius: 8px; background: var(--aui-color-raised); font-size: 13px; }
 @media (max-width: 760px) {
-  .desktop-shell:has(.view-rail) { grid-template-columns: 48px 160px minmax(0, 1fr); }
   .settings-panel { padding-top: 72px; }
   .view-rail { padding-inline: 4px; }
   .view-rail button { width: 36px; height: 36px; padding: 7px; }
 }
 @media (max-width: 520px) {
-  .desktop-shell:has(.view-rail) { grid-template-columns: 44px 108px minmax(0, 1fr); }
   .sidebar-title { font-size: 14px; margin-inline: 4px; }
-  .desktop-shell:has(.view-rail) .application-controls { padding-inline: 4px; }
-  .desktop-shell:has(.view-rail) #main-content { padding-inline: 10px; }
 }
 
 .chat-view { flex-direction: column; }
@@ -276,16 +261,10 @@
 .workspace-theme { display: flex; min-height: 0; min-width: 0; }
 .workspace-theme > * { flex: 1; min-height: 0; min-width: 0; }
 .extension-loading { padding: 24px; color: var(--aui-color-muted); }
-.desktop-shell[data-workspace-open="true"] { grid-template-columns: 56px 0 minmax(0, 1fr); }
-.desktop-shell[data-workspace-open="true"] .application-controls { display: none; }
-.desktop-shell[data-workspace-open="true"] #main-content { padding: 0; }
-.desktop-shell[data-workspace-open="true"] .shell-header { top: 8px; right: 16px; }
 @media (max-width: 760px) {
-  .desktop-shell[data-workspace-open="true"] { grid-template-columns: 48px 0 minmax(0, 1fr); }
   .extensions-panel { padding-top: 72px; }
   .extension-status-strip { padding-right: 112px; }
 }
-@media (max-width: 520px) { .desktop-shell[data-workspace-open="true"] { grid-template-columns: 44px 0 minmax(0, 1fr); } }
 
 /* A new conversation is one centred composer under a short greeting; content pins it to the bottom. */
 .conversation-panel[data-empty="true"] { justify-content: center; justify-content: safe center; }
@@ -374,3 +353,5 @@
 
 .saved-draft-recovery { flex: none; max-height: 40vh; overflow: auto; padding: 12px; border: 1px solid var(--aui-color-border); }
 .saved-draft-recovery textarea { display: block; width: 100%; min-height: 5rem; max-height: 12rem; resize: vertical; font: inherit; color: inherit; background: var(--aui-color-surface); }
+
+}

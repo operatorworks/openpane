@@ -117,7 +117,7 @@ export function ExtensionsList({ rows, onOpen, enabled, tools = null, conversati
               {row.bundled && <p>Code is included in this desktop build.</p>}
               {row.detail && <p>{row.detail}</p>}
             </div>
-            {selectable && <button type="button" disabled={!enabled} aria-label={`Open ${row.label}`} onClick={() => onOpen(row.namespace)}>Open</button>}
+            {selectable && <button data-openpane-part="button" type="button" disabled={!enabled} aria-label={`Open ${row.label}`} onClick={() => onOpen(row.namespace)}>Open</button>}
           </li>;
         })}
       </ul>}
@@ -191,11 +191,11 @@ export function ExtensionWorkspace({ contentPalette = palettes, row, metadata, w
   const View = row.workspace.component;
   return <div className="extension-workspace-frame">
     <div className="extension-status-strip">
-      <button type="button" className="extension-back" onClick={onBack}>All extensions</button>
+      <button data-openpane-part="button" type="button" className="extension-back" onClick={onBack}>All extensions</button>
       {status}
     </div>
     <div className="extension-workspace" data-extension-workspace={namespace}>
-      <Suspense fallback={<p role="status" className="extension-loading">Loading {row.label}…</p>}>
+      <Suspense fallback={<p data-openpane-part="status" role="status" className="extension-loading">Loading {row.label}…</p>}>
         <CustomizationBoundary key={row.owner.lifetime} fail={row.owner.fail} fallback={<p role="alert">{row.label} could not load.</p>}>
           <ThemeScope palette={contentPalette} className="workspace-theme"><View {...props} /></ThemeScope>
         </CustomizationBoundary>

@@ -3,9 +3,9 @@ import { chmodSync, lstatSync, openSync, closeSync, constants, statSync } from '
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ApplyReceipt, NativePlacementTarget, UiClientSnapshot, ExperienceBundle, UiAppearance, UiSelection, WindowContext } from '@openpane/contracts';
-import { canonicalJson, experienceSchema, parseUiAppearance, parseUiSelection, parseApplyReceipt, DISPLAY_PAGE_LIMITS } from '@openpane/contracts';
+import { canonicalJson, experienceSchema, EXPERIENCE_STYLE_DISCOVERY, HOME_PANE_KINDS, parseUiAppearance, parseUiSelection, parseApplyReceipt, DISPLAY_PAGE_LIMITS } from '@openpane/contracts';
 import { count, identifier, record } from '@openpane/contracts/decode';
-import { EXPERIENCE_PARTS, parseExperienceBundle, sha256 } from './experience-bundle.js';
+import { parseExperienceBundle, sha256 } from './experience-bundle.js';
 import { UiRefusal } from './ui-protocol.js';
 import type { UiRequest } from './ui-protocol.js';
 import { UiDisplayStore } from './ui-display-store.js';
@@ -66,7 +66,7 @@ export class UiStore {
   private readonly listeners = new Set<() => void>();
   private change = 0;
   private closed = false;
-  recoveryReason: string | null;
+  recoveryReason: string | null = null;
   constructor(path: string, readonly hostId: string, private readonly targets: (after: string | null) => unknown = () => { throw new UiRefusal('unavailable', 'Conversation catalog unavailable'); }, checkScope: (scope: ConversationScope) => boolean = () => false) {
     let file;
     try { file = lstatSync(path); }
@@ -93,8 +93,8 @@ export class UiStore {
       this.state = row ? parseState(JSON.parse(text(row.value))) : initial();
       this.display = new UiDisplayStore({ db: this.db, hostId, epoch: () => this.state.epoch, checkScope,
         transaction: run => this.transaction(run), capacity: (bytes, entries) => this.capacity(bytes, entries), notify: () => this.notify() });
-      this.recoveryReason = this.validateSelection();
       this.transaction(() => {
+        this.recoveryReason = this.validateSelection();
         for (const row of this.db.prepare('SELECT id,result FROM ui_receipts').all()) {
           const receipt = parseReceipt(JSON.parse(text(row.result)));
           this.writeReceipt({ ...receipt, participants: receipt.participants.map(participant => participant.visual.kind === 'pending' ? departedParticipant(participant) : participant) });
@@ -107,13 +107,18 @@ export class UiStore {
     } catch (error) { this.db.close(); throw error; }
   }
   private validateSelection(): string | null {
-    const selected = this.state.selection.selected;
-    if (selected.kind === 'builtin') return null;
-    try { this.bundle(selected.digest); return null; }
-    catch {
-      this.state = { ...this.state, selection: { ...this.state.selection, revision: next(this.state.selection.revision), deliveryGeneration: next(this.state.selection.deliveryGeneration), selected: { kind: 'builtin' } }, healthy: { kind: 'builtin' } };
-      return 'Selected experience is missing or invalid; builtin appearance is active. Repair UI data before applying again.';
-    }
+    const normalize = (appearance: UiAppearance): UiAppearance => {
+      if (appearance.kind === 'builtin') return appearance;
+      try { this.bundle(appearance.digest); return appearance; }
+      catch { this.manifests.delete(appearance.digest); return { kind: 'builtin' }; }
+    };
+    const selected = normalize(this.state.selection.selected), previousHealthy = normalize(this.state.selection.previousHealthy), healthy = normalize(this.state.healthy);
+    const changed = selected !== this.state.selection.selected;
+    const recovered = changed || previousHealthy !== this.state.selection.previousHealthy || healthy !== this.state.healthy;
+    this.state = { ...this.state, healthy, selection: { ...this.state.selection, selected, previousHealthy,
+      revision: changed ? next(this.state.selection.revision) : this.state.selection.revision,
+      deliveryGeneration: changed ? next(this.state.selection.deliveryGeneration) : this.state.selection.deliveryGeneration } };
+    return recovered ? 'A missing or invalid experience reference (including unsupported versions) was restored to builtin. Reauthor the bundle using experience schema; saved conversations and cards are unchanged.' : null;
   }
   private transaction<T>(run: () => T): T {
     if (this.closed) throw new UiRefusal('unavailable', 'UI store is closed');
@@ -134,12 +139,14 @@ export class UiStore {
   private notify(): void { this.change = next(this.change); for (const listener of this.listeners) listener(); }
   context(): object {
     return { version: 1, hostId: this.hostId, profileId: this.state.profileId, requestEpoch: this.state.epoch, recoveryGeneration: this.state.recoveryGeneration,
-      revision: this.state.selection.revision, selection: this.state.selection, capabilities: ['experiences-v1', 'display-v1'], fault: this.recoveryReason };
+      revision: this.state.selection.revision, selection: this.state.selection, capabilities: ['experiences-v2', 'display-v1'], fault: this.recoveryReason };
   }
   bundle(digest: string): ExperienceBundle {
     const row = this.db.prepare('SELECT value FROM ui_bundles WHERE digest=?').get(digest);
     if (!row) throw new UiRefusal('not-found', 'Experience bundle unavailable');
-    const bundle = parseExperienceBundle(JSON.parse(text(row.value)));
+    let bundle: ExperienceBundle;
+    try { bundle = parseExperienceBundle(JSON.parse(text(row.value))); }
+    catch { throw new UiRefusal('unavailable', 'Experience bundle is unsupported or invalid; reauthor it using experience schema'); }
     if (bundle.digest !== digest) throw new Error('Corrupt UI bundle identity');
     if (!this.manifests.has(digest) && this.manifests.size >= MAX_BUNDLES) this.manifests.clear();
     this.manifests.set(digest, bundle.manifest);
@@ -265,7 +272,11 @@ export class UiStore {
   }
   private placement(request: Extract<UiRequest, { op: 'placement-reserve' | 'placement-idle' | 'placement-failed' }>): object {
     const session = this.sessions.get(request.session), receipt = this.readReceipt(request.envelope.requestId);
-    if (!session || Date.now() - session.seen > PRESENCE_MS || session.context.role !== 'main' || !session.nativePlacement || !receipt || canonicalJson(request.envelope) !== canonicalJson(receiptEnvelope(receipt)) || receipt.deliveryGeneration !== this.state.selection.deliveryGeneration) throw new UiRefusal('conflict', 'Unknown native placement attempt');
+    if (!session || Date.now() - session.seen > PRESENCE_MS || session.context.role !== 'main' || !session.nativePlacement || !receipt || canonicalJson(request.envelope) !== canonicalJson(receiptEnvelope(receipt))) throw new UiRefusal('conflict', 'Unknown native placement attempt');
+    if (receipt.deliveryGeneration !== this.state.selection.deliveryGeneration) {
+      if (request.op === 'placement-reserve' && receiptStatus(receipt) === 'superseded' && receipt.participants.some(participant => participant.slot.kind === 'transition' && participant.slot.transitionId === request.transitionId && canonicalJson(participant.slot.source) === canonicalJson(session.context))) return this.status(receipt.requestId);
+      throw new UiRefusal('conflict', 'Native placement attempt was superseded');
+    }
     let found = false;
     const participants = receipt.participants.map(participant => {
       const slot = participant.slot;
@@ -273,6 +284,7 @@ export class UiStore {
       found = true;
       if (canonicalJson(slot.source) !== canonicalJson(session.context)) throw new UiRefusal('conflict', 'Placement belongs to another source document');
       if (request.op === 'placement-reserve') {
+        if (session.paintedGeneration !== receipt.deliveryGeneration) throw new UiRefusal('conflict', 'Placement requires the source document to paint this delivery');
         if (request.target.scope.hostId !== this.hostId) throw new UiRefusal('conflict', 'Foreign placement scope');
         if (slot.target) {
           if (canonicalJson(slot.target) !== canonicalJson(request.target)) throw new UiRefusal('conflict', 'Placement target is already fixed');
@@ -369,7 +381,7 @@ export class UiStore {
         const result = this.transaction(() => this.placement(request)); this.notify(); return result;
       }
       case 'targets': return this.targets(request.after);
-      case 'schema': return { manifest: experienceSchema, parts: EXPERIENCE_PARTS };
+      case 'schema': return { manifest: experienceSchema, ...EXPERIENCE_STYLE_DISCOVERY, panes: HOME_PANE_KINDS, density: ['comfortable', 'compact'], transcript: ['bubbles', 'lines'] };
       case 'apply': case 'refresh': case 'restore': {
         const receipt = this.transaction(() => this.select(request)); this.notify(); return { receipt, outcome: receiptStatus(receipt) };
       }

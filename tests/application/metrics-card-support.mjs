@@ -25,8 +25,8 @@ export async function qualifyCardRestyle(host, page) {
   const original = await card.elementHandle(), editor = page.locator('.conversation-panel:visible #message'), editorNode = await editor.elementHandle();
   const before = await requestUi(f.socket, { op: 'display-status', scope: f.scope, publicationId: f.publicationId });
   const css = '[data-openpane-part="card"] { border-radius: 0px; border-width: 3px; } [data-openpane-part="plot-trace"] { stroke-width: 3px; }';
-  const bundle = createExperienceBundle({ schemaVersion: 1, id: 'metrics-restyle', label: 'Metrics restyle', theme: { mode: 'light', light: { chart: { trace1: '#3355aa', grid: '#d0d0d0' } }, dark: {} },
-    presentation: { navigation: 'pages', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } }, stylesheet: 'style.css', assets: [{ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) }] }, css, []);
+  const bundle = createExperienceBundle({ schemaVersion: 2, id: 'metrics-restyle', label: 'Metrics restyle', theme: { density: 'comfortable', mode: 'light', light: { chart: { trace1: '#3355aa', grid: '#d0d0d0' } }, dark: {} },
+    presentation: { home: { kind: 'stack', panes: ['conversations', 'conversation'] }, transcript: 'bubbles', navigation: 'pages', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } }, stylesheet: 'style.css', assets: [{ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) }] }, css, []);
   const apply = await requestUi(f.socket, { op: 'apply', requestId: `${f.context.requestEpoch}:${randomUUID()}`, expectedRevision: f.context.revision, bundle });
   await wait(async () => (await requestUi(f.socket, { op: 'status', requestId: apply.receipt.requestId })).outcome === 'all-rendered', 'card restyle painted');
   assert.equal(await card.evaluate((node, old) => node === old, original), true);

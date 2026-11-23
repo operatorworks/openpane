@@ -5,8 +5,7 @@ import { mkdtemp, writeFile, symlink, rm, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createExperienceBundle, parseExperienceBundle, readExperienceDirectory, scopeExperienceCss, sha256 } from '../../apps/host/build/tsc/experience-bundle.js';
-const manifest = () => ({ schemaVersion: 1, id: 'test', label: 'Test experience', theme: { mode: 'system', light: {}, dark: {} }, presentation: {
-  navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } }, stylesheet: null, assets: [] });
+const manifest = () => ({ schemaVersion: 2, id: 'test', label: 'Test experience', theme: { density: 'comfortable', mode: 'system', light: {}, dark: {} }, presentation: { home: { kind: 'stack', panes: ['conversations', 'conversation'] }, transcript: 'bubbles', navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } }, stylesheet: null, assets: [] });
 function bundle(css = '[data-openpane-part="button"] { color: #123456; border: 1px outset #ffffff; }') {
   const value = manifest(); value.stylesheet = 'style.css'; value.assets.push({ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) });
   return createExperienceBundle(value, css, []);
@@ -104,4 +103,23 @@ test('semantic CSS accepts only CSS hex lengths and valid local font lists',()=>
   for(const color of ['#ab','#abcde','#abcdef1','#abcdef123'])assert.throws(()=>bundle(`[data-openpane-part="button"] { color: ${color}; }`));
   assert.doesNotThrow(()=>bundle('[data-openpane-part="button"] { font-family: "Segoe UI", sans-serif; }'));
   assert.throws(()=>bundle('[data-openpane-part="button"] { font-family: Tahoma,,sans-serif; }'));
+});
+
+test('authored control states, gradients and bevels use bounded parsed values and applicable compounds', () => {
+  for (const css of [
+    '[data-openpane-part="header"] { background-image: linear-gradient(to right, #000080, var(--aui-color-accent) 100%); }',
+    '[data-openpane-part="button"][data-openpane-role="send"]:active { border-top-style: inset; box-shadow: inset 1px 1px 0 var(--aui-color-border), -1px -1px 0 #ffffff; }',
+    '[data-openpane-part="button"][data-openpane-role="navigation"][data-openpane-state="selected"] { color: #ffffff; }',
+    '[data-openpane-part="checkbox"]:checked { accent-color: var(--aui-color-accent); }',
+    '[data-openpane-part="message-author"][data-openpane-state="remote"] { font-style: italic; letter-spacing: 1px; }',
+  ]) assert.doesNotThrow(() => bundle(css), css);
+  for (const selector of ['[data-openpane-role="send"]', '[data-openpane-part="input"][data-openpane-role="send"]',
+    '[data-openpane-part="button"] [data-openpane-role="send"]', '[data-openpane-part="button"][data-openpane-state="remote"]',
+    '[data-openpane-part="button"][data-openpane-role^="send"]', '[data-openpane-part="button"][class="secret"]'])
+    assert.throws(() => bundle(`${selector} { color: #123456; }`), selector);
+  for (const value of ['linear-gradient(to right, #fff, url("remote.png"))', 'linear-gradient(to right, #fff, var(--secret))',
+    'linear-gradient(to right, #fff, var(--aui-color-text, url("remote.png")))', 'linear-gradient(to right, #fff 90%, #000 10%)',
+    'linear-gradient(12deg, #fff, #000)', 'linear-gradient(to right, #fff, #000), url("remote.png")', 'linear-gradient(to right, #fff, #000'])
+    assert.throws(() => bundle(`[data-openpane-part="header"] { background-image: ${value}; }`), value);
+  assert.throws(() => bundle('[data-openpane-part="button"] { box-shadow: ' + Array(5).fill('1px 1px 0 #ffffff').join(',') + '; }'));
 });

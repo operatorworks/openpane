@@ -43,10 +43,10 @@ export function useDisplayCards(scope: ConversationScope) {
 type Cards = ReturnType<typeof useDisplayCards>;
 export function DisplayCards({ cards }: { readonly cards: Cards }) {
   return <div ref={cards.root} className="display-cards" aria-label="Saved display cards">
-    {cards.view.kind === 'unavailable' && <div role="status"><p>{cards.view.reason}{cards.view.publications.length > 0 ? ' Saved cards remain visible.' : ''}</p><button type="button" onClick={cards.refresh}>Refresh cards</button></div>}
+    {cards.view.kind === 'unavailable' && <div data-openpane-part="status" role="status"><p>{cards.view.reason}{cards.view.publications.length > 0 ? ' Saved cards remain visible.' : ''}</p><button data-openpane-part="button" type="button" onClick={cards.refresh}>Refresh cards</button></div>}
     {cards.view.kind !== 'none' && cards.view.publications.map(publication => <MetricsCard key={publication.publicationId} publication={publication} />)}
   </div>;
 }
 export function NewCardNotice({ cards }: { readonly cards: Cards }) {
-  return <><span className="visually-hidden" role="status">{cards.announcement}</span>{cards.newCount > 0 && <div className="card-notice"><button type="button" onClick={cards.showNew}>{cards.newCount === 1 ? 'New card' : `${cards.newCount} new cards`} ↓</button></div>}</>;
+  return <><span data-openpane-part="status" className="visually-hidden" role="status">{cards.announcement}</span>{cards.newCount > 0 && <div className="card-notice"><button data-openpane-part="button" type="button" onClick={cards.showNew}>{cards.newCount === 1 ? 'New card' : `${cards.newCount} new cards`} ↓</button></div>}</>;
 }

@@ -388,6 +388,18 @@ test('template workspace keeps composer, Stop and approval reachable with many r
           if (!point && ['auto', 'scroll'].includes(overflow) && bounds.top < innerHeight - 60 && bounds.bottom > 0 && ancestor.contains(document.elementFromPoint(x, y))) point = { x, y };
           if (ancestor.classList.contains('review-workspace')) break;
         }
+        const workspace = node.closest('.review-workspace'), panel = node.closest('.conversation-panel');
+        if (workspace && panel) {
+          const outer = workspace.getBoundingClientRect(), inner = panel.getBoundingClientRect();
+          const outerTop = Math.max(0, outer.top), outerBottom = Math.min(innerHeight, outer.bottom);
+          const room = Math.min(inner.bottom, outerBottom) - Math.max(inner.top, outerTop);
+          if (room < box.height + 2) {
+            const down = inner.top >= outerTop;
+            const y = down ? (outerTop + Math.min(inner.top, outerBottom)) / 2 : (Math.max(inner.bottom, outerTop) + outerBottom) / 2;
+            const x = (outer.left + outer.right) / 2;
+            if (workspace.contains(document.elementFromPoint(x, y))) return { visible: false, delta: down ? 80 : -80, point: { x, y } };
+          }
+        }
         return { visible: box.top >= top && box.bottom <= bottom && node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)),
           delta: Math.max(-80, Math.min(80, box.top < top ? box.top - top - 8 : box.bottom - bottom + 8)), point };
       });

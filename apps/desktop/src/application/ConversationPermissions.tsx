@@ -37,7 +37,7 @@ export function ConversationPermissions({ state, actions, enabled, retained }: {
     if (!event.currentTarget.contains(event.relatedTarget) && enabled && state.kind === 'stale') refresh();
   }}>
     <h2>Permissions</h2>
-    {state.kind !== 'fresh' && <p role="status">{state.reason}</p>}
+    {state.kind !== 'fresh' && <p data-openpane-part="status" role="status">{state.reason}</p>}
     {listing && <>
       <p>Last checked <time dateTime={listing.observedAt}>{new Date(listing.observedAt).toLocaleString()}</time>{state.kind !== 'fresh' ? ' · Refresh required' : ''}</p>
       {listing.permissions.length === 0 && <p>No active work-item permissions were found.</p>}
@@ -45,7 +45,7 @@ export function ConversationPermissions({ state, actions, enabled, retained }: {
         <h3>{permission.actionLabel} · {permission.scope === 'agent' ? 'All conversations for this member' : 'This conversation'}</h3>
         <p>{permission.detail}</p>
         {unresolved.has(permission.permissionId) && <p>The earlier revoke acknowledgement is unknown. Revoke again sends a new command. Its result leaves the earlier acknowledgement unknown.</p>}
-        <button type="button" disabled={!fresh} onClick={() => permission.scope === 'agent' ? setConfirming(permission) : void revoke(permission)}>
+        <button data-openpane-part="button" type="button" disabled={!fresh} onClick={() => permission.scope === 'agent' ? setConfirming(permission) : void revoke(permission)}>
           {unresolved.has(permission.permissionId) ? 'Revoke again' : permission.scope === 'agent' ? 'Revoke for this member in all conversations' : 'Revoke for this conversation'}
         </button>
       </div>)}
@@ -54,10 +54,10 @@ export function ConversationPermissions({ state, actions, enabled, retained }: {
     {confirming && fresh && listing?.permissions.some(row => row.permissionId === confirming.permissionId && row.scope === 'agent') &&
       <div role="group" aria-label="Confirm all-conversations revocation">
         <p>Revoke this member’s work-item permission in all conversations? Already-approved work may finish.</p>
-        <button type="button" onClick={() => void revoke(confirming)}>Confirm revoke in all conversations</button>
-        <button type="button" onClick={() => setConfirming(null)}>Keep permission</button>
+        <button data-openpane-part="button" type="button" onClick={() => void revoke(confirming)}>Confirm revoke in all conversations</button>
+        <button data-openpane-part="button" type="button" onClick={() => setConfirming(null)}>Keep permission</button>
       </div>}
     {error && <p role="alert">{error}</p>}
-    <button type="button" disabled={!enabled || state.kind === 'loading'} onClick={refresh}>Refresh permissions</button>
+    <button data-openpane-part="button" type="button" disabled={!enabled || state.kind === 'loading'} onClick={refresh}>Refresh permissions</button>
   </section>;
 }

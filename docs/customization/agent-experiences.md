@@ -92,6 +92,29 @@ retain their editor owners; builtin policy puts future new chats inline.
 
 ## Author tokens, styles and assets
 
+`experience schema` returns the version-2 manifest schema, pane choices, semantic parts, applicable roles/states, supported declarations and limits. Version 1 experience bundles must be reauthored; the UI wire protocol and stored metrics card version remain unchanged.
+
+Every v2 manifest adds `theme.density` (`comfortable` or `compact`) and these presentation fields:
+
+```json
+{
+  "home": { "kind": "stack", "panes": ["agents", "conversations"] },
+  "transcript": "lines"
+}
+```
+
+Alternatively, use `{"kind":"columns","primary":["conversation"],"secondary":["extensions","status"],"balance":"primary-wide"}` for Home. Regions are nonempty and pane kinds are unique across the entire composition. Other balance values are `even` and `secondary-wide`; `transcript` can also be `bubbles`. Panes show actual host data and keep ordinary routes to omitted capabilities. A separate-chat main's conversation pane shows placement status; browser fallback can show the real inline editor.
+
+[AIM Classic](../../examples/experiences/aim-classic/) demonstrates the directory/lines look. [Messenger 2002](../../examples/experiences/messenger-2002/) demonstrates the contrasting workbench. Both are optional. A cold v2 startup chooses Home; live apply preserves your current destination. Chats reveals the editor even when Home omits it.
+
+Compact density uses smaller desktop targets only for fine-pointer environments without coarse input. Coarse/hybrid targets remain at least 44px. The same inherited theme reaches main and detached windows. The authoring CSS changes appearance; the manifest owns layout and application actions remain unchanged.
+
+`[data-openpane-part="button"][data-openpane-role="navigation"][data-openpane-state="selected"]` styles selected navigation. Action roles include send, stop, approval and ordinary tones. Use only combinations returned by discovery; role/state attributes must be in the same compound as their applicable part. Native `:active`, `:disabled`, `:checked` and other discovered states remain functional. Bounded gradients and bevel shadows are available; arbitrary layout, imports and remote resources are rejected.
+
+Structural changes wait for active text composition to finish. A visible document's pending receipt can mean this deferral; the protected status says “Appearance waiting for text input to finish”. It is neither a render success nor a failed apply. A newer apply or restore cancels the older candidate. No theme operation sends a message or queries a provider. The local builtin restore can also wait for composition; its notice distinguishes saving the selection from completing the visible restore.
+
+Web CSS cannot repaint native OS window controls. The [reference sheet](references/aim-classic.md) explains the visual target and platform differences.
+
 `experience schema` returns the manifest schema and supported semantic parts.
 The theme has system/light/dark mode and separate light/dark token sets: colors,
 spacing, radius, typography, system font stacks, border/shadow treatments and

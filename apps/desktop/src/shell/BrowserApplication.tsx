@@ -1,10 +1,12 @@
 import { SavedDraftRecovery } from '../application/SavedDraftRecovery.js';
-import { sameScope } from '@openpane/contracts';
-import { useExperience, useUiActions } from '../application/experience-state.js';
+import { BUILTIN_HOME, homePaneOrder, sameScope, type ConversationOpenResult } from '@openpane/contracts';
+import { useExperience, useExperienceBootstrap, useExperienceCommitted, useUiActions } from '../application/experience-state.js';
 import { useDisplayScope } from '../application/display-state.js';
-import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
-import { DesktopShell } from './Shell.js';
+import { ContentBoundary, DesktopShell } from './Shell.js';
+import { HomeSurface, type MainDestination } from './HomeSurface.js';
+import { AgentsPane, StatusPane } from '../application/HomePanes.js';
 import { HostStatusLabel } from './HostStatusLabel.js';
 import { applicationEnabled } from '../application/application-controller.js';
 import { useApplication } from '../application/use-application.js';
@@ -89,6 +91,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   useDisplayScope(catalogOnly ? null : app.active?.scope ?? null);
   // The new-conversation composer's text, and whether it is opening a conversation. While it opens, the new-conversation
   // screen stays up; the conversation replaces it in one step once its first message is on its way.
+  const [customContentRestored, setCustomContentRestored] = useState(false);
   const [launchText, setLaunchText] = useState('');
   const [opening, setOpening] = useState(false);
   const openingGuard = useRef(false);
@@ -104,7 +107,38 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     window.addEventListener('drop', guard);
     return () => { window.removeEventListener('dragover', guard); window.removeEventListener('drop', guard); };
   }, []);
-  const [selectedView, setSelectedView] = useState<'chats' | 'extensions' | 'settings'>('chats');
+  const experience = useExperience();
+  const bootstrap = useExperienceBootstrap();
+  const committed = useExperienceCommitted();
+  const navigationEpoch = useRef(0);
+  const [navigation, storeSelectedView] = useState<MainDestination | 'initial'>('initial');
+  const setSelectedView = (view: MainDestination) => { navigationEpoch.current++; storeSelectedView(view); };
+  const selectedView: MainDestination = navigation === 'initial'
+    ? experience && bootstrap.kind !== 'pending' && bootstrap.initial === 'experience' ? 'home' : 'chats'
+    : navigation === 'home' && !experience ? 'chats' : navigation;
+  useLayoutEffect(() => {
+    if (bootstrap.kind === 'settled' && navigation === 'initial') storeSelectedView(selectedView);
+    else if (committed && navigation === 'home' && !experience) storeSelectedView('chats');
+  }, [bootstrap.kind, navigation, selectedView, experience, committed]);
+  const home = experience?.manifest.presentation.home ?? BUILTIN_HOME;
+  const currentDestination = useRef({ selectedView, home });
+  useLayoutEffect(() => { currentDestination.current = { selectedView, home }; }, [selectedView, home]);
+  function revealOpened(epoch: number): void {
+    const current = currentDestination.current;
+    if (current.selectedView !== 'home' && current.selectedView !== 'chats') return;
+    if (navigationEpoch.current === epoch && !(current.selectedView === 'home' && homePaneOrder(current.home).includes('conversation'))) storeSelectedView('chats');
+  }
+  async function reopenFromPane(viewId: string): Promise<void> {
+    const epoch = navigationEpoch.current;
+    await controller.reopenView(viewId);
+    if (controller.getSnapshot().active) revealOpened(epoch);
+  }
+  async function openFromPane(operation: () => Promise<ConversationOpenResult>): Promise<ConversationOpenResult> {
+    const epoch = navigationEpoch.current;
+    const result = await operation();
+    if (result.kind === 'inline') revealOpened(epoch);
+    return result;
+  }
   const [selectedExtension, setSelectedExtension] = useState<string | null>(null);
   const personalization = usePersonalization();
   const { document: preferences, session: personalizationSession } = personalization;
@@ -112,7 +146,6 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   const customizationsOn = children === undefined && customizationEnabled;
   const selectedPalette = preferences.palette;
   const paletteResource = selectedPalette.kind === 'imported' ? personalization.saved?.palettes.find(item => item.digest === selectedPalette.digest && item.kind === 'ready') : undefined;
-  const experience = useExperience();
   const uiActions = useUiActions();
   const contentPalette = experience ? { light: { ...palettes.light, ...experience.manifest.theme.light.colors }, dark: { ...palettes.dark, ...experience.manifest.theme.dark.colors } } : paletteResource?.kind === 'ready' ? paletteResource.document.colors : palettes;
   const custom = useDesktopCustomizations({ customizations: customization, sink: controller.frontendGenerations, enabled: customizationsOn,
@@ -137,7 +170,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     let opened = false, carried = !text;
     setLaunchNotice(''); setOpening(true);
     try {
-      const result = await controller.create(agentId, text || undefined);
+      const result = await openFromPane(() => controller.create(agentId, text || undefined));
       if (result.kind !== 'inline') {
         if (result.kind === 'detached' || result.kind === 'pending' && result.scope) {
           carried = true;
@@ -197,7 +230,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     ? <ConversationView
         key={`${app.active.viewId}/${app.active.scope.hostId}/${app.active.scope.conversationId}`}
         contentPalette={contentPalette} transcript={slots.transcript} activity={custom.activity} contentLayout={slots.contentLayout} modules={slots.modules} permissionState={app.permissionState} observation={app.observation} continuation={app.continuation} actions={activeActions} active={app.active} enabled={enabled} storageFailure={app.storageFailure} agent={agent} customizationNotices={customizationNotices}
-        composerControls={canSwitch => <ComposerAgentControls agents={composerAgents} agent={app.active?.agent ?? null} hasConversation enabled={canSwitch && app.saved.pendingCreation === null} onStartConversation={id => void controller.create(id)} {...(fixedChat ? {} : { onSetupPi: setupPi })} />}
+        composerControls={canSwitch => <ComposerAgentControls agents={composerAgents} agent={app.active?.agent ?? null} hasConversation enabled={canSwitch && app.saved.pendingCreation === null} onStartConversation={id => void openFromPane(() => controller.create(id))} {...(fixedChat ? {} : { onSetupPi: setupPi })} />}
       />
     : null;
   const workspaceConversation = slots.workspace ? activeConversation : null;
@@ -210,7 +243,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   // The footer carries the conversation's disclosure wherever its composer is on screen.
   const composerVisible = Boolean(activeConversation) && ((selectedView === 'chats' && !slots.workspace) || (workspaceOpen && Boolean(slots.workspace)));
   const canStart = enabled && app.saved.pendingCreation === null && !opening;
-  const conversation = catalogOnly ? <section className="chat-catalog-empty" aria-label="Chats in separate windows"><h1>Chats open in their own windows</h1><p>Choose a chat from the catalog or start a new chat with an available agent.</p>{placementNotice && <p role="status">{placementNotice}</p>}</section> : !slots.workspace && activeConversation && !opening
+  const conversation = catalogOnly ? <section className="chat-catalog-empty" aria-label="Chats in separate windows"><h1>Chats open in their own windows</h1><p>Choose a chat from the catalog or start a new chat with an available agent.</p>{placementNotice && <p data-openpane-part="status" role="status">{placementNotice}</p>}</section> : slots.workspace ? <p data-openpane-part="status">This conversation is open in its extension workspace.</p> : activeConversation && !opening
     ? activeConversation
     : <NewConversation text={launchText} onText={setLaunchText} placeholder={presentation.placeholder} opening={opening}
         note={app.host.kind === 'ready' && !selected ? 'No agents are available to start a conversation.'
@@ -219,22 +252,22 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
         onSend={() => void startConversation(selected?.id, true)}
         controls={<ComposerAgentControls agents={choices} agent={selected ?? null} hasConversation={false} enabled={canStart} onStartConversation={id => void startConversation(id, false)} {...(fixedChat ? {} : { onSetupPi: setupPi })} />} />;
   const hostAlerts = <>
-    {launchNotice && <p role="status">{launchNotice}</p>}
-    {catalogOnly && launchText && !opening && <details><summary>Unsent launch text</summary><textarea readOnly aria-label="Unsent launch text" value={launchText} /></details>}
+    {launchNotice && <p data-openpane-part="status" role="status">{launchNotice}</p>}
+    {catalogOnly && launchText && !opening && <details><summary>Unsent launch text</summary><textarea data-openpane-part="textarea" readOnly aria-label="Unsent launch text" value={launchText} /></details>}
     {app.savedDraftRecovery && <SavedDraftRecovery key={`${app.savedDraftRecovery.viewId}/${app.savedDraftRecovery.scope.conversationId}`} recovery={app.savedDraftRecovery} onSelectScope={scope => { if (app.savedDraftRecovery) void controller.inspectSavedDraft(app.savedDraftRecovery.viewId, scope); }} onOpen={() => { if (app.savedDraftRecovery) void (app.savedDraftRecovery.kind === 'bound' ? controller.create() : controller.open(app.savedDraftRecovery.scope)); }} onRemainingWork={() => { if (app.savedDraftRecovery) void controller.openRemainingSavedWork(app.savedDraftRecovery); }} onDismiss={() => { if (app.savedDraftRecovery) controller.dismissSavedDraftRecovery(app.savedDraftRecovery); }} />}
     {app.storageFailure && <div className="application-alert" role="alert"><strong>Local storage unavailable. Commands are blocked.</strong><p>{app.storageFailure}</p><p>Existing records have not been discarded. Restore browser storage access, then reload.</p></div>}
     {app.error && <p className="application-alert" role="alert">{app.error}</p>}
-    {!placementNotice && app.lastPlacement?.kind === 'pending' && <p role="status">{app.lastPlacement.reason}</p>}
-    {placementNotice && <p role="status">{placementNotice}</p>}
+    {!placementNotice && app.lastPlacement?.kind === 'pending' && <p data-openpane-part="status" role="status">{app.lastPlacement.reason}</p>}
+    {placementNotice && <p data-openpane-part="status" role="status">{placementNotice}</p>}
     {app.host.kind === 'incompatible' && <div className="application-alert" role="alert"><strong>This host is incompatible. Commands are blocked.</strong>
       {app.host.issues.map(issue => <p key={issue.dimension}>{issue.reason} {issue.action}</p>)}
     </div>}
   </>;
   const creationRecovery = app.saved.pendingCreation && <div className="creation-recovery"><p>Creation of {app.saved.pendingCreation.scope.conversationId} needs confirmation. Recovery uses the saved conversation and agent.</p>
-    {app.saved.pendingCreation.agentId === null && <label className="agent-choice">Agent if this chat was not created<select aria-label="Agent for pending creation" disabled={!enabled} value={recoveryAgent ?? ''} onChange={event => setRecoveryChoice(event.target.value ? { scopeKey: pendingScopeKey, agentId: event.target.value } : null)}>
+    {app.saved.pendingCreation.agentId === null && <label data-openpane-part="field-label" className="agent-choice">Agent if this chat was not created<select data-openpane-part="select" aria-label="Agent for pending creation" disabled={!enabled} value={recoveryAgent ?? ''} onChange={event => setRecoveryChoice(event.target.value ? { scopeKey: pendingScopeKey, agentId: event.target.value } : null)}>
       <option value="">Check the saved chat first</option>{options}
     </select></label>}
-    <button disabled={!enabled} onClick={() => void controller.recoverCreation(recoveryAgent ?? undefined)}>Recover creation</button>
+    <button data-openpane-part="button" disabled={!enabled} onClick={() => void controller.recoverCreation(recoveryAgent ?? undefined)}>Recover creation</button>
   </div>;
   const personalizationNotice = <>{personalization.diagnostic && <p className="application-alert" role="alert">{personalization.diagnostic}</p>}
     {selectedPalette.kind === 'imported' && !paletteResource && <p role="alert">Selected palette is unavailable. Reimport it or choose builtin in Settings.</p>}
@@ -247,60 +280,64 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
       : <ExtensionsList rows={rows} enabled={!suspended} onOpen={setSelectedExtension}
           tools={toolsEligible ? <ThemeScope palette={contentPalette} className="content-theme">{moduleList('tools')}</ThemeScope> : null} conversation={toolsTarget} />}
   </div>;
-  const controls = <div className="application-controls">
+  const controls = <div className="application-notices">
     {windowRecovery}
     {!workspaceOpen && personalizationNotice}
-    <h2 className="sidebar-title">{selectedView === 'chats' ? 'Chats' : selectedView === 'extensions' ? 'Extensions' : 'Settings'}</h2>
     {app.capturedSends.length > 0 && <section aria-label="Captured tools"><h3>Captured tools</h3>
       <p>Tools are retained for these sends. Execution is not enabled.</p>
       {app.capturedSends.map(send => <div key={send.key} data-captured-command={send.command.clientCommandId}>
-        <p role="status">{send.status === 'waiting' ? 'Waiting for confirmed run' : send.status === 'bound' ? 'Bound to confirmed run' : 'Captured tools unavailable'} · {send.command.body.text}</p>
+        <p data-openpane-part="status" role="status">{send.status === 'waiting' ? 'Waiting for confirmed run' : send.status === 'bound' ? 'Bound to confirmed run' : 'Captured tools unavailable'} · {send.command.body.text}</p>
         {send.binding && <p>Run {send.binding.run.runId}</p>}
-        {send.status !== 'unavailable' && <button type="button" onClick={() => void controller.releaseCapturedSend(send.key)}>Release captured tools</button>}
+        {send.status !== 'unavailable' && <button data-openpane-part="button" type="button" onClick={() => void controller.releaseCapturedSend(send.key)}>Release captured tools</button>}
       </div>)}
     </section>}
     {app.savedViewNotice && <p role="note">{app.savedViewNotice}</p>}
     {!workspaceOpen && hostAlerts}
-    {selectedView === 'extensions' && !workspaceOpen && creationRecovery}
-    <div className="chat-navigation" hidden={selectedView !== 'chats'}>
+    {!workspaceOpen && creationRecovery}
+
+  </div>;
+  const directory = <div className="chat-navigation">
       <div className="action-row">
-        <button disabled={!enabled || opening || app.saved.pendingCreation !== null || selected?.availability.kind !== 'ready'} onClick={() => void (catalogOnly || app.active ? controller.create(selected?.id) : startConversation(selected?.id, false))}>{selected && 'runtime' in selected && selected.runtime.engine === 'openpane-recorded' ? 'New recorded conversation' : 'New conversation'}</button>
+        <button data-openpane-part="button" disabled={!enabled || opening || app.saved.pendingCreation !== null || selected?.availability.kind !== 'ready'} onClick={() => void (catalogOnly || app.active ? openFromPane(() => controller.create(selected?.id)) : startConversation(selected?.id, false))}>{selected && 'runtime' in selected && selected.runtime.engine === 'openpane-recorded' ? 'New recorded conversation' : 'New conversation'}</button>
       </div>
-      {creationRecovery}
-      <ConversationSearch controller={controller} connectionKey={searchConnection} enabled={enabled} active={app.active?.scope ?? null}>
+      <ConversationSearch onOpen={scope => openFromPane(() => controller.open(scope))} controller={controller} connectionKey={searchConnection} enabled={enabled} active={app.active?.scope ?? null}>
       {app.catalog.items.length > 0 && <nav className="conversation-catalog" data-openpane-part="chat-directory" aria-label="Host conversations">
         {app.catalog.items.map(({ scope, preview }) => {
           const label = conversationLabel({ scope, preview });
-          return <button key={scope.conversationId} disabled={!enabled}
+          return <button data-openpane-part="button" data-openpane-role="directory-row" data-openpane-state={scope.conversationId === app.active?.scope.conversationId ? 'selected' : undefined} key={scope.conversationId} disabled={!enabled}
             title={scope.conversationId} aria-label={`${label} · Open conversation ${scope.conversationId}`}
             aria-current={scope.conversationId === app.active?.scope.conversationId ? 'page' : undefined}
-            onClick={() => void controller.open(scope)}>{label}</button>;
+            onClick={() => void openFromPane(() => controller.open(scope))}>{label}</button>;
         })}
-        {app.catalog.after !== null && <button disabled={!enabled} onClick={() => void controller.moreConversations()}>More conversations</button>}
+        {app.catalog.after !== null && <button data-openpane-part="button" disabled={!enabled} onClick={() => void controller.moreConversations()}>More conversations</button>}
       </nav>}
       {(app.savedViews.items.length > 0 || app.savedViews.after !== null) && <nav className="conversation-catalog" data-openpane-part="chat-directory" aria-label="Saved local views">
-        {app.savedViews.items.map(viewId => <button key={viewId} disabled={!enabled} onClick={() => void controller.reopenView(viewId)}>Reopen saved view {viewId}</button>)}
-        {app.savedViews.after !== null && <button disabled={!enabled} onClick={() => void controller.moreSavedViews()}>More saved views</button>}
+        {app.savedViews.items.map(viewId => <button data-openpane-part="button" key={viewId} disabled={!enabled} onClick={() => void reopenFromPane(viewId)}>Reopen saved view {viewId}</button>)}
+        {app.savedViews.after !== null && <button data-openpane-part="button" disabled={!enabled} onClick={() => void controller.moreSavedViews()}>More saved views</button>}
       </nav>}
       </ConversationSearch>
-    </div>
-    {selectedView === 'settings' && <a className="settings-link" href="#connection-settings">Connection and app</a>}
-  </div>;
+    </div>;
   const views = <div className="chat-view" inert={suspended}>
-      {conversation}
+      {children != null && !customContentRestored ? <ContentBoundary revision={0}>{children}</ContentBoundary> : conversation}
       {!app.active && moduleList('status')}
     </div>;
-  const settings = <section className="settings-panel" aria-label="Settings" id="connection-settings">
+  const homeView = <HomeSurface composition={home} destination={selectedView} panes={{
+    agents: <AgentsPane agents={choices} enabled={canStart} onCreate={id => void openFromPane(() => controller.create(id))} />,
+    conversations: directory, conversation: views,
+    extensions: <ExtensionsList rows={rows} enabled={!suspended} onOpen={namespace => { setSelectedExtension(namespace); setSelectedView('extensions'); }} />,
+    status: <StatusPane host={<HostStatusLabel host={app.host} />} conversation={app.active ? `Conversation ${app.active.scope.conversationId}` : 'No conversation open'} build={presentation.buildLabel} />,
+  }} />;
+  const settings = <section data-openpane-part="page" className="settings-panel" aria-label="Settings" id="connection-settings">
       <h1>Settings</h1>
       <section className="settings-section"><h2>Connection</h2>
         <div className="application-status"><strong>{presentation.hostLabel}</strong><HostStatusLabel host={app.host} /></div>
         <p>{presentation.settings}</p>
         {connection.kind === 'native' && connection.controls}
-        <button disabled={suspended || app.busy || Boolean(app.storageFailure)} onClick={() => connection.kind === 'native' ? connection.reconnect() : void controller.reconnect()}>Reconnect</button>
+        <button data-openpane-part="button" disabled={suspended || app.busy || Boolean(app.storageFailure)} onClick={() => connection.kind === 'native' ? connection.reconnect() : void controller.reconnect()}>Reconnect</button>
       </section>
       <section className="settings-section" aria-label="Pi and OpenCode Go"><h2>Pi and OpenCode Go</h2>
         <p>OpenPane includes a compatible Pi runtime. Your installed Pi command is separate and is not required for this chat.</p>
-        <p role="status">{pi?.availability.kind === 'ready' ? 'Pi is configured for GLM 5.3 through OpenCode Go.'
+        <p data-openpane-part="status" role="status">{pi?.availability.kind === 'ready' ? 'Pi is configured for GLM 5.3 through OpenCode Go.'
           : pi?.availability.kind === 'unavailable' ? pi.availability.reason
           : 'This host does not offer Pi. Start OpenPane with ./openpane to include Pi, or ./openpane --agent pi for Pi only.'}</p>
         {pi && <><a className="settings-link" href="/setup/pi">Open secure Pi setup</a>
@@ -316,29 +353,30 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     {continuationAnnouncement(app.continuation, app.observation?.status.kind === 'concluded')}</div>;
   const rail = <nav className="view-rail" data-openpane-part="page-rail" aria-label="Workspace views">
     {continuationStatus}
-    <button type="button" data-openpane-essential="chats" data-openpane-part="button" aria-label="Chats" title="Chats" aria-pressed={selectedView === 'chats'} onClick={() => setSelectedView('chats')}>
+    {experience && <button type="button" data-openpane-essential="home" data-openpane-part="button" data-openpane-role="navigation" data-openpane-state={selectedView === 'home' ? 'selected' : undefined} aria-label="Home" title="Home" aria-pressed={selectedView === 'home'} onClick={() => setSelectedView('home')}><span aria-hidden="true">⌂</span>{experience.manifest.presentation.navigation === 'pages' && <span className="page-label">Home</span>}</button>}
+    <button type="button" data-openpane-essential="chats" data-openpane-part="button" data-openpane-role="navigation" data-openpane-state={selectedView === 'chats' ? 'selected' : undefined} aria-label="Chats" title="Chats" aria-pressed={selectedView === 'chats'} onClick={() => setSelectedView('chats')}>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3v-9.5A7.5 7.5 0 0 1 9.5 5H12"/><path d="M16 5h6m-3-3v6"/></svg>{experience?.manifest.presentation.navigation === 'pages' && <span className="page-label">Chats</span>}
     </button>
-    <button type="button" data-openpane-essential="extensions" data-openpane-part="button" aria-label="Extensions" title="Extensions" aria-pressed={selectedView === 'extensions'} onClick={() => setSelectedView('extensions')}>
+    <button type="button" data-openpane-essential="extensions" data-openpane-part="button" data-openpane-role="navigation" data-openpane-state={selectedView === 'extensions' ? 'selected' : undefined} aria-label="Extensions" title="Extensions" aria-pressed={selectedView === 'extensions'} onClick={() => setSelectedView('extensions')}>
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><path d="M17.25 13.5v7.5M13.5 17.25H21"/></svg>{experience?.manifest.presentation.navigation === 'pages' && <span className="page-label">Extensions</span>}
     </button>
-    <button type="button" data-openpane-essential="settings" data-openpane-part="button" className="settings-view-button" aria-label="Settings" title="Settings" aria-pressed={selectedView === 'settings'} onClick={() => setSelectedView('settings')}>
+    <button type="button" data-openpane-essential="settings" data-openpane-part="button" data-openpane-role="navigation" data-openpane-state={selectedView === 'settings' ? 'selected' : undefined} className="settings-view-button" aria-label="Settings" title="Settings" aria-pressed={selectedView === 'settings'} onClick={() => setSelectedView('settings')}>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h4m4 0h8M4 12h8m4 0h4M4 18h2m4 0h10"/><circle cx="10" cy="6" r="2"/><circle cx="14" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></svg>{experience?.manifest.presentation.navigation === 'pages' && <span className="page-label">Settings</span>}
     </button>
   </nav>;
-  if (personalization.readiness === 'loading') return <ThemeScope><p role="status">Loading local preferences…</p></ThemeScope>;
+  if (personalization.readiness === 'loading') return <ThemeScope><p data-openpane-part="status" role="status">Loading local preferences…</p></ThemeScope>;
   const resolvedAppearance = experience ? (experience.manifest.theme.mode === 'system' ? undefined : experience.manifest.theme.mode) : preferences.appearance === 'system' ? undefined : preferences.appearance;
-  if (fixedChat) return <ThemeScope inert={suspended} variants={experience?.manifest.theme} appearance={resolvedAppearance} palette={contentPalette} className="application-chat-window" data-openpane-part="main">
-    <header className="application-chat-header" data-openpane-part="page-header"><h1>{app.active?.agent.label ?? 'Opening chat'}</h1>
-      <button type="button" data-openpane-essential="new-chat" disabled={!enabled || !app.active} onClick={() => void controller.create(app.active?.agent.id)}>New chat</button>
+  if (fixedChat) return <ThemeScope density={experience?.manifest.theme.density ?? 'comfortable'} inert={suspended} variants={experience?.manifest.theme} appearance={resolvedAppearance} palette={contentPalette} className="application-chat-window" data-openpane-part="main">
+    <header className="application-chat-header" data-openpane-part="page-header"><h1 data-openpane-part="caption-title">{app.active?.agent.label ?? 'Opening chat'}</h1>
+      <button data-openpane-part="button" type="button" data-openpane-essential="new-chat" disabled={!enabled || !app.active} onClick={() => void controller.create(app.active?.agent.id)}>New chat</button>
     </header>
     {personalizationNotice}{hostAlerts}{creationRecovery}{windowRecovery}
-    {activeConversation ?? <section aria-label="Chat ownership"><p role="status">Waiting for this window's assigned editor.</p><button data-openpane-essential="retry-editor" type="button" onClick={() => window.location.reload()}>Retry assigned editor</button></section>}
+    {activeConversation ?? <section aria-label="Chat ownership"><p data-openpane-part="status" role="status">Waiting for this window's assigned editor.</p><button data-openpane-part="button" data-openpane-essential="retry-editor" type="button" onClick={() => window.location.reload()}>Retry assigned editor</button></section>}
     <footer>{app.active ? <ConversationStatus active={app.active} /> : 'No editor ready'}</footer>
   </ThemeScope>;
-  return <DesktopShell experience={experience?.manifest} contentPalette={experience ? contentPalette : undefined} appearance={resolvedAppearance} onRestoreAppearance={() => { if (experience && uiActions) void uiActions.restore(); else void personalizationSession.resetAppearance(); }} navigation={rail} activeView={selectedView} protectedContent={controls} defaultView={views} settingsView={settings}
-    extensionsView={extensionsView} workspaceOpen={workspaceOpen} restoreMode={children === undefined ? 'managed' : 'remount'}
-    onRestore={() => { void personalizationSession.restoreDefaultView(); setSelectedView('chats'); }}
+  return <DesktopShell experience={experience?.manifest} contentPalette={experience ? contentPalette : undefined} appearance={resolvedAppearance} onRestoreAppearance={() => { if (experience && uiActions) void uiActions.restore(); else void personalizationSession.resetAppearance(); }} navigation={rail} activeView={selectedView} protectedContent={controls} composed defaultView={homeView} settingsView={settings}
+    extensionsView={extensionsView} workspaceOpen={workspaceOpen} restoreMode="managed"
+    onRestore={() => { setCustomContentRestored(true); void personalizationSession.restoreDefaultView(); setSelectedView('chats'); }}
     status={app.active ? <ConversationStatus active={app.active} /> : 'No conversation open'}
-    buildLabel={composerVisible && app.active ? conversationPresentation(app.active.agent, agent).footer : presentation.buildLabel}>{children}</DesktopShell>;
+    buildLabel={composerVisible && app.active ? conversationPresentation(app.active.agent, agent).footer : presentation.buildLabel} />;
 }

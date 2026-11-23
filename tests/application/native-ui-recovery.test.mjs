@@ -31,7 +31,7 @@ async function fixture(t) {
   t.after(async () => { ui.close(); globalThis.fetch = previousFetch; globalThis.localStorage = previousStorage; store.close(); await rm(directory, { recursive: true, force: true }); });
   return { ui, store, confirmations, requests, pending: () => pending, cached: () => JSON.parse(saved.get(UI_RECOVERY_KEY) ?? 'null'),
     transport: fn => { transport = fn; }, confirm: fn => { confirm = fn; }, async apply() {
-      const bundle = createExperienceBundle({ schemaVersion: 1, id: 'new-selection', label: 'New selection', theme: { mode: 'system', light: {}, dark: {} }, presentation: { navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } }, stylesheet: null, assets: [] }, null, []);
+      const bundle = createExperienceBundle({ schemaVersion: 2, id: 'new-selection', label: 'New selection', theme: { density: 'comfortable', mode: 'system', light: {}, dark: {} }, presentation: { home: { kind: 'stack', panes: ['conversations', 'conversation'] }, transcript: 'bubbles', navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } }, stylesheet: null, assets: [] }, null, []);
       await store.execute({ op: 'apply', requestId: `1:${randomUUID()}`, expectedRevision: store.context().revision, bundle });
     } };
 }

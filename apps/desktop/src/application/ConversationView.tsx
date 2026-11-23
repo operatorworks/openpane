@@ -47,7 +47,7 @@ type DraftEditor =
 
 export function ConversationStatus({ active }: { readonly active: OpenConversation }) {
   const view = useConversation(active.store);
-  return <span role="status">Conversation {view.connection.kind}{'reason' in view.connection ? ` · ${view.connection.reason}` : ''}</span>;
+  return <span data-openpane-part="status" role="status">Conversation {view.connection.kind}{'reason' in view.connection ? ` · ${view.connection.reason}` : ''}</span>;
 }
 
 export function ConversationView({ contentPalette = palettes, actions, active, enabled, storageFailure, observation = null, continuation = null, permissionState, agent = 'recorded', composerControls, transcript = { kind: 'default' }, activity = { kind: 'default' }, contentLayout = { kind: 'default' }, modules = null, customizationNotices = false }: {
@@ -234,13 +234,14 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
     recovery.retained.length === 0 && recovery.uncertain.length === 0 && recovery.pending.length === 0 &&
     !customizationNotices && !showPermissions && !hasCards;
 
+  const experience = useExperience();
   const conversationKey = `${active.viewId}/${active.scope.hostId}/${active.scope.conversationId}`;
   const context = { conversation: active.scope, activity: view.document, commands: actions.commands, permissions: actions.permissions };
   const nativeMessages = <>
       {view.document.domain.messages.length === 0 && !view.document.domain.activities?.length && !continuation?.boundary && <p className="conversation-greeting">A conversation that stays with you.</p>}
-      {view.document.domain.messages.map(message => <article data-openpane-part="transcript-row" className={`message message-${message.role}`} key={message.messageId}>
-        <strong>{message.role === 'user' ? 'You' : presentation.assistant}</strong>
-        {message.role === 'assistant' ? <AssistantReply text={message.text} /> : message.text && <p data-openpane-part="message-text">{message.text}</p>}
+      {view.document.domain.messages.map(message => <article data-openpane-part="transcript-row" data-openpane-state={message.role === 'user' ? 'local' : 'remote'} className={`message message-${message.role}`} key={message.messageId}>
+        <strong data-openpane-part="message-author" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.role === 'user' ? 'You' : presentation.assistant}{experience?.manifest.presentation.transcript === 'lines' ? ': ' : ''}</strong>
+        <div data-openpane-part="message-body" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.role === 'assistant' ? <AssistantReply text={message.text} /> : message.text && <p data-openpane-part="message-text">{message.text}</p>}</div>
         {message.image && <ImageAttachmentCard attachment={message.image} read={actions.readImage} />}
         {!message.complete && <span className="progress-label">{concluded ? 'Did not finish' : paused ? 'Updates paused' : agent === 'recorded' ? 'Recorded response in progress…' : 'Responding…'}</span>}
       </article>)}
@@ -256,14 +257,13 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
   </div>;
 
   const inherited = useTheme();
-  const experience = useExperience();
   const builtin = createTheme({ colors: experience ? contentPalette[inherited.appearance] : palettes[inherited.appearance] }, inherited);
   return <ThemeProvider colors={builtin.colors}><section style={toCssVariables(builtin)} className="aui-theme conversation-panel" data-openpane-part="chat-window" data-appearance={builtin.appearance} data-reduced-motion={builtin.reducedMotion} aria-label="Conversation" data-empty={empty ? 'true' : undefined} {...dropHandlers}>
     <header className="visually-hidden"><p className="eyebrow">{agent === 'recorded' ? 'RECORDED CONVERSATION' : 'CONVERSATION'}</p><h1>Your conversation</h1><p className="agent-label">{active.agent.label}</p><p className="scope-label">{active.scope.conversationId}</p></header>
-    {active.agent.availability.kind === 'unavailable' && <p role="status">{active.agent.availability.reason} Saved history remains available.</p>}
-    {observationStatus?.kind === 'unknown' && <p role="status">Observation status unavailable. Reconnect to check for updates.</p>}
-    {observationStatus?.kind === 'recovering' && <p role="status">Resuming provider updates…</p>}
-    {observationStatus?.kind === 'stopped' && <div role="status" className="observation-notice">
+    {active.agent.availability.kind === 'unavailable' && <p data-openpane-part="status" role="status">{active.agent.availability.reason} Saved history remains available.</p>}
+    {observationStatus?.kind === 'unknown' && <p data-openpane-part="status" role="status">Observation status unavailable. Reconnect to check for updates.</p>}
+    {observationStatus?.kind === 'recovering' && <p data-openpane-part="status" role="status">Resuming provider updates…</p>}
+    {observationStatus?.kind === 'stopped' && <div data-openpane-part="status" role="status" className="observation-notice">
       <p>Updates paused. {OBSERVATION_NOTICE[observationStatus.reason]} Saved messages and your draft remain available.{run && run.kind !== 'ended' ? ' The provider may still be running.' : ''}</p>
       {canRetryObservation(observationStatus) && <>
         <p>Checking for updates does not restart this request or resend commands.</p>
@@ -271,7 +271,7 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
           onClick={() => void actions.retryObservation()}>{observation?.retrying ? 'Checking for updates…' : 'Check for updates'}</button>
       </>}
     </div>}
-    {observationStatus?.kind === 'concluded' && <div role="status" className="observation-notice">
+    {observationStatus?.kind === 'concluded' && <div data-openpane-part="status" role="status" className="observation-notice">
       <p>This conversation ended: {CLOSURE_NOTICE[observationStatus.cause]}. Earlier messages and your draft stay available.</p>
       {continuation && <ContinuationChoices continuation={continuation} actions={actions} enabled={enabled && available} />}
     </div>}
@@ -283,9 +283,9 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
         appendix={sentImages.length > 0 && <section className="sent-images" aria-label="Sent images">
           <h2>Sent images</h2>{sentImages.map(sent => <ImageAttachmentCard key={sent.messageId} attachment={sent.image} read={actions.readImage} />)}
         </section>} />} />
-    {Object.keys(view.document.decisions).length > 0 && <div className="conversation-approvals" role="region" aria-label="Pending approvals">{Object.values(view.document.decisions).map(decision => <section className="decision-card" key={decision.pendingId} aria-label="Approval required">
+    {Object.keys(view.document.decisions).length > 0 && <div className="conversation-approvals" role="region" aria-label="Pending approvals">{Object.values(view.document.decisions).map(decision => <section className="decision-card" data-openpane-part="approval-panel" key={decision.pendingId} aria-label="Approval required">
       <h2>Approval required</h2><p tabIndex={0} role="region" aria-label="Approval request details">{decision.prompt}</p><div className="action-row">
-        {decision.choices.map(choice => <button data-openpane-essential="approval" data-openpane-part="button" key={choice} disabled={!connected || !active.agent.commands.includes('approve') || decision.reserved || approving.has(decision.pendingId)} onClick={() => approve(decision.pendingId, choice)}>{decision.choiceLabels?.[choice] ?? (agent === 'codex' && choice === 'accept' ? 'Allow' : agent === 'codex' && choice === 'decline' ? 'Deny' : choice)}</button>)}
+        {decision.choices.map(choice => <button data-openpane-essential="approval" data-openpane-part="button" data-openpane-role="approval" key={choice} disabled={!connected || !active.agent.commands.includes('approve') || decision.reserved || approving.has(decision.pendingId)} onClick={() => approve(decision.pendingId, choice)}>{decision.choiceLabels?.[choice] ?? (agent === 'codex' && choice === 'accept' ? 'Allow' : agent === 'codex' && choice === 'decline' ? 'Deny' : choice)}</button>)}
       </div>
     </section>)}</div>}
     {permissionState && showPermissions && <ConversationPermissions retained={recovery.retained} state={permissionState} actions={actions} enabled={connected} />}
@@ -296,7 +296,7 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
         {drop && <p className="composer-drop-hint" aria-hidden="true">{drop.kind === 'reject' ? drop.reason : image ? `Drop to replace ${image.name}` : 'Drop to attach image'}</p>}
         {image && <div className="composer-image" aria-label="Attached image">
           <span>{image.name} · {imageSize(image.byteLength)}</span>
-          <span role="status">{image.status === 'uploading' ? 'Uploading…' : image.status === 'ready' ? 'Ready' : image.status === 'interrupted' ? 'Upload interrupted' : image.reason}</span>
+          <span data-openpane-part="status" role="status">{image.status === 'uploading' ? 'Uploading…' : image.status === 'ready' ? 'Ready' : image.status === 'interrupted' ? 'Upload interrupted' : image.reason}</span>
           {(image.status === 'failed' || image.status === 'interrupted') && <button data-openpane-part="button" type="button" disabled={!enabled}
             onClick={() => imageAction(() => active.store.retryImage())}>Retry</button>}
           <button data-openpane-part="button" type="button" className="composer-image-remove" aria-label="Remove" title="Remove image" disabled={Boolean(storageFailure)}
@@ -307,7 +307,7 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
       </>}
       below={editor.kind === 'failed' && <p role={storageFailure ? 'note' : 'alert'}>Draft not saved. {storageFailure ? 'Copy your text before reloading.' : editor.message}</p>}
       leading={acceptsImages && <>
-        <input ref={imageInput} type="file" accept="image/png,image/jpeg" aria-label="Image file" hidden onChange={event => {
+        <input data-openpane-part="input" ref={imageInput} type="file" accept="image/png,image/jpeg" aria-label="Image file" hidden onChange={event => {
           const file = event.target.files?.[0];
           event.target.value = '';
           if (file) attach([file]);
@@ -316,7 +316,7 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
           disabled={Boolean(blocked)} onClick={() => imageInput.current?.click()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg></button>
       </>}
       controls={composerControls?.(enabled && editor.kind === 'saved' && !responding)}
-      actions={run && run.kind !== 'ended' && !concluded && <button data-openpane-part="button" type="button" className="composer-setting" disabled={!connected || !active.agent.commands.includes('cancel') || stopping} onClick={stop}>{stopping ? 'Stopping…' : 'Stop'}</button>} />
+      actions={run && run.kind !== 'ended' && !concluded && <button data-openpane-part="button" data-openpane-role="stop" type="button" className="composer-setting" disabled={!connected || !active.agent.commands.includes('cancel') || stopping} onClick={stop}>{stopping ? 'Stopping…' : 'Stop'}</button>} />
     <CommandRecovery view={view} actions={actions} enabled={enabled} canRetry={available} retry={id => active.store.retry(id)} />
   </section></ThemeProvider>;
 }

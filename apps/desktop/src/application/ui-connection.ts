@@ -14,8 +14,8 @@ export interface UiTransport {
   getSnapshot(): UiConnectionSnapshot;
   subscribe(listener: () => void): () => void;
   start(): void;
-  rendered(state: UiClientSnapshot): Promise<void>;
-  failed(state: UiClientSnapshot, reason: string): Promise<void>;
+  rendered(state: UiClientSnapshot | null, localBuiltin?: boolean, context?: string | null): Promise<void>;
+  failed(state: UiClientSnapshot, reason: string, context?: string | null): Promise<void>;
   restore(): Promise<void>;
   close(): void;
   selectScope(scope: ConversationScope | null): void;
@@ -26,17 +26,25 @@ export interface NativeUiRelayPort {
   close(): void;
 }
 export const noChildUiRelay: NativeUiRelayPort = { async publish() { return false; }, close() {} };
+export type ValidatedAppearance = { readonly kind: 'none' } | { readonly kind: 'local-builtin' }
+  | { readonly kind: 'delivery'; readonly context: string | null; readonly generation: number; readonly revision: number; readonly digest: string | null };
+export function validatedDelivery(state: UiClientSnapshot, context: string | null): ValidatedAppearance {
+  return { kind: 'delivery', context, generation: state.selection.deliveryGeneration, revision: state.selection.revision, digest: state.bundle?.digest ?? null };
+}
+export function matchesValidatedDelivery(visual: ValidatedAppearance, state: UiClientSnapshot, context: string | null): boolean {
+  return visual.kind === 'delivery' && visual.context === context && visual.generation === state.selection.deliveryGeneration && visual.revision === state.selection.revision && visual.digest === (state.bundle?.digest ?? null);
+}
 export interface UiConnectionSnapshot {
   readonly state: UiClientSnapshot | null;
   readonly diagnostic: string | null;
   readonly localBuiltin: boolean;
   readonly deliveryContext: string | null;
-  readonly validatedGeneration: number | null;
+  readonly validatedVisual: ValidatedAppearance;
   readonly confirmedGeneration: number | null;
   readonly cards: DisplayView;
 }
 export class UiConnection {
-  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, deliveryContext: null, validatedGeneration: null, confirmedGeneration: null, cards: NO_DISPLAY };
+  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, deliveryContext: null, validatedVisual: { kind: 'none' }, confirmedGeneration: null, cards: NO_DISPLAY };
   private readonly cards = new DisplayClient();
   private relayPaging = false;
   private readonly listeners = new Set<() => void>();
@@ -98,7 +106,7 @@ export class UiConnection {
           this.window = this.identify ? await this.identify(this.context) : { role: 'main', profileId: this.context.profileId, hostId: this.context.hostId,
             brokerInstance: `browser:${crypto.randomUUID()}`, label: 'browser', documentIncarnation: crypto.randomUUID(), viewId: crypto.randomUUID() };
           this.sequence = 0; this.painted = null; this.confirmed = null; this.failure = null;
-          this.update({ state: null, deliveryContext: JSON.stringify(this.window), validatedGeneration: null, confirmedGeneration: null });
+          this.update({ state: null, deliveryContext: JSON.stringify(this.window), validatedVisual: { kind: 'none' }, confirmedGeneration: null });
           }
         }
         if (this.recovery?.kind === 'reserved') await this.finishRecovery();
@@ -130,24 +138,27 @@ export class UiConnection {
     if (!this.window) throw new Error('UI source is not registered');
     await this.post({ op: 'placement-reserve', session: this.window.documentIncarnation, envelope: transition.envelope, transitionId: transition.slot.transitionId, target });
     const state = this.snapshot.state;
-    if (state?.selection.deliveryGeneration === transition.envelope.deliveryGeneration) this.update({ state: { ...state, transitions: state.transitions.map(item => item.slot.transitionId === transition.slot.transitionId ? { ...item, slot: { ...item.slot, target } } : item) } });
+    if (state && state.selection.deliveryGeneration === transition.envelope.deliveryGeneration && state.selection.revision === transition.envelope.selectionRevision && (state.bundle?.digest ?? null) === transition.envelope.digest) this.update({ state: { ...state, transitions: state.transitions.map(item => item.slot.transitionId === transition.slot.transitionId ? { ...item, slot: { ...item.slot, target } } : item) } });
   }
   async idlePlacement(transition: PlacementTransition): Promise<void> {
     if (!this.window) throw new Error('UI source is not registered');
     await this.post({ op: 'placement-idle', session: this.window.documentIncarnation, envelope: transition.envelope, transitionId: transition.slot.transitionId });
     const state = this.snapshot.state;
-    if (state?.selection.deliveryGeneration === transition.envelope.deliveryGeneration) this.update({ state: { ...state, transitions: state.transitions.filter(item => item.slot.transitionId !== transition.slot.transitionId) } });
+    if (state && state.selection.deliveryGeneration === transition.envelope.deliveryGeneration && state.selection.revision === transition.envelope.selectionRevision && (state.bundle?.digest ?? null) === transition.envelope.digest) this.update({ state: { ...state, transitions: state.transitions.filter(item => item.slot.transitionId !== transition.slot.transitionId) } });
   }
   async failPlacement(transition: PlacementTransition, reason: string): Promise<void> {
     if (!this.window) throw new Error('UI source is not registered');
     await this.post({ op: 'placement-failed', session: this.window.documentIncarnation, envelope: transition.envelope, transitionId: transition.slot.transitionId, reason: reason.slice(0, 500) || 'Appearance failed' });
     const state = this.snapshot.state;
-    if (state?.selection.deliveryGeneration === transition.envelope.deliveryGeneration) this.update({ state: { ...state, transitions: state.transitions.filter(item => item.slot.transitionId !== transition.slot.transitionId) } });
+    if (state && state.selection.deliveryGeneration === transition.envelope.deliveryGeneration && state.selection.revision === transition.envelope.selectionRevision && (state.bundle?.digest ?? null) === transition.envelope.digest) this.update({ state: { ...state, transitions: state.transitions.filter(item => item.slot.transitionId !== transition.slot.transitionId) } });
   }
-  async rendered(state: UiClientSnapshot): Promise<void> {
-    if (!this.window || this.snapshot.localBuiltin && state.selection.selected.kind !== 'builtin') return;
+  async rendered(state: UiClientSnapshot | null, localBuiltin = false, context = this.snapshot.deliveryContext): Promise<void> {
+    if (context !== this.snapshot.deliveryContext || state && (!this.snapshot.state || !sameDelivery(state, this.snapshot.state))) return;
+    if (localBuiltin) this.update({ validatedVisual: { kind: 'local-builtin' } });
+    if (!state || !this.snapshot.state || !sameDelivery(state, this.snapshot.state) || !this.window || this.snapshot.localBuiltin && state.selection.selected.kind !== 'builtin') return;
+    if (!localBuiltin && this.snapshot.localBuiltin) return;
     this.painted = state;
-    this.update({ validatedGeneration: state.selection.deliveryGeneration });
+    if (!localBuiltin) this.update({ validatedVisual: validatedDelivery(state, this.snapshot.deliveryContext) });
     await this.reportPaint(state);
   }
   private async reportPaint(state: UiClientSnapshot): Promise<void> {
@@ -161,7 +172,8 @@ export class UiConnection {
     if (this.window !== owner || !this.snapshot.state || !sameDelivery(this.snapshot.state, state)) return;
     this.confirmed = key; this.update({ confirmedGeneration: state.selection.deliveryGeneration });
   }
-  async failed(state: UiClientSnapshot, reason: string): Promise<void> {
+  async failed(state: UiClientSnapshot, reason: string, context = this.snapshot.deliveryContext): Promise<void> {
+    if (context !== this.snapshot.deliveryContext || !this.snapshot.state || !sameDelivery(state, this.snapshot.state)) return;
     this.update({ diagnostic: reason });
     this.painted = null;
     this.failure = { state, reason: reason.slice(0, 500) || 'Appearance failed' };
@@ -185,7 +197,7 @@ export class UiConnection {
   async restore(): Promise<void> { await this.requestRecovery({ kind: 'browser' }); }
   protected async requestRecovery(originator: RecoveryOriginator): Promise<boolean> {
     this.restorationRequests++;
-    this.update({ localBuiltin: true, diagnostic: 'OpenPane appearance is active locally. Saving builtin selection…' });
+    this.update({ localBuiltin: true, diagnostic: 'Saving builtin appearance selection…' });
     try {
       if (this.recovery?.kind === 'reserved' && !sameRecoveryOriginator(this.recovery.originator, originator)) await this.finishRecovery();
       if (originator.kind === 'native' && this.recovery?.kind === 'conflicted' && sameRecoveryOriginator(this.recovery.originator, originator)) return true;

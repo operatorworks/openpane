@@ -17,7 +17,7 @@ export function ContinuationChoices({ continuation, actions, enabled }: {
     {notice.status && <p>{notice.status}</p>}
     {notice.disclosure && <p className="continuation-disclosure">{BEFORE_CONTINUE}</p>}
     {notice.choices.length > 0 && <div className="action-row">{notice.choices.map(choice =>
-      <button key={choice} type="button" disabled={!ready} onClick={() => void run[choice]()}>{choice}</button>)}</div>}
+      <button data-openpane-part="button" key={choice} type="button" disabled={!ready} onClick={() => void run[choice]()}>{choice}</button>)}</div>}
     {notice.choices.includes('Start a new chat') && <p>{NEW_CHAT_NOTE}</p>}
     {continuation.error && <p role="alert">{continuation.error}</p>}
   </div>;
@@ -30,7 +30,7 @@ export function ContinuationHistory({ continuation, actions, enabled, assistant 
   if (!continuation.boundary) return null;
   const earlier = earlierLabel(continuation);
   return <div className="continuation-history">
-    {earlier && <button type="button" disabled={!enabled || continuation.action !== null}
+    {earlier && <button data-openpane-part="button" type="button" disabled={!enabled || continuation.action !== null}
       onClick={() => void actions.loadEarlierSegment()}>{earlier}</button>}
     {continuation.earlierError && <p role="alert">{continuation.earlierError}</p>}
     {continuation.earlier.map(segment => <Fragment key={segment.scope.conversationId}>

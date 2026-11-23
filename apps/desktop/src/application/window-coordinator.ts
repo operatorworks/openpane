@@ -1,6 +1,6 @@
 import { pruneDraftCarryHistory, bindDraftCarry, sourceCarries, keptMainDraft } from './draft-carry.js';
 import { parseConversationOpenResult } from '@openpane/contracts';
-import type { ConversationOpenResult, ConversationScope, EditorBinding, ExperienceV1 } from '@openpane/contracts';
+import type { ConversationOpenResult, ConversationScope, EditorBinding, ExperienceV2 } from '@openpane/contracts';
 import { sameScope } from '@openpane/contracts';
 import { count, identifier, record } from '@openpane/contracts/decode';
 import { BrowserViewStorage } from './browser-storage.js';
@@ -10,7 +10,7 @@ import type { NativeReservation, NativePlacementIntent, NativeWindowLookup } fro
 
 type Request = Parameters<PlacementPort['acquire']>[0];
 type Owner = Parameters<PlacementPort['acquire']>[1];
-const DEFAULT_WINDOW: ExperienceV1['presentation']['chatWindow'] = { width: 640, height: 720, titlebar: 'native', title: 'agent-and-conversation' };
+const DEFAULT_WINDOW: ExperienceV2['presentation']['chatWindow'] = { width: 640, height: 720, titlebar: 'native', title: 'agent-and-conversation' };
 
 /** Native intents allocate conversations; IndexedDB bindings decide where their drafts live. */
 export class WindowCoordinator implements PlacementPort {
@@ -19,7 +19,7 @@ export class WindowCoordinator implements PlacementPort {
     const key = JSON.stringify(scope); if (this.forced.has(key)) throw new Error('A recovery of this chat is already in progress.');
     this.forced.set(key, mode); try { return await operation(); } finally { this.forced.delete(key); }
   }
-  private presentation: ExperienceV1['presentation'] = { navigation: 'rail', chats: 'inline', chatWindow: DEFAULT_WINDOW };
+  private presentation: Pick<ExperienceV2['presentation'], 'chats' | 'chatWindow'> = { chats: 'inline', chatWindow: DEFAULT_WINDOW };
   private track: (reservation: NativeReservation, binding: EditorBinding) => Promise<void> = async () => {};
   trackPlacement(handler: (reservation: NativeReservation, binding: EditorBinding) => Promise<void>): void { this.track = handler; }
   private notice: (result: ConversationOpenResult, requestId: string) => void = () => {};
@@ -30,8 +30,8 @@ export class WindowCoordinator implements PlacementPort {
   constructor(private readonly port: DesktopWindowPort | null, browserLabel?: () => string) {
     const id = crypto.randomUUID(); this.browserLabel = browserLabel ?? (() => `browser:${id}`);
   }
-  setPresentation(value: ExperienceV1['presentation'] | null): void {
-    this.presentation = value ?? { navigation: 'rail', chats: 'inline', chatWindow: DEFAULT_WINDOW };
+  setPresentation(value: Pick<ExperienceV2['presentation'], 'chats' | 'chatWindow'> | null): void {
+    this.presentation = value ?? { chats: 'inline', chatWindow: DEFAULT_WINDOW };
   }
   canAutomaticallySend(): boolean { return this.port?.context.role !== 'main' || !this.port.context.liveRelay || this.presentation.chats === 'inline'; }
   async restoresInline(scope: ConversationScope): Promise<boolean> {

@@ -6,7 +6,7 @@ test('a file dropped outside the conversation never navigates the window or atta
   const host = await fixture(t), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation' }).click(); await connected(page);
   const url = page.url();
-  const outcomes = await page.evaluate(() => ['.view-rail', '.application-controls', '#main-content'].map(selector => {
+  const outcomes = await page.evaluate(() => ['.view-rail', '[data-home-pane="conversations"]', '#main-content'].map(selector => {
     const transfer = new DataTransfer();
     transfer.items.add(new File([new Uint8Array(8)], 'outside.png', { type: 'image/png' }));
     const target = document.querySelector(selector);
@@ -15,7 +15,7 @@ test('a file dropped outside the conversation never navigates the window or atta
     target.dispatchEvent(over); target.dispatchEvent(drop);
     return [selector, over.defaultPrevented, drop.defaultPrevented];
   }));
-  assert.deepEqual(outcomes, [['.view-rail', true, true], ['.application-controls', true, true], ['#main-content', true, true]]);
+  assert.deepEqual(outcomes, [['.view-rail', true, true], ['[data-home-pane="conversations"]', true, true], ['#main-content', true, true]]);
   assert.equal(page.url(), url);
   assert.equal(await page.getByLabel('Attached image').count(), 0);
   assert.equal(await page.locator('.composer').getAttribute('data-drop'), null);

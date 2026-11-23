@@ -29,7 +29,7 @@ async function page(t, host, colorScheme = 'light', viewport = { width: 1280, he
 }
 async function openWorkspace(view, label) {
   await view.rail.getByRole('button', { name: 'Extensions', exact: true }).click();
-  const row = view.page.locator(`[data-extension="${label.toLowerCase()}"]`);
+  const row = view.page.locator(`[data-extension="${label.toLowerCase()}"]:visible`);
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Ready', `${label} ready`);
   await view.page.getByRole('button', { name: `Open ${label}` }).click();
 }
@@ -327,7 +327,7 @@ test('without a Coworkers installation the workspace names the configuration and
   const host = await extensionFixture(t, { extensions: [] });
   const view = await page(t, host);
   await view.rail.getByRole('button', { name: 'Extensions', exact: true }).click();
-  const row = view.page.locator('[data-extension="coworkers"]');
+  const row = view.page.locator('[data-extension="coworkers"]:visible');
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Not configured', 'not configured');
   await view.page.getByRole('button', { name: 'Open Coworkers' }).click();
   const setup = view.page.getByRole('region', { name: 'Coworkers setup' });

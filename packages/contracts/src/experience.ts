@@ -16,12 +16,21 @@ export interface ExperienceTokens {
   readonly treatments?: { readonly borderWidth?: number; readonly shadow?: 'none' | 'soft' | 'bevel' };
   readonly chart?: Readonly<Partial<Record<typeof EXPERIENCE_CHART_ROLES[number], string>>>;
 }
-export interface ExperienceV1 {
-  readonly schemaVersion: 1;
+export const HOME_PANE_KINDS = ['agents', 'conversations', 'conversation', 'extensions', 'status'] as const;
+export type HomePaneKind = typeof HOME_PANE_KINDS[number];
+export type HomeComposition =
+  | { readonly kind: 'stack'; readonly panes: readonly [HomePaneKind, ...HomePaneKind[]] }
+  | { readonly kind: 'columns'; readonly primary: readonly [HomePaneKind, ...HomePaneKind[]]; readonly secondary: readonly [HomePaneKind, ...HomePaneKind[]]; readonly balance: 'even' | 'primary-wide' | 'secondary-wide' };
+export const BUILTIN_HOME = { kind: 'columns', primary: ['conversations'], secondary: ['conversation'], balance: 'secondary-wide' } as const satisfies HomeComposition;
+export type ExperienceDensity = 'comfortable' | 'compact';
+export interface ExperienceV2 {
+  readonly schemaVersion: 2;
   readonly id: string;
   readonly label: string;
-  readonly theme: { readonly mode: 'system' | 'light' | 'dark'; readonly light: ExperienceTokens; readonly dark: ExperienceTokens };
+  readonly theme: { readonly mode: 'system' | 'light' | 'dark'; readonly density: ExperienceDensity; readonly light: ExperienceTokens; readonly dark: ExperienceTokens };
   readonly presentation: {
+    readonly home: HomeComposition;
+    readonly transcript: 'bubbles' | 'lines';
     readonly navigation: 'rail' | 'pages'; readonly chats: 'inline' | 'separate';
     readonly chatWindow: { readonly width: number; readonly height: number; readonly titlebar: 'native' | 'integrated'; readonly title: 'agent' | 'conversation' | 'agent-and-conversation' };
   };
@@ -29,7 +38,7 @@ export interface ExperienceV1 {
   readonly assets: readonly { readonly name: string; readonly mimeType: 'text/css' | 'image/png'; readonly bytes: number; readonly sha256: string }[];
 }
 export interface ExperienceBundle {
-  readonly manifest: ExperienceV1;
+  readonly manifest: ExperienceV2;
   readonly stylesheet: string | null;
   readonly assets: readonly { readonly name: string; readonly base64: string }[];
   readonly digest: string;
@@ -98,13 +107,37 @@ export function parseExperienceTokens(value: unknown): ExperienceTokens {
   };
   return result;
 }
-export function parseExperience(value: unknown): ExperienceV1 {
+export function homePaneOrder(home: HomeComposition): readonly HomePaneKind[] {
+  return home.kind === 'stack' ? home.panes : [...home.primary, ...home.secondary];
+}
+export function parseHomeComposition(value: unknown): HomeComposition {
+  const input = record(value);
+  const panes = (value: unknown): readonly [HomePaneKind, ...HomePaneKind[]] => {
+    if (!Array.isArray(value) || value.length > HOME_PANE_KINDS.length) throw new Error('Invalid home pane list');
+    const items = Array.from(value, (item: unknown) => choice(item, HOME_PANE_KINDS));
+    const [first, ...rest] = items;
+    if (first === undefined) throw new Error('Home pane region must not be empty');
+    return [first, ...rest];
+  };
+  let home: HomeComposition;
+  if (input.kind === 'stack') {
+    record(input, ['kind', 'panes']);
+    home = { kind: 'stack', panes: panes(input.panes) };
+  } else if (input.kind === 'columns') {
+    record(input, ['kind', 'primary', 'secondary', 'balance']);
+    home = { kind: 'columns', primary: panes(input.primary), secondary: panes(input.secondary), balance: choice(input.balance, ['even', 'primary-wide', 'secondary-wide']) };
+  } else throw new Error('Unsupported home layout');
+  const order = homePaneOrder(home);
+  if (new Set(order).size !== order.length) throw new Error('Home panes must be unique across regions');
+  return home;
+}
+export function parseExperience(value: unknown): ExperienceV2 {
   const input = record(value, ['schemaVersion', 'id', 'label', 'theme', 'presentation', 'stylesheet', 'assets']);
-  if (input.schemaVersion !== 1) throw new Error('Unsupported experience schema version');
+  if (input.schemaVersion !== 2) throw new Error('Unsupported experience schema version; author a version 2 bundle using experience schema');
   const id = identifier(input.id, 64);
   if (!/^[a-z][a-z0-9-]*$/.test(id)) throw new Error('Invalid experience id');
-  const theme = record(input.theme, ['mode', 'light', 'dark']);
-  const presentation = record(input.presentation, ['navigation', 'chats', 'chatWindow']);
+  const theme = record(input.theme, ['mode', 'density', 'light', 'dark']);
+  const presentation = record(input.presentation, ['home', 'transcript', 'navigation', 'chats', 'chatWindow']);
   const window = record(presentation.chatWindow, ['width', 'height', 'titlebar', 'title']);
   if (!Array.isArray(input.assets) || input.assets.length > EXPERIENCE_LIMITS.assets + 1) throw new Error('Invalid experience asset inventory');
   const names = new Set<string>();
@@ -124,10 +157,11 @@ export function parseExperience(value: unknown): ExperienceV1 {
   const stylesheet = input.stylesheet === null ? null : identifier(input.stylesheet, 128);
   const stylesheets = assets.filter(asset => asset.mimeType === 'text/css');
   if (stylesheets.length !== (stylesheet === null ? 0 : 1) || (stylesheet !== null && stylesheets[0]?.name !== stylesheet)) throw new Error('Stylesheet must match its sole declared CSS asset');
-  const experience: ExperienceV1 = {
-    schemaVersion: 1, id, label: boundedText(input.label, 200),
-    theme: { mode: choice(theme.mode, ['system', 'light', 'dark']), light: parseExperienceTokens(theme.light), dark: parseExperienceTokens(theme.dark) },
+  const experience: ExperienceV2 = {
+    schemaVersion: 2, id, label: boundedText(input.label, 200),
+    theme: { mode: choice(theme.mode, ['system', 'light', 'dark']), density: choice(theme.density, ['comfortable', 'compact']), light: parseExperienceTokens(theme.light), dark: parseExperienceTokens(theme.dark) },
     presentation: {
+      home: parseHomeComposition(presentation.home), transcript: choice(presentation.transcript, ['bubbles', 'lines']),
       navigation: choice(presentation.navigation, ['rail', 'pages']), chats: choice(presentation.chats, ['inline', 'separate']),
       chatWindow: { width: bounded(window.width, 360, 1600, true), height: bounded(window.height, 480, 1200, true),
         titlebar: choice(window.titlebar, ['native', 'integrated']), title: choice(window.title, ['agent', 'conversation', 'agent-and-conversation']) },

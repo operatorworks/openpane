@@ -122,7 +122,7 @@ test('committed production browser captures both actual send paths and retains o
   assert.deepEqual(await page.evaluate(() => window.captureFixture.disposed), []);
   await saveUiEnable(page);
   await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Extensions', exact: true }).click();
-  await page.locator('[data-extension="personal"]').getByText('Loading', { exact: true }).waitFor();
+  await page.locator('[data-extension="personal"]:visible').getByText('Loading', { exact: true }).waitFor();
   // A is retired for new admission, but its retained original send keeps the namespace's barrier closed.
   assert.equal(await page.evaluate(() => window.captureFixture.activations), 1);
   await tools(page);

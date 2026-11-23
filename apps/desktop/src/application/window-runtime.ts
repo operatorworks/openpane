@@ -1,7 +1,8 @@
+import { matchesValidatedDelivery } from './ui-connection.js';
 import { carriedDraftText, carryRequestEpoch } from './draft-carry-records.js';
 import { createBrowserConnection } from '@openpane/client/service';
 import { parseWindowContext, sameScope } from '@openpane/contracts';
-import type { ConversationOpenResult, ConversationScope, UiContextV1 } from '@openpane/contracts';
+import type { ConversationOpenResult, ConversationScope, PlacementTransition, UiContextV1 } from '@openpane/contracts';
 import type { AgentDescriptor } from '@openpane/contracts/service';
 import { count, record } from '@openpane/contracts/decode';
 import { BrowserViewStorage } from './browser-storage.js';
@@ -84,7 +85,7 @@ export class WindowRuntime {
   private carryRecoveryAfter: IDBValidKey | null = null;
   private carrySettlementAfter: IDBValidKey | null = null;
   private policyScope: ConversationScope | null = null;
-  private placingPolicy: ConversationScope | null = null;
+  private placingPolicy: { readonly scope: ConversationScope; readonly delivery: string; readonly transitions: readonly PlacementTransition[] } | null = null;
   private readonly pendingIntents = new Map<string, Extract<ConversationOpenResult, { readonly kind: 'pending' }>>();
   private pendingIntent: { readonly requestId: string; readonly result: Extract<ConversationOpenResult, { readonly kind: 'pending' }> } | null = null;
   private lastPlacement: ConversationOpenResult | null = null;
@@ -170,11 +171,15 @@ export class WindowRuntime {
       return { cancel: () => this.refuseOfferedCarry(requestId) };
     });
     this.coordinator.trackPlacement(async (reservation, binding) => {
-      if (!(this.ui instanceof UiConnection) || !this.placingPolicy || !sameScope(this.placingPolicy, reservation.scope)) return;
-      for (const transition of this.ui.getSnapshot().state?.transitions ?? []) await this.ui.reservePlacement(transition, {
+      const attempt = this.placingPolicy;
+      if (!(this.ui instanceof UiConnection) || !attempt || !sameScope(attempt.scope, reservation.scope)) return;
+      for (const transition of attempt.transitions) {
+        if (this.confirmedPolicyDelivery() !== attempt.delivery) return;
+        await this.ui.reservePlacement(transition, {
         scope: reservation.scope, viewId: reservation.viewId, label: reservation.label,
         nativeTransitionId: reservation.transitionId, bindingRevision: binding.revision,
-      });
+        });
+      }
     });
   }
   getSnapshot = (): WindowRuntimeSnapshot => this.snapshot;
@@ -210,18 +215,24 @@ export class WindowRuntime {
     }) : Promise.resolve();
     void initialUi.then(() => this.closed ? undefined : this.controller.start()).then(() => this.drive());
   }
+  private confirmedPolicyDelivery(): string | null {
+    const current = this.ui.getSnapshot();
+    if (!current.state || current.localBuiltin || current.confirmedGeneration !== current.state.selection.deliveryGeneration || !matchesValidatedDelivery(current.validatedVisual, current.state, current.deliveryContext)) return null;
+    return JSON.stringify([current.deliveryContext, current.state.selection.deliveryGeneration, current.state.selection.revision, current.state.bundle?.digest]);
+  }
   private uiChanged = (): void => {
     if (this.context.role === 'main') void this.recoveryWake();
     const state = this.ui.getSnapshot();
-    if (!state.localBuiltin && state.state && state.validatedGeneration !== state.state.selection.deliveryGeneration) return;
-    const presentation = state.localBuiltin ? null : state.state?.bundle?.manifest.presentation ?? null;
+    const builtin = state.validatedVisual.kind === 'local-builtin';
+    if (!builtin && (!state.state || state.localBuiltin || !matchesValidatedDelivery(state.validatedVisual, state.state, state.deliveryContext))) return;
+    const presentation = builtin ? null : state.state?.bundle?.manifest.presentation ?? null;
     const separate = presentation?.chats === 'separate';
     const supported = this.context.role === 'main' && this.context.liveRelay;
     const active = this.controller.getSnapshot().active;
     const catalogOnly = separate && supported && !active;
     this.coordinator.setPresentation(presentation);
-    const delivery = state.localBuiltin || !state.state ? null : JSON.stringify([state.deliveryContext, state.state.selection.deliveryGeneration, state.state.selection.revision, state.state.bundle?.digest]);
-    if (this.policyDelivery !== delivery) { this.policyDelivery = delivery; this.policyAppliedScope = null; }
+    const delivery = builtin || !state.state ? null : JSON.stringify([state.deliveryContext, state.state.selection.deliveryGeneration, state.state.selection.revision, state.state.bundle?.digest]);
+    if (this.policyDelivery !== delivery) { this.policyDelivery = delivery; this.policyAppliedScope = null; if (this.processing) this.recoveryDirty = true; }
     this.separatePolicy = separate && supported;
     if (!this.separatePolicy) { this.policyScope = null; this.policyAppliedScope = null; }
     else {
@@ -282,22 +293,32 @@ export class WindowRuntime {
         return;
       }
       await this.syncDraftCarries();
-      if (this.policyScope) {
+      const delivery = this.confirmedPolicyDelivery();
+      if (this.policyScope && delivery && delivery === this.policyDelivery) {
         const scope = this.policyScope;
+        const attempt = { scope, delivery, transitions: this.ui.getSnapshot().state?.transitions ?? [] };
         this.policyAppliedScope = scope;
-        this.placingPolicy = scope;
+        this.placingPolicy = attempt;
         let placed: ConversationOpenResult;
         try { placed = await this.controller.openReserved(scope); } finally { this.placingPolicy = null; }
-        if (placed.kind === 'detached') this.policyScope = null;
-        else if (placed.kind === 'refused') {
-          this.policyScope = null;
-          if (this.ui instanceof UiConnection) for (const transition of this.ui.getSnapshot().state?.transitions ?? []) await this.ui.failPlacement(transition, placed.reason);
+        if (this.confirmedPolicyDelivery() === delivery && this.policyDelivery === delivery) {
+          if (placed.kind === 'detached') this.policyScope = null;
+          else if (placed.kind === 'refused') {
+            this.policyScope = null;
+            if (this.ui instanceof UiConnection) for (const transition of attempt.transitions) {
+              if (this.confirmedPolicyDelivery() !== delivery) break;
+              await this.ui.failPlacement(transition, placed.reason);
+            }
+          }
+          this.update({ placementNotice: placed.kind === 'refused' || placed.kind === 'pending' ? placed.reason : null });
         }
-        this.update({ placementNotice: placed.kind === 'refused' || placed.kind === 'pending' ? placed.reason : null });
       }
       if (!this.port) return;
-      if (!this.policyScope && !this.controller.getSnapshot().active && !this.controller.getSnapshot().saved.pendingCreation && this.ui instanceof UiConnection) {
-        for (const transition of this.ui.getSnapshot().state?.transitions ?? []) if (!transition.slot.target) await this.ui.idlePlacement(transition).catch(() => {});
+      if (delivery && delivery === this.confirmedPolicyDelivery() && !this.policyScope && !this.controller.getSnapshot().active && !this.controller.getSnapshot().saved.pendingCreation && this.ui instanceof UiConnection) {
+        for (const transition of this.ui.getSnapshot().state?.transitions ?? []) {
+          if (this.confirmedPolicyDelivery() !== delivery) break;
+          if (!transition.slot.target) await this.ui.idlePlacement(transition).catch(() => {});
+        }
       }
       if (this.catalogDirty) { this.catalogDirty = false; await this.controller.refreshCatalog(); }
       const value = await this.port.request({ kind: 'pending-intents' });

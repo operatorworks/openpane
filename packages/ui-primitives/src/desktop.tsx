@@ -26,6 +26,7 @@ export function toCssVariables(theme: Theme): Record<`--aui-${string}`, string> 
   }
   for (const [variant, role] of Object.entries(textVariantColor)) variables[`--aui-text-color-${variant}`] = theme.colors[role];
   for (const [key, value] of Object.entries(theme.motion)) variables[`--aui-motion-${key}`] = `${value}ms`;
+  variables['--aui-desktop-target'] = theme.density === 'compact' ? 'max(24px, 1.5rem)' : 'max(44px, 2.75rem)';
   variables['--aui-control-min-target'] = `${control.minTarget}px`;
   variables['--aui-control-scaled-target'] = `${control.minTarget / 16}rem`;
   variables['--aui-disabled-opacity'] = String(control.disabledOpacity);
@@ -51,14 +52,14 @@ export type ThemeScopeProps = { readonly variants?: Readonly<Record<Appearance, 
   | { readonly colors?: ThemeProviderProps['colors']; readonly palette?: never }
   | { readonly colors?: never; readonly palette: Readonly<Record<Appearance, ThemeColors>> }
 );
-export function ThemeScope({ appearance, reducedMotion, colors, palette, variants, spacing, radius, typography, fonts, treatments, chart, children, ...props }: ThemeScopeProps) {
+export function ThemeScope({ appearance, reducedMotion, density, colors, palette, variants, spacing, radius, typography, fonts, treatments, chart, children, ...props }: ThemeScopeProps) {
   const parent = useProvidedTheme();
   const isRoot = parent === undefined;
   const prefersDark = useMediaQuery('(prefers-color-scheme: dark)', isRoot);
   const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)', isRoot);
   const resolved = appearance ?? parent?.appearance ?? (prefersDark ? 'dark' : 'light');
   const tokens = variants?.[resolved];
-  return <ThemeProvider spacing={tokens?.spacing ?? spacing} radius={tokens?.radius ?? radius} typography={tokens?.typography ?? typography} fonts={tokens?.fonts ?? fonts} treatments={tokens?.treatments ?? treatments} chart={tokens?.chart ?? chart} colors={palette ? palette[resolved] : tokens?.colors ?? colors} appearance={resolved}
+  return <ThemeProvider density={density} spacing={tokens?.spacing ?? spacing} radius={tokens?.radius ?? radius} typography={tokens?.typography ?? typography} fonts={tokens?.fonts ?? fonts} treatments={tokens?.treatments ?? treatments} chart={tokens?.chart ?? chart} colors={palette ? palette[resolved] : tokens?.colors ?? colors} appearance={resolved}
     reducedMotion={reducedMotion ?? (isRoot ? prefersReducedMotion : undefined)}>
     <ThemeSurface {...props}>{children}</ThemeSurface>
   </ThemeProvider>;
@@ -66,11 +67,11 @@ export function ThemeScope({ appearance, reducedMotion, colors, palette, variant
 function ThemeSurface({ children, style, className = '', ...props }: HTMLAttributes<HTMLDivElement>) {
   const theme = useTheme();
   return <div {...props} className={`aui-theme ${className}`} data-appearance={theme.appearance}
-    data-reduced-motion={theme.reducedMotion} style={{ ...toCssVariables(theme), ...style }}>{children}</div>;
+    data-reduced-motion={theme.reducedMotion} data-openpane-density={theme.density} style={{ ...toCssVariables(theme), ...style }}>{children}</div>;
 }
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> { readonly tone?: ButtonTone }
 export function Button({ tone = 'primary', className = '', type = 'button', style, ...props }: ButtonProps) {
-  return <button {...props} data-openpane-part="button" type={type} style={{ ...buttonCssVariables(tone), ...style }} className={`aui-button ${className}`} data-tone={tone} />;
+  return <button data-openpane-role={tone} {...props} data-openpane-part="button" type={type} style={{ ...buttonCssVariables(tone), ...style }} className={`aui-button ${className}`} data-tone={tone} />;
 }
 export interface TextProps extends HTMLAttributes<HTMLElement> {
   readonly variant?: TextVariant;
@@ -88,7 +89,7 @@ export function TextField({ label, id, className = '', ...props }: TextFieldProp
   const generatedId = useId();
   const inputId = id ?? generatedId;
   return <label className="aui-field" htmlFor={inputId}>
-    <span className="aui-text" data-variant="label">{label}</span>
-    <input {...props} id={inputId} className={`aui-input ${className}`} />
+    <span data-openpane-part="field-label" className="aui-text" data-variant="label">{label}</span>
+    <input data-openpane-part={props.type === 'checkbox' || props.type === 'radio' ? props.type : 'input'} {...props} id={inputId} className={`aui-input ${className}`} />
   </label>;
 }

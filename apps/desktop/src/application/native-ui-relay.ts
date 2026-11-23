@@ -1,3 +1,4 @@
+import { validatedDelivery, matchesValidatedDelivery } from './ui-connection.js';
 import { parseDelivery, parseUiClientSnapshot, parseWindowContext, parseDisplaySubscription, parseDisplayDelivery, sameScope } from '@openpane/contracts';
 import type { ConversationScope, DisplaySubscription, DeliveryEnvelope, UiClientSnapshot, WindowContext } from '@openpane/contracts';
 import { count, hex, identifier, record } from '@openpane/contracts/decode';
@@ -88,7 +89,7 @@ export class NativeMainUiRelay implements NativeUiRelayPort {
 
 /** A child reads only its caller-checked native cache. Conversation traffic remains on its normal service connection. */
 export class ChildUiConnection implements UiTransport {
-  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, deliveryContext: null, validatedGeneration: null, confirmedGeneration: null, cards: NO_DISPLAY };
+  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, deliveryContext: null, validatedVisual: { kind: 'none' }, confirmedGeneration: null, cards: NO_DISPLAY };
   private readonly cards = new DisplayClient();
   private readonly listeners = new Set<() => void>();
   private readonly unlisten: (() => void)[] = [];
@@ -147,7 +148,7 @@ export class ChildUiConnection implements UiTransport {
           if (advanced || this.presencePending) await this.presence();
           if (state && this.failure && this.failure.state.selection.deliveryGeneration !== state.selection.deliveryGeneration) this.failure = null;
           if (this.failure && document.visibilityState === 'visible') await this.reportFailure();
-          if (state && this.painted?.selection.deliveryGeneration === state.selection.deliveryGeneration && document.visibilityState === 'visible') await this.rendered(state);
+          if (state && this.painted && matchesValidatedDelivery(validatedDelivery(this.painted, this.snapshot.deliveryContext), state, this.snapshot.deliveryContext) && document.visibilityState === 'visible') await this.rendered(state);
         } catch (error) { this.update({ diagnostic: error instanceof Error ? error.message : 'Native UI relay unavailable' }); }
       }
       this.reading = false;
@@ -158,14 +159,19 @@ export class ChildUiConnection implements UiTransport {
     await this.port.request({ kind: 'report-ui', report: { kind: reason === null ? 'rendered' : 'failed', deliveryGeneration: state.selection.deliveryGeneration,
       selectionRevision: state.selection.revision, digest: state.bundle?.digest ?? null, envelope: state.envelope, reason } });
   }
-  async rendered(state: UiClientSnapshot): Promise<void> {
+  async rendered(state: UiClientSnapshot | null, localBuiltin = false, context = this.snapshot.deliveryContext): Promise<void> {
+    if (context !== this.snapshot.deliveryContext || state && (!this.snapshot.state || !matchesValidatedDelivery(validatedDelivery(state, context), this.snapshot.state, context))) return;
+    if (localBuiltin) this.update({ validatedVisual: { kind: 'local-builtin' } });
+    if (!state || !this.snapshot.state || !matchesValidatedDelivery(validatedDelivery(state, this.snapshot.deliveryContext), this.snapshot.state, this.snapshot.deliveryContext)) return;
+    if (this.snapshot.localBuiltin && state.selection.selected.kind !== 'builtin') return;
     this.painted = state;
-    this.update({ validatedGeneration: state.selection.deliveryGeneration });
-    const key = `${state.selection.deliveryGeneration}:${state.envelope?.requestId ?? ''}`;
+    if (!localBuiltin) this.update({ validatedVisual: validatedDelivery(state, this.snapshot.deliveryContext) });
+    const key = JSON.stringify([this.snapshot.deliveryContext, state.selection.deliveryGeneration, state.selection.revision, state.bundle?.digest, state.envelope?.requestId]);
     if (this.confirmed === key) return;
     await this.report(state, null); this.confirmed = key; this.update({ confirmedGeneration: state.selection.deliveryGeneration });
   }
-  async failed(state: UiClientSnapshot, reason: string): Promise<void> {
+  async failed(state: UiClientSnapshot, reason: string, context = this.snapshot.deliveryContext): Promise<void> {
+    if (context !== this.snapshot.deliveryContext || !this.snapshot.state || !matchesValidatedDelivery(validatedDelivery(state, context), this.snapshot.state, context)) return;
     this.painted = null; this.failure = { state, reason: reason.slice(0, 500) || 'Appearance failed' };
     await this.reportFailure();
   }
@@ -176,7 +182,7 @@ export class ChildUiConnection implements UiTransport {
     if (this.failure === failure) this.failure = null;
   }
   async restore(): Promise<void> {
-    this.update({ localBuiltin: true, diagnostic: 'OpenPane appearance is active locally. Main will save builtin selection.' });
+    this.update({ localBuiltin: true, diagnostic: 'Restoring OpenPane appearance. Main will save builtin selection.' });
     await this.port.request({ kind: 'restore-builtin' });
   }
   close(): void {

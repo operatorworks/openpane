@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 2,
+  "id": "aim-classic",
+  "label": "AIM Classic",
+  "theme": {
+    "mode": "light",
+    "light": {
+      "colors": {
+        "canvas": "#d4d0c8",
+        "surface": "#ffffff",
+        "raised": "#d4d0c8",
+        "text": "#111111",
+        "muted": "#505050",
+        "border": "#808080",
+        "controlBorder": "#808080",
+        "accent": "#000080",
+        "onAccent": "#ffffff",
+        "danger": "#9a1717",
+        "onDanger": "#ffffff",
+        "focus": "#000080"
+      },
+      "chart": {
+        "background": "#ffffff",
+        "grid": "#c4c4c4",
+        "axis": "#484848",
+        "trace1": "#153b7a",
+        "trace2": "#823b77",
+        "trace3": "#236533",
+        "trace4": "#9a1717"
+      },
+      "fonts": {
+        "body": "Tahoma, Verdana, sans-serif",
+        "code": "Consolas, Monaco, monospace"
+      },
+      "spacing": {
+        "xs": 2,
+        "sm": 4,
+        "md": 6,
+        "lg": 8,
+        "xl": 12,
+        "xxl": 16
+      },
+      "radius": {
+        "control": 0,
+        "panel": 0
+      },
+      "typography": {
+        "body": {
+          "size": 12,
+          "lineHeight": 1.4,
+          "weight": 400
+        },
+        "muted": {
+          "size": 10,
+          "lineHeight": 1.4,
+          "weight": 400
+        },
+        "label": {
+          "size": 11,
+          "lineHeight": 1.4,
+          "weight": 700
+        },
+        "title": {
+          "size": 14,
+          "lineHeight": 1.4,
+          "weight": 700
+        },
+        "code": {
+          "size": 12,
+          "lineHeight": 1.4,
+          "weight": 400
+        }
+      },
+      "treatments": {
+        "borderWidth": 2,
+        "shadow": "bevel"
+      }
+    },
+    "dark": {
+      "colors": {
+        "canvas": "#d4d0c8",
+        "surface": "#ffffff",
+        "raised": "#d4d0c8",
+        "text": "#111111",
+        "muted": "#505050",
+        "border": "#808080",
+        "controlBorder": "#808080",
+        "accent": "#000080",
+        "onAccent": "#ffffff",
+        "danger": "#9a1717",
+        "onDanger": "#ffffff",
+        "focus": "#000080"
+      },
+      "chart": {
+        "background": "#ffffff",
+        "grid": "#c4c4c4",
+        "axis": "#484848",
+        "trace1": "#153b7a",
+        "trace2": "#823b77",
+        "trace3": "#236533",
+        "trace4": "#9a1717"
+      },
+      "fonts": {
+        "body": "Tahoma, Verdana, sans-serif",
+        "code": "Consolas, Monaco, monospace"
+      },
+      "spacing": {
+        "xs": 2,
+        "sm": 4,
+        "md": 6,
+        "lg": 8,
+        "xl": 12,
+        "xxl": 16
+      },
+      "radius": {
+        "control": 0,
+        "panel": 0
+      },
+      "typography": {
+        "body": {
+          "size": 12,
+          "lineHeight": 1.4,
+          "weight": 400
+        },
+        "muted": {
+          "size": 10,
+          "lineHeight": 1.4,
+          "weight": 400
+        },
+        "label": {
+          "size": 11,
+          "lineHeight": 1.4,
+          "weight": 700
+        },
+        "title": {
+          "size": 14,
+          "lineHeight": 1.4,
+          "weight": 700
+        },
+        "code": {
+          "size": 12,
+          "lineHeight": 1.4,
+          "weight": 400
+        }
+      },
+      "treatments": {
+        "borderWidth": 2,
+        "shadow": "bevel"
+      }
+    },
+    "density": "compact"
+  },
+  "presentation": {
+    "navigation": "rail",
+    "chats": "separate",
+    "chatWindow": {
+      "width": 600,
+      "height": 660,
+      "titlebar": "native",
+      "title": "agent-and-conversation"
+    },
+    "home": {
+      "kind": "stack",
+      "panes": [
+        "agents",
+        "conversations"
+      ]
+    },
+    "transcript": "lines"
+  },
+  "stylesheet": "style.css",
+  "assets": [
+    {
+      "name": "style.css",
+      "mimeType": "text/css",
+      "bytes": 5269,
+      "sha256": "f68f0dd93aff4fcaab485cd7b7d0eb1942473760334357a3e9490cda2a121ded"
+    }
+  ]
+}

@@ -50,7 +50,7 @@ async function open(t) {
   const rail = page.getByRole('navigation', { name: 'Workspace views' });
   return { ledger, host, page, rail };
 }
-const row = (page, namespace) => page.locator(`[data-extension="${namespace}"]`);
+const row = (page, namespace) => page.locator(`[data-extension="${namespace}"]:visible`);
 async function openWorkspace(f) {
   await f.rail.getByRole('button', { name: 'Extensions', exact: true }).click();
   await f.page.getByRole('button', { name: 'Open Ledger workspace' }).click();

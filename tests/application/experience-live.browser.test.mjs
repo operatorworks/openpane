@@ -8,8 +8,8 @@ import { requestUi } from '../../apps/host/build/tsc/ui-control.js';
 import { createExperienceBundle, sha256 } from '../../apps/host/build/tsc/experience-bundle.js';
 function experience(color) {
   const css = `[data-openpane-part="composer"] { border: 2px solid ${color}; }`;
-  return createExperienceBundle({ schemaVersion: 1, id: 'live-test', label: 'Live test', theme: { mode: 'light', light: { typography: { body: { size: 13 } }, fonts: { body: 'Tahoma, Verdana, sans-serif' }, spacing: { sm: 6 } }, dark: {} },
-    presentation: { navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } },
+  return createExperienceBundle({ schemaVersion: 2, id: 'live-test', label: 'Live test', theme: { density: 'comfortable', mode: 'light', light: { typography: { body: { size: 13 } }, fonts: { body: 'Tahoma, Verdana, sans-serif' }, spacing: { sm: 6 } }, dark: {} },
+    presentation: { home: { kind: 'stack', panes: ['conversations', 'conversation'] }, transcript: 'bubbles', navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } },
     stylesheet: 'style.css', assets: [{ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) }] }, css, []);
 }
 async function completed(socket, id) {
@@ -91,7 +91,7 @@ test('offline builtin recovery survives reload and never overwrites a newer sele
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Offline recovery keeps this draft');
 });
 
-test('superseding an unpainted candidate restores the last validated appearance when the successor fails', { timeout: 30000 }, async t => {
+test('superseding a staged candidate restores the last validated appearance when the successor fails', { timeout: 30000 }, async t => {
   const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
   await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
   await draft(page, 'Keep the validated editor');
@@ -100,15 +100,13 @@ test('superseding an unpainted candidate restores the last validated appearance 
   const a = experience('#3355aa'), b = experience('#aa5533'), c = experience('#338855');
   const first = { op: 'apply', requestId: id(), expectedRevision: 0, bundle: a };
   await requestUi(socket, first); assert.equal((await completed(socket, first.requestId)).outcome, 'all-rendered');
-  await page.evaluate(digest => {
-    const frame = window.requestAnimationFrame;
-    window.requestAnimationFrame = callback => frame(time => {
-      if (document.querySelector('.experience-content')?.getAttribute('data-openpane-experience') === digest) (window.heldAppearanceFrames ??= []).push(() => callback(time));
-      else callback(time);
-    });
-  }, b.digest);
+  let release, staging = false;
+  const held = new Promise(resolve => { release = resolve; });
+  await page.route(`**/ui-assets/${b.digest}/style.css`, async route => { staging = true; await held; await route.continue().catch(() => {}); });
+  t.after(() => release());
   await requestUi(socket, { op: 'apply', requestId: id(), expectedRevision: 1, bundle: b });
-  await wait(() => page.locator('.experience-content').evaluate((node, digest) => node.getAttribute('data-openpane-experience') === digest, b.digest), 'unvalidated B in the frame');
+  await wait(() => staging, 'B stylesheet is held in staging');
+  assert.equal(await page.locator('.experience-content').getAttribute('data-openpane-experience'), a.digest);
   await page.route(`**/ui-assets/${c.digest}/style.css`, route => route.fulfill({ status: 404, body: 'missing' }));
   const failed = { op: 'apply', requestId: id(), expectedRevision: 2, bundle: c };
   await requestUi(socket, failed); assert.equal((await completed(socket, failed.requestId)).outcome, 'failed');
@@ -172,9 +170,9 @@ test('a retried painted acknowledgement clears the waiting notice for that exact
 });
 
 for (const [label, css] of [
-  ['transparent message text', '[data-openpane-part="composer"] { color: transparent; }'],
-  ['transparent message text via alpha', '[data-openpane-part="composer"] { color: #12345600; }'],
-  ['clipped controls', '[data-openpane-part="button"] { padding: 64px; font-size: 48px; }'],
+  ['transparent message text', '[data-openpane-part="textarea"] { color: transparent; }'],
+  ['transparent message text via alpha', '[data-openpane-part="textarea"] { color: #12345600; }'],
+  ['clipped controls', '[data-openpane-part="button"] { padding: 64px; font-size: 48px; } [data-openpane-part="pane-heading"] { padding: 64px; font-size: 48px; }'],
 ]) test(`unusable appearance rejects ${label} and retains the editor`, { timeout: 45000 }, async t => {
   const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
   await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);

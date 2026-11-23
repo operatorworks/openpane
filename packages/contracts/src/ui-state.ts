@@ -128,7 +128,7 @@ export interface UiClientSnapshot {
   readonly version: 1;
   readonly change: number;
   readonly selection: UiSelection;
-  readonly bundle: { readonly manifest: import('./experience.js').ExperienceV1; readonly digest: string } | null;
+  readonly bundle: { readonly manifest: import('./experience.js').ExperienceV2; readonly digest: string } | null;
   readonly envelope: DeliveryEnvelope | null;
   readonly fault: string | null;
   readonly transitions: readonly PlacementTransition[];

@@ -75,15 +75,15 @@ export function Composer({ id, label = 'Message', text, onText, placeholder, rea
   }
   return <form ref={form} className="composer" data-openpane-part="composer" data-drop={drop} onSubmit={submit}>
     {above}
-    <label htmlFor={id}>{label}</label>
-    <textarea data-openpane-essential="composer" ref={field} id={id} value={text} onChange={event => onText(event.target.value)} readOnly={readOnly} placeholder={placeholder} rows={1} />
+    <label data-openpane-part="field-label" htmlFor={id}>{label}</label>
+    <textarea data-openpane-part="textarea" data-openpane-essential="composer" ref={field} id={id} value={text} onChange={event => onText(event.target.value)} readOnly={readOnly} placeholder={placeholder} rows={1} />
     {below}
     <div className="composer-footer" data-openpane-part="toolbar">
       {leading}
       {controls}
       <div className="composer-send-actions">
         {actions}
-        <button data-openpane-part="button" className="composer-send" aria-label="Send" title="Send" disabled={!canSend}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg></button>
+        <button data-openpane-part="button" data-openpane-role="send" data-openpane-essential="send" className="composer-send" aria-label="Send" title="Send" disabled={!canSend}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg><span className="composer-send-label">Send</span></button>
       </div>
     </div>
   </form>;

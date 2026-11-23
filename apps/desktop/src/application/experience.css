@@ -1,3 +1,4 @@
+@layer openpane-foundation, openpane-application, openpane-authored;
 .experience-frame { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
 .experience-content { flex: 1; min-height: 0; overflow: clip; contain: paint; isolation: isolate; }
 .experience-content > .aui-theme { height: 100%; min-height: 0; }
@@ -7,18 +8,67 @@
 
 .experience-content .desktop-shell { height: 100%; min-height: 0; }
 
-[data-openpane-navigation="pages"] .desktop-shell:has(.view-rail) { grid-template-columns: 140px 232px minmax(0, 1fr); }
-[data-openpane-navigation="pages"] .view-rail button { width: 100%; min-height: 44px; height: auto; display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding: 10px; font: inherit; }
-[data-openpane-navigation="pages"] .view-rail svg { flex: none; }
+[data-openpane-navigation="pages"] .composed-shell { grid-template-columns: 132px minmax(0, 1fr); }
+[data-openpane-navigation="pages"] .view-rail button { width: 100%; height: auto; min-height: 44px; display: flex; align-items: center; gap: 6px; justify-content: flex-start; }
 [data-openpane-navigation="pages"] .view-rail .page-label { display: inline; }
-@media (max-width: 900px) {
-  [data-openpane-navigation="pages"] .desktop-shell:has(.view-rail) { grid-template-columns: 112px 160px minmax(0, 1fr); }
+[data-openpane-navigation="pages"] .view-rail svg { flex: none; }
+
+/* These app-owned hit areas and focus rings stay above all authored visual layers. */
+[data-openpane-experience] :is(button, input, textarea, select, summary) { min-height: max(44px, 2.75rem); }
+[data-openpane-experience] :is(button, input, select, summary) { min-width: max(44px, 2.75rem); }
+@media (pointer: fine) {
+  [data-openpane-experience] :is(button, input, textarea, select, summary) { min-height: var(--aui-desktop-target); }
+  [data-openpane-experience] :is(button, input, select, summary) { min-width: var(--aui-desktop-target); }
 }
-@media (max-width: 640px) {
-  [data-openpane-navigation="pages"] .desktop-shell:has(.view-rail) { grid-template-columns: 100px 108px minmax(0, 1fr); }
-  [data-openpane-navigation="pages"] .view-rail button { padding-inline: 4px; gap: 4px; }
+@media (any-pointer: coarse) {
+  [data-openpane-experience] :is(button, input, textarea, select, summary) { min-height: max(44px, 2.75rem); }
+  [data-openpane-experience] :is(button, input, select, summary) { min-width: max(44px, 2.75rem); }
+}
+.experience-content :is(button, input, textarea, select, summary, a):focus-visible { outline: 2px solid var(--aui-color-focus); outline-offset: 2px; }
+[data-openpane-experience][data-openpane-transcript="lines"] .message { align-self: stretch; max-width: none; margin: 0; border: 0; padding: 0; }
+[data-openpane-experience][data-openpane-transcript="lines"] .transcript { gap: var(--aui-space-sm); }
+
+@layer openpane-application {
+  [data-openpane-experience] :is(.desktop-shell, .application-chat-window) { font-size: var(--aui-font-size-body); }
+  [data-openpane-experience] :is(.message, .composer textarea, .conversation-catalog button) { font-size: var(--aui-font-size-body); line-height: var(--aui-leading-body); }
+  [data-openpane-experience] :is(.message-user, .composer, .reply-code-block, .decision-card, .permissions-panel, .outbox, .metrics-card) { border-radius: var(--aui-radius-panel); }
+  [data-openpane-experience] :is(button, input, select, textarea) { font-family: var(--aui-font-body); border-radius: var(--aui-radius-control); }
+  [data-openpane-experience] .composer { padding: var(--aui-space-sm); border: var(--aui-border-width) solid var(--aui-color-control-border); background: var(--aui-color-raised); }
+  [data-openpane-experience] .composer textarea { padding: var(--aui-space-sm); border: var(--aui-border-width) inset var(--aui-color-control-border); background: var(--aui-color-surface); }
+  [data-openpane-experience] .composer-send { width: auto; height: auto; padding: var(--aui-space-xs) var(--aui-space-sm); }
+  [data-openpane-experience] .message-user { padding: var(--aui-space-sm); }
+  [data-openpane-experience] .message > strong { font-size: var(--aui-font-size-label); font-weight: var(--aui-weight-label); }
+  [data-openpane-experience][data-openpane-transcript="lines"] .message-user { background: transparent; border-radius: 0; }
+  [data-openpane-experience] :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) { color: var(--aui-color-text); background-color: var(--aui-color-surface); font: inherit; }
+  [data-openpane-experience] :is([data-openpane-part="checkbox"], [data-openpane-part="radio"], [data-openpane-part="select"]) { appearance: none; accent-color: var(--aui-color-accent); border: var(--aui-border-width) inset var(--aui-color-control-border); }
+  [data-openpane-experience] :is([data-openpane-part="checkbox"], [data-openpane-part="radio"]) { display: inline-grid; place-content: center; margin: 0; vertical-align: middle; background-color: var(--aui-color-surface); }
+  [data-openpane-experience] [data-openpane-part="radio"] { border-radius: 50%; }
+  [data-openpane-experience] :is([data-openpane-part="checkbox"], [data-openpane-part="radio"])::before { content: ''; width: 10px; height: 10px; background: currentColor; transform: scale(0); }
+  [data-openpane-experience] [data-openpane-part="checkbox"]::before { clip-path: polygon(12% 40%, 40% 68%, 88% 8%, 100% 20%, 42% 96%, 0 54%); }
+  [data-openpane-experience] [data-openpane-part="radio"]::before { border-radius: 50%; }
+  [data-openpane-experience] :is([data-openpane-part="checkbox"], [data-openpane-part="radio"]):checked::before { transform: scale(1); }
+  [data-openpane-experience] [data-openpane-part="select"] { padding-right: 28px; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
+}
+@media (forced-colors: active) {
+  .experience-content :is(button, input, textarea, select, summary, a):focus-visible { outline-color: Highlight; }
+  [data-openpane-experience] :is([data-openpane-part="checkbox"], [data-openpane-part="radio"], [data-openpane-part="select"]) { appearance: auto; }
+  [data-openpane-experience] :is([data-openpane-part="checkbox"], [data-openpane-part="radio"])::before { display: none; }
+}
+@layer openpane-application {
+  .composer-send-label { display: none; }
+  [data-openpane-experience] .composer-send-label { display: inline; }
+  [data-openpane-experience] .composer-send svg { display: none; }
+  [data-openpane-experience][data-openpane-transcript="lines"] .message > [data-openpane-part="message-body"],
+  [data-openpane-experience][data-openpane-transcript="lines"] .message > [data-openpane-part="message-body"] > :is(p, .assistant-reply),
+  [data-openpane-experience][data-openpane-transcript="lines"] .assistant-reply > p:first-child { display: inline; }
 }
 
-[data-openpane-navigation="pages"] .desktop-shell[data-workspace-open="true"]:has(.view-rail) { grid-template-columns: 140px 0 minmax(0, 1fr); }
-@media (max-width: 900px) { [data-openpane-navigation="pages"] .desktop-shell[data-workspace-open="true"]:has(.view-rail) { grid-template-columns: 112px 0 minmax(0, 1fr); } }
-@media (max-width: 640px) { [data-openpane-navigation="pages"] .desktop-shell[data-workspace-open="true"]:has(.view-rail) { grid-template-columns: 100px 0 minmax(0, 1fr); } }
+@media (any-pointer: coarse) { .experience-recovery button { min-height: 44px; min-width: 44px; } }
+
+@layer openpane-application {
+  [data-openpane-transcript="lines"] .conversation-panel[data-empty="true"]:has(.conversation-content) { justify-content: flex-start; }
+  [data-openpane-transcript="lines"] .conversation-panel[data-empty="true"] .conversation-content { flex: 1; }
+}
+@layer openpane-application {
+  [data-openpane-experience] [data-openpane-part="card-title"] > :is(h2, span) { color: inherit; font: inherit; }
+}

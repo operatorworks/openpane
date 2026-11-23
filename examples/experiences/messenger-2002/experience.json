@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "messenger-2002",
   "label": "Messenger 2002",
   "theme": {
@@ -117,7 +117,8 @@
         "borderWidth": 2,
         "shadow": "bevel"
       }
-    }
+    },
+    "density": "comfortable"
   },
   "presentation": {
     "navigation": "pages",
@@ -127,7 +128,19 @@
       "height": 720,
       "titlebar": "native",
       "title": "agent-and-conversation"
-    }
+    },
+    "home": {
+      "kind": "columns",
+      "primary": [
+        "conversation"
+      ],
+      "secondary": [
+        "extensions",
+        "status"
+      ],
+      "balance": "primary-wide"
+    },
+    "transcript": "bubbles"
   },
   "stylesheet": "style.css",
   "assets": [

@@ -682,17 +682,18 @@ for (const lookupFails of [false, true]) test(`a refused native intent releases 
 test('native placement policy waits until the appearance generation has painted', async t => {
   const page = await fixture(t), result = await page.evaluate(async () => {
     const runtime = new globalThis.WindowRuntime({ version: 1, role: 'main', label: 'main', brokerInstance: 'broker', documentIncarnation: 'main', viewId: 'catalog', liveRelay: true, reservation: null });
-    let confirmedGeneration = null, localBuiltin = false;
-    const state = { selection: { deliveryGeneration: 2 }, bundle: { manifest: { presentation: { navigation: 'rail', chats: 'separate', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } } } } };
-    runtime.ui.getSnapshot = () => ({ state, localBuiltin, validatedGeneration: confirmedGeneration, confirmedGeneration });
+    let confirmedGeneration = null, localBuiltin = false, builtinPainted = false;
+    const state = { selection: { deliveryGeneration: 2, revision: 4 }, bundle: { digest: 'a'.repeat(64), manifest: { presentation: { navigation: 'rail', chats: 'separate', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } } } } };
+    runtime.ui.getSnapshot = () => ({ state, localBuiltin, deliveryContext: 'document', validatedVisual: builtinPainted ? { kind: 'local-builtin' } : confirmedGeneration === null ? { kind: 'none' } : { kind: 'delivery', context: 'document', generation: confirmedGeneration, revision: 4, digest: 'a'.repeat(64) }, confirmedGeneration });
     runtime.recoveryWake = async () => {}; runtime.drive = async () => {};
     runtime.controller.getSnapshot = () => ({ active: null });
     runtime.uiChanged(); const staging = runtime.getSnapshot().catalogOnly;
     confirmedGeneration = 2; runtime.uiChanged(); const committed = runtime.getSnapshot().catalogOnly;
-    localBuiltin = true; runtime.uiChanged(); const restored = runtime.getSnapshot().catalogOnly;
-    return { staging, committed, restored };
+    localBuiltin = true; runtime.uiChanged(); const deferredRestore = runtime.getSnapshot().catalogOnly;
+    builtinPainted = true; runtime.uiChanged(); const restored = runtime.getSnapshot().catalogOnly;
+    return { staging, committed, deferredRestore, restored };
   });
-  assert.deepEqual(result, { staging: false, committed: true, restored: false });
+  assert.deepEqual(result, { staging: false, committed: true, deferredRestore: true, restored: false });
 });
 
 
@@ -820,4 +821,30 @@ test('keeping a draft permits placement retry without reactivating its transfer'
   });
   assert.equal(result.commands[0].kind, 'retry-intent'); assert.equal(result.commands[0].requestId, '1:kept-native-request');
   assert.equal(result.kind, 'cancelled'); assert.deepEqual(result.copies, []); assert.equal(result.text, 'Keep exact original');
+});
+
+test('an older automatic handoff cannot reserve or fail a newer unpainted delivery', async t => {
+  const page = await fixture(t), result = await page.evaluate(async () => {
+    const runtime = new globalThis.WindowRuntime({ version: 1, role: 'main', label: 'main', brokerInstance: 'broker', documentIncarnation: 'main', viewId: 'catalog', liveRelay: true, reservation: null });
+    const scope = { hostId: 'host', conversationId: 'one' }, reserved = [], failed = [];
+    const delivery = generation => ({ selection: { deliveryGeneration: generation, revision: generation }, bundle: { digest: String(generation).repeat(64), manifest: { presentation: { chats: 'separate' } } }, transitions: [{ envelope: { requestId: `${generation}:test`, deliveryGeneration: generation }, slot: { transitionId: `t${generation}`, target: null } }] });
+    let state = delivery(2), validated = { kind: 'delivery', context: 'main', generation: 2, revision: 2, digest: '2'.repeat(64) };
+    runtime.ui.getSnapshot = () => ({ state, validatedVisual: validated, deliveryContext: 'main', confirmedGeneration: 2, localBuiltin: false });
+    runtime.ui.reservePlacement = async transition => { reserved.push(transition.envelope.deliveryGeneration); };
+    runtime.ui.failPlacement = async transition => { failed.push(transition.envelope.deliveryGeneration); };
+    runtime.recoveryWake = runtime.refreshRecovery = runtime.syncDraftCarries = async () => {};
+    runtime.port.request = async () => [];
+    runtime.controller.getSnapshot = () => ({ busy: false, host: { kind: 'ready' }, active: { scope }, saved: { pendingCreation: null }, lastPlacement: null });
+    let track, resume, started;
+    runtime.coordinator.trackPlacement = callback => { track = callback; }; runtime.configurePlacementTracking();
+    const began = new Promise(resolve => { started = resolve; });
+    const paused = new Promise(resolve => { resume = resolve; });
+    runtime.controller.openReserved = async () => { started(); await paused; await track({ scope, viewId: 'one', label: 'one', transitionId: 'native-A' }, { revision: 3 }); return { kind: 'refused', scope, reason: 'A failed' }; };
+    runtime.processing = true; runtime.uiChanged(); runtime.processing = false;
+    const attempt = runtime.drive(); await began;
+    state = delivery(3); validated = { kind: 'none' }; runtime.uiChanged();
+    resume(); await attempt;
+    return { reserved, failed, transition: state.transitions[0].slot.transitionId, notice: runtime.getSnapshot().placementNotice };
+  });
+  assert.deepEqual(result, { reserved: [], failed: [], transition: 't3', notice: null });
 });

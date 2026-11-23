@@ -38,8 +38,8 @@ test('installed UI chunks include runtime CSS validation without importing host 
   const { sha256 } = await import('../../apps/host/build/tsc/experience-bundle.js');
   const css = '[data-openpane-part="button"] { color: #123456; }';
   await writeFile(join(source, 'style.css'), css);
-  await writeFile(join(source, 'experience.json'), JSON.stringify({ schemaVersion: 1, id: 'installed', label: 'Installed CLI', theme: { mode: 'system', light: {}, dark: {} },
-    presentation: { navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } },
+  await writeFile(join(source, 'experience.json'), JSON.stringify({ schemaVersion: 2, id: 'installed', label: 'Installed CLI', theme: { density: 'comfortable', mode: 'system', light: {}, dark: {} },
+    presentation: { home: { kind: 'stack', panes: ['conversations', 'conversation'] }, transcript: 'bubbles', navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } },
     stylesheet: 'style.css', assets: [{ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) }] }));
   const { randomUUID } = await import('node:crypto');
   const applied = await command(installed, ['ui', '--data-dir', host.directory, 'experience', 'apply', '--directory', source, '--request-id', `${context.requestEpoch}:${randomUUID()}`, '--expected-revision', String(context.revision)]);

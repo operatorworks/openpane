@@ -7,8 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { UiStore } from '../../apps/host/build/tsc/ui-store.js';
 import { createExperienceBundle } from '../../apps/host/build/tsc/experience-bundle.js';
-const bundle = id => createExperienceBundle({ schemaVersion: 1, id, label: id, theme: { mode: 'system', light: {}, dark: {} },
-  presentation: { navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } }, stylesheet: null, assets: [] }, null, []);
+const bundle = id => createExperienceBundle({ schemaVersion: 2, id, label: id, theme: { density: 'comfortable', mode: 'system', light: {}, dark: {} },
+  presentation: { home: { kind: 'stack', panes: ['conversations', 'conversation'] }, transcript: 'bubbles', navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } }, stylesheet: null, assets: [] }, null, []);
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'ui-store-'));
   const path = join(directory, 'ui.sqlite'); let store = new UiStore(path, 'host');
@@ -127,7 +127,9 @@ test('a native transition stays pending after main paints and resolves once to t
   assert.equal((await f.store.execute({ op: 'ack', session: main.documentIncarnation, envelope: env, result: { kind: 'rendered' } })).outcome, 'pending');
   const target = { scope: { hostId: 'host', conversationId: 'assigned' }, viewId: 'dedicated', label: 'assigned-child', nativeTransitionId: 'native-transition', bindingRevision: 3 };
   const reserve = { op: 'placement-reserve', session: main.documentIncarnation, envelope: env, transitionId: transition.transitionId, target };
+  await f.store.execute({ op: 'state', context: main, visible: false, presenceSequence: 2, after: null, waitMs: 0, nativePlacement: true });
   await f.store.execute(reserve); await f.store.execute(reserve);
+  await f.store.execute({ op: 'state', context: main, visible: true, presenceSequence: 3, after: null, waitMs: 0, nativePlacement: true });
   await assert.rejects(f.store.execute({ ...reserve, target: { ...target, viewId: 'replacement' } }), /already fixed/);
   const child = { ...main, role: 'chat', scope: target.scope, viewId: target.viewId, label: target.label, documentIncarnation: randomUUID() };
   const ready = (context, sequence, revision = 3, visible = false) => f.store.execute({ op: 'relay', main, children: [{ context, visible, presenceSequence: sequence,
@@ -273,7 +275,10 @@ test('a mismatched child placement hint leaves sibling delivery and presence int
   await f.store.execute({op:'state',context:main,visible:true,presenceSequence:1,after:null,waitMs:0,nativePlacement:true});await f.state(one);
   const base=bundle('isolated-hints'),separate=createExperienceBundle({...base.manifest,presentation:{...base.manifest.presentation,chats:'separate'}},null,[]);
   const selected=await f.store.execute({op:'apply',requestId:f.id(),expectedRevision:0,bundle:separate}),env=envelope(selected.receipt),slot=selected.receipt.participants.find(row=>row.slot.kind==='transition').slot;
-  const target={scope:{hostId:'host',conversationId:'two'},viewId:'two',label:'two',nativeTransitionId:'transition',bindingRevision:3};await f.store.execute({op:'placement-reserve',session:main.documentIncarnation,envelope:env,transitionId:slot.transitionId,target});
+  const target={scope:{hostId:'host',conversationId:'two'},viewId:'two',label:'two',nativeTransitionId:'transition',bindingRevision:3};
+  const reserve={op:'placement-reserve',session:main.documentIncarnation,envelope:env,transitionId:slot.transitionId,target};
+  await assert.rejects(f.store.execute(reserve), /paint/);
+  await paint(f.store,main,selected.receipt); await f.store.execute(reserve);
   const two={...main,role:'chat',scope:target.scope,viewId:'two',label:'two',documentIncarnation:randomUUID()};
   const relay=sequence=>f.store.execute({op:'relay',main,children:[{context:one,visible:true,presenceSequence:sequence+1},{context:two,visible:true,presenceSequence:sequence,placement:{nativeTransitionId:'transition',bindingRevision:4}}],departed:[]});
   await relay(1);const now=Date.now;Date.now=()=>now()+16000;
@@ -366,4 +371,55 @@ test('an expired main presence cannot complete an idle placement as rendered', a
   Date.now = () => now() + 16000;
   try { await assert.rejects(f.store.execute({ op: 'placement-idle', session: main.documentIncarnation, envelope: envelope(receipt), transitionId }), /placement/i); }
   finally { Date.now = now; }
+});
+
+test('unsupported selected and healthy bundles recover once and allow a fresh v2 write without resetting UI data', async t => {
+  const { canonicalJson } = await import('@openpane/contracts');
+  const { sha256 } = await import('../../apps/host/build/tsc/experience-bundle.js');
+  for (const mode of ['selected', 'healthy', 'builtin']) {
+    const f = await fixture(t), valid = bundle(`valid-${mode}`);
+    await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: valid });
+    f.store.close();
+    const db = new DatabaseSync(f.path);
+    const old = structuredClone(valid); old.manifest.schemaVersion = 1;
+    delete old.manifest.theme.density; delete old.manifest.presentation.home; delete old.manifest.presentation.transcript;
+    old.digest = sha256(canonicalJson({ manifest: old.manifest, stylesheet: old.stylesheet, assets: old.assets }));
+    db.prepare('INSERT INTO ui_bundles VALUES (?,?,?,?)').run(old.digest, JSON.stringify(old), Buffer.byteLength(JSON.stringify(old)), 1);
+    const state = JSON.parse(db.prepare('SELECT value FROM ui_state WHERE id=1').get().value);
+    state.healthy = { kind: 'experience', digest: old.digest }; state.selection.previousHealthy = state.healthy;
+    if (mode === 'selected') state.selection.selected = state.healthy;
+    if (mode === 'builtin') state.selection.selected = { kind: 'builtin' };
+    db.prepare('UPDATE ui_state SET value=? WHERE id=1').run(JSON.stringify(state));
+    db.exec('CREATE TABLE retained_ui_data (value TEXT); INSERT INTO retained_ui_data VALUES (\'kept\')'); db.close();
+    f.restart();
+    const context = f.store.context();
+    assert.equal(context.revision, mode === 'selected' ? 2 : 1);
+    assert.equal(context.selection.selected.kind, mode === 'healthy' ? 'experience' : 'builtin');
+    if (mode === 'healthy') assert.equal(context.selection.selected.digest, valid.digest);
+    assert.equal(context.selection.previousHealthy.kind, 'builtin'); assert.match(context.fault, /unsupported|unavailable/);
+    assert.throws(() => f.store.bundle(old.digest), error => error.code === 'unavailable');
+    assert.equal(f.store.context().revision, context.revision); f.restart(); assert.equal(f.store.context().revision, context.revision);
+    const next = bundle(`next-${mode}`), requestId = f.id();
+    await f.store.execute({ op: 'apply', requestId, expectedRevision: context.revision, bundle: next });
+    assert.equal((await f.store.execute({ op: 'status', requestId })).receipt.digest, next.digest);
+    f.restart(); assert.equal(f.store.context().selection.selected.digest, next.digest);
+    const inspect = new DatabaseSync(f.path); assert.equal(inspect.prepare('SELECT value FROM retained_ui_data').get().value, 'kept');
+    assert.equal(inspect.prepare('SELECT count(*) AS count FROM ui_bundles WHERE digest=?').get(old.digest).count, 1); inspect.close();
+  }
+});
+
+test('a superseded reservation is an authoritative no-op so an already transferred editor can finish its old handoff', async t => {
+  const f = await fixture(t), main = f.window();
+  await f.store.execute({ op: 'state', context: main, visible: true, presenceSequence: 1, after: null, waitMs: 0, nativePlacement: true });
+  const base = bundle('superseded-handoff'), separate = createExperienceBundle({ ...base.manifest, presentation: { ...base.manifest.presentation, chats: 'separate' } }, null, []);
+  const a = await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: separate });
+  await paint(f.store, main, a.receipt);
+  const slot = a.receipt.participants.find(row => row.slot.kind === 'transition').slot;
+  const b = await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: 1 });
+  const target = { scope: { hostId: 'host', conversationId: 'one' }, viewId: 'one', label: 'one', nativeTransitionId: 'native-A', bindingRevision: 3 };
+  const reply = await f.store.execute({ op: 'placement-reserve', session: main.documentIncarnation, envelope: envelope(a.receipt), transitionId: slot.transitionId, target });
+  assert.equal(reply.outcome, 'superseded');
+  const current = await f.store.execute({ op: 'status', requestId: b.receipt.requestId });
+  assert.equal(current.receipt.participants.find(row => row.slot.kind === 'transition').slot.target, null);
+  assert.equal(current.outcome, 'pending');
 });

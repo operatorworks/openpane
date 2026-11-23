@@ -1,4 +1,4 @@
-import type { ExperienceTokens, TextMetrics } from '@openpane/contracts';
+import type { ExperienceTokens, ExperienceDensity, TextMetrics } from '@openpane/contracts';
 import { palettes, type Appearance, type ThemeColors } from './color-tokens.js';
 export { palettes, type Appearance, type ThemeColors } from './color-tokens.js';
 export * from './palette.js';
@@ -26,11 +26,13 @@ export const motion = { quick: 120, standard: 180 } as const;
 export type ThemeColorOverrides = Readonly<Partial<Record<keyof ThemeColors, string | undefined>>>;
 type OptionalExperienceTokens = { readonly [K in keyof ExperienceTokens]?: ExperienceTokens[K] | undefined };
 export interface ThemeOptions extends Omit<OptionalExperienceTokens, 'colors'> {
+  readonly density?: ExperienceDensity | undefined;
   readonly appearance?: Appearance | undefined;
   readonly reducedMotion?: boolean | undefined;
   readonly colors?: ThemeColorOverrides | undefined;
 }
 export interface Theme {
+  readonly density: ExperienceDensity;
   readonly appearance: Appearance;
   readonly reducedMotion: boolean;
   readonly colors: ThemeColors;
@@ -57,7 +59,7 @@ export function createTheme(options: ThemeOptions = {}, parent?: Theme): Theme {
     (entry): entry is [string, string] => Object.hasOwn(inheritedColors, entry[0]) && typeof entry[1] === 'string' && entry[1].trim() !== '',
   ));
   return {
-    appearance, reducedMotion,
+    appearance, reducedMotion, density: options.density ?? parent?.density ?? 'comfortable',
     colors: { ...inheritedColors, ...overrides },
     spacing: { ...(parent?.spacing ?? spacing), ...options.spacing }, radius: { ...(parent?.radius ?? radius), ...options.radius },
     typography: {
