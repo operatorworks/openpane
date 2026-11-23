@@ -308,3 +308,24 @@ fresh maintainability pass remain required before either gauntlet push checkpoin
 After these changes, `npm run verify` passed with Node 24.22.3 and npm 11.19.1:
 4,154 tests, 4,149 passed, no failures, and five existing skips. Rust formatting
 and all 63 native tests passed. The production Mac bundle built at 15.24 MiB.
+
+### Native placement completion, November 23
+
+An ordinary catalog open now settles its pending result when the current native
+child confirms readiness. Native lookup distinguishes absent, closed, opening and
+ready windows; a historical ready phase cannot confirm a reloaded document. A
+late lookup cannot overwrite a newer placement or clear its notice. The native
+lookup callers migrated together.
+
+The real Mac app opened a recorded chat in a separate window, saved an unsent
+draft, closed it and reopened it through the catalog. The reopened child retained
+the exact draft and connected composer. Main showed no stale waiting notice after
+the child closed. The appearance receipt was all-rendered, zero recorded commands
+were submitted, and the app and temporary host exited normally.
+
+The full repository verification passed: 4,157 tests, 4,152 passed, no failures,
+and five existing skips. After preserving the existing separate-policy shortcut
+and removing redundant guards, the desktop was rebuilt and its focused checks
+were rerun. Rust formatting and all 64 native tests passed. The production Mac
+bundle built at 15.25 MiB. The review gauntlet remains stopped on the previously
+recorded subscription failure; these changes still need the planned reviews.

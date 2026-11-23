@@ -11,7 +11,7 @@ import type { ViewStorageFactory } from './view-state.js';
 import { ChildUiConnection, NativeMainUiRelay } from './native-ui-relay.js';
 import { UiConnection } from './ui-connection.js';
 import type { UiTransport } from './ui-connection.js';
-import { childPlacementResult, DesktopWindowPort, parseNativePlacementIntent, parseNativeReservation, parseEditorRecoveryGrant } from './window-context.js';
+import { childPlacementResult, DesktopWindowPort, parseNativePlacementIntent, parseNativeReservation, parseEditorRecoveryGrant, parseNativeWindowLookup } from './window-context.js';
 import type { DesktopWindowContext, NativePlacementIntent, NativeReservation } from './window-context.js';
 import type { DraftCarry } from './draft-carry.js';
 import { bindDraftCarry, offerDraftCarry, sourceCarries, targetCarries, cancelDraftCarry, refuseDraftCarry, retryDraftCarry } from './draft-carry.js';
@@ -88,8 +88,8 @@ export class WindowRuntime {
       ...(context.role !== 'chat' ? { readLegacyDraft: BrowserViewStorage.readLegacyDraft, openRemainingWork: BrowserViewStorage.openRemainingWork.bind(BrowserViewStorage), recoverClosedView: async (viewId: string, onFailure: (error: unknown) => void) => {
         const binding = await BrowserViewStorage.bindingForView(viewId);
         if (binding && this.port) {
-          const native = record(await this.port.request({ kind: 'lookup', scope: binding.scope }), ['reservation', 'live']);
-          if (native.live === true) return null;
+          const native = parseNativeWindowLookup(await this.port.request({ kind: 'lookup', scope: binding.scope }), binding.scope);
+          if (native.kind === 'opening' || native.kind === 'ready') return null;
         }
         return BrowserViewStorage.reopenForRecovery(viewId, onFailure);
       } } : {}),
@@ -293,8 +293,8 @@ export class WindowRuntime {
       let target = intent.target;
       if (!target) {
         const scope = intent.action.kind === 'open' ? intent.action.scope : { hostId: intent.sourceScope.hostId, conversationId: crypto.randomUUID() };
-        const located = await BrowserViewStorage.locateEditor(scope), cached = record(await this.port.request({ kind: 'lookup', scope }), ['reservation', 'live']);
-        const previous = cached.reservation === null ? null : parseNativeReservation(cached.reservation);
+        const located = await BrowserViewStorage.locateEditor(scope), cached = parseNativeWindowLookup(await this.port.request({ kind: 'lookup', scope }), scope);
+        const previous = cached.kind === 'absent' ? null : cached.reservation;
         const viewId = located.binding?.viewId ?? previous?.viewId ?? crypto.randomUUID();
         const assigned = parseNativePlacementIntent(await this.port.request({ kind: 'assign-intent', sourceScope: intent.sourceScope, requestId: intent.requestId,
           scope, viewId, creationAgentId: intent.action.kind === 'create' ? intent.action.agentId : null }));
@@ -326,6 +326,14 @@ export class WindowRuntime {
       if (!Array.isArray(value) || value.length > 512) throw new Error('Invalid native recovery inventory');
       const state = this.controller.getSnapshot(), hostId = state.host.kind === 'ready' ? state.host.metadata.hostId : null;
       this.update({ recovery: { kind: 'main', windows: value.map(parseNativeReservation).filter(window => window.scope.hostId === hostId) } });
+      const pending = state.lastPlacement;
+      if (pending?.kind === 'pending' && pending.scope?.hostId === hostId) {
+        const native = parseNativeWindowLookup(await this.port.request({ kind: 'lookup', scope: pending.scope }), pending.scope);
+        if (native.kind === 'ready' && this.controller.settlePlacement(pending, { kind: 'detached', scope: pending.scope, label: native.reservation.label })) {
+          if (this.policyScope && sameScope(this.policyScope, pending.scope)) this.policyScope = null;
+          if (this.snapshot.placementNotice === pending.reason) this.update({ placementNotice: null });
+        }
+      }
       return;
     }
     if (this.context.role !== 'chat') return;

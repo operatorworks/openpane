@@ -66,6 +66,29 @@ impl Broker {
         }
     }
 
+    fn lookup_window(&self, origin: &str, scope: &Scope) -> Result<Value, &'static str> {
+        let Some(reservation) = self.storage.profile(origin)?.windows.get(&scope.key()) else {
+            return Ok(json!({"kind":"absent"}));
+        };
+        let ready = self
+            .documents
+            .get(&reservation.label)
+            .is_some_and(|document| {
+                document.ready
+                    && document.scope.as_ref() == Some(scope)
+                    && document.view_id == reservation.view_id
+            });
+        let kind = if ready {
+            "ready"
+        } else if self.opening.contains_key(&reservation.label)
+            || self.documents.contains_key(&reservation.label)
+        {
+            "opening"
+        } else {
+            "closed"
+        };
+        Ok(json!({"kind":kind,"reservation":reservation}))
+    }
     fn children_open(&self) -> bool {
         !self.opening.is_empty() || self.documents.keys().any(|label| label != "main")
     }
@@ -568,14 +591,7 @@ impl ChatWindows {
             }
             Command::Lookup { incarnation, scope } => {
                 self.require_main(broker, label, &incarnation)?;
-                let entry = broker
-                    .storage
-                    .profile(&self.origin)?
-                    .windows
-                    .get(&scope.key());
-                Ok(
-                    json!({"reservation":entry,"live":entry.is_some_and(|entry|broker.opening.contains_key(&entry.label))}),
-                )
+                broker.lookup_window(&self.origin, &scope)
             }
             Command::Launch {
                 incarnation,
@@ -956,6 +972,90 @@ pub async fn desktop_window(
 #[cfg(test)]
 mod admission_tests {
     use super::*;
+    #[test]
+    fn window_lookup_reports_current_document_readiness_instead_of_historical_phase() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-lookup-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.host = Some(("host".into(), "profile".into()));
+            let scope = Scope {
+                host_id: "host".into(),
+                conversation_id: "chat".into(),
+            };
+            assert_eq!(
+                broker.lookup_window(&windows.origin, &scope).unwrap(),
+                json!({"kind":"absent"})
+            );
+            let reservation = windows
+                .reserve(broker, scope.clone(), "view".into(), None, false)
+                .unwrap();
+            broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    profile.windows.get_mut(&scope.key()).unwrap().phase = Phase::TargetReady;
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(
+                broker.lookup_window(&windows.origin, &scope).unwrap()["kind"],
+                "closed"
+            );
+            broker
+                .opening
+                .insert(reservation.label.clone(), scope.clone());
+            assert_eq!(
+                broker.lookup_window(&windows.origin, &scope).unwrap()["kind"],
+                "opening"
+            );
+            broker.documents.insert(
+                reservation.label.clone(),
+                Document {
+                    nonce: "nonce".into(),
+                    incarnation: "incarnation".into(),
+                    scope: Some(scope.clone()),
+                    view_id: "view".into(),
+                    visible: true,
+                    presence_sequence: 1,
+                    display: None,
+                    ready: false,
+                },
+            );
+            assert_eq!(
+                broker.lookup_window(&windows.origin, &scope).unwrap()["kind"],
+                "opening"
+            );
+            broker.documents.get_mut(&reservation.label).unwrap().ready = true;
+            assert_eq!(
+                broker.lookup_window(&windows.origin, &scope).unwrap()["kind"],
+                "ready"
+            );
+            broker
+                .documents
+                .get_mut(&reservation.label)
+                .unwrap()
+                .view_id = "other".into();
+            assert_eq!(
+                broker.lookup_window(&windows.origin, &scope).unwrap()["kind"],
+                "opening"
+            );
+            broker.finish_close(&reservation.label).unwrap();
+            assert_eq!(
+                broker.lookup_window(&windows.origin, &scope).unwrap()["kind"],
+                "closed"
+            );
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn each_explicit_restore_survives_until_its_matching_confirmation() {
         let directory =

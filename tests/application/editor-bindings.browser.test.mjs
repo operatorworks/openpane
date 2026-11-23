@@ -230,7 +230,7 @@ test('native restoration keeps separate policy, live windows and foreign handoff
   const result = await page.evaluate(async () => {
     const scope = { hostId: 'host', conversationId: 'restore' }, Storage = globalThis.BrowserViewStorage;
     let live = false;
-    const coordinator = new globalThis.WindowCoordinator({ context: { role: 'main', label: 'main', liveRelay: true }, async request(command) { if (command.kind !== 'lookup') throw new Error('Unexpected native command'); return { reservation: null, live }; } });
+    const coordinator = new globalThis.WindowCoordinator({ context: { role: 'main', label: 'main', liveRelay: true }, async request(command) { if (command.kind !== 'lookup') throw new Error('Unexpected native command'); return live ? { kind: 'opening', reservation: { scope, viewId: 'restore-editor', label: 'child', transitionId: 'transition', creationAgentId: null, phase: 'source-released', bindingRevision: null, writerGeneration: null } } : { kind: 'absent' }; } });
     const initial = await coordinator.restoresInline(scope);
     live = true; const active = await coordinator.restoresInline(scope); live = false;
     coordinator.setPresentation({ chats: 'separate' }); const separate = await coordinator.restoresInline(scope); coordinator.setPresentation(null);
@@ -326,7 +326,7 @@ test('a detached creation saves its launch text and pending creation in the assi
     const reservation = { scope, viewId: 'new-view', label: 'chat-new', transitionId: 'new-transition', creationAgentId: 'agent', phase: 'requested', bindingRevision: null, writerGeneration: null };
     let atLaunch, launches = 0;
     const port = { context: { role: 'main', label: 'main', liveRelay: true }, async request(request) {
-      if (request.kind === 'lookup') return { reservation: null, live: false };
+      if (request.kind === 'lookup') return { kind: 'absent' };
       if (request.kind === 'reserve') return reservation;
       if (request.kind === 'launch') {
         launches++;
@@ -451,7 +451,7 @@ test('an opening child registers the same authoritative handoff against a later 
     const drafts=source.drafts(()=>{});await drafts.load(scope);await drafts.save({version:3,scope,draft:'Preserve opening draft',draftRevision:1,outbox:[],frontendSends:[],image:null});
     const binding=await source.reserveHandoff({scope,sourceViewId:'source',targetViewId:'child-view',transitionId:'transition',targetLabel:'child',expectedBinding:source.editorBinding()});await source.close();
     const reservation={scope,viewId:'child-view',label:'child',transitionId:'transition',creationAgentId:null,phase:'source-released',bindingRevision:null,writerGeneration:null},calls=[];
-    const coordinator=new globalThis.WindowCoordinator({context:{role:'main',label:'main',liveRelay:true},async request(command){if(command.kind==='lookup')return{reservation,live:true};if(command.kind==='launch')return{kind:'pending',scope,reason:'Window is opening'};throw new Error('Unexpected mutation');}});
+    const coordinator=new globalThis.WindowCoordinator({context:{role:'main',label:'main',liveRelay:true},async request(command){if(command.kind==='lookup')return{kind:'opening',reservation};if(command.kind==='launch')return{kind:'pending',scope,reason:'Window is opening'};throw new Error('Unexpected mutation');}});
     let delivery=1;coordinator.trackPlacement(async(target,owned)=>calls.push({delivery,transition:target.transitionId,revision:owned.revision}));
     const owner=await Storage.reopen('catalog',()=>{}),request={scope,creation:false,carryFrom:null,agentId:'agent',agentLabel:'Agent'},port={storage:owner,holds:()=>false,async quiesce(){throw new Error('Already handed off');},async release(){throw new Error('Already handed off');}};
     const first=await coordinator.acquire(request,port), child=await Storage.claimEditor({scope,viewId:'child-view',label:'child',transitionId:'transition',creation:null},()=>{});delivery=2;const second=await coordinator.acquire(request,port);await child.close();await owner.close();return{first:first.kind,second:second.kind,calls,revision:binding.revision};
@@ -588,7 +588,7 @@ for (const occupied of [false, true]) test(`opening a successor in a native chil
     const reservation = { scope: targetScope, viewId: target.viewId, label: 'child', transitionId: 'successor-transition', creationAgentId: null, phase: 'target-ready', bindingRevision: 1, writerGeneration: 1 };
     let launches = 0;
     const port = { context: { role: 'main', label: 'main', liveRelay: true }, async request(command) {
-      if (command.kind === 'lookup') return { reservation, live: true };
+      if (command.kind === 'lookup') return { kind: 'ready', reservation };
       if (command.kind === 'intent-context') return { epoch: 1, pendingCarryRequests: [] };
       if (command.kind === 'launch') { launches++; return { kind: 'detached', scope: targetScope, label: 'child' }; }
       throw new Error(command.kind);

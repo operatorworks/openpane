@@ -1,7 +1,7 @@
 import type { EditorRecoveryGrant } from './editor-bindings.js';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { parseScope, parseConversationOpenResult } from '@openpane/contracts';
+import { parseScope, parseConversationOpenResult, sameScope } from '@openpane/contracts';
 import type { ConversationScope, ConversationOpenResult } from '@openpane/contracts';
 import { identifier, record } from '@openpane/contracts/decode';
 
@@ -14,6 +14,18 @@ export interface NativeReservation {
   readonly phase: 'assigned' | 'requested' | 'source-saved' | 'transfer-committed' | 'source-released' | 'target-ready' | 'failed';
   readonly bindingRevision: number | null;
   readonly writerGeneration: number | null;
+}
+export type NativeWindowLookup =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'closed' | 'opening' | 'ready'; readonly reservation: NativeReservation };
+export function parseNativeWindowLookup(value: unknown, scope: ConversationScope): NativeWindowLookup {
+  const input = record(value);
+  if (input.kind === 'absent') { record(input, ['kind']); return { kind: 'absent' }; }
+  record(input, ['kind', 'reservation']);
+  if (input.kind !== 'closed' && input.kind !== 'opening' && input.kind !== 'ready') throw new Error('Invalid native window state');
+  const reservation = parseNativeReservation(input.reservation);
+  if (!sameScope(reservation.scope, scope)) throw new Error('Foreign native window lookup');
+  return { kind: input.kind, reservation };
 }
 export type DesktopWindowContext =
   | { readonly role: 'browser'; readonly capability: 'inline' }

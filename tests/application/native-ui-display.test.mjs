@@ -149,3 +149,36 @@ test('a wake that first sees a newer native sequence queues behind a manual rest
   const waking = runtime.recoveryWake(); await new Promise(resolve => setImmediate(resolve)); release(); await Promise.all([manual, waking]);
   assert.deepEqual(calls, [1, 2]); assert.equal(pending, false);
 });
+
+for (const opening of [false, true]) test(`main settles a catalog placement only after the current child is ready (opening ${opening})`, async t => {
+  const { WindowRuntime } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  const { fixture } = await import('./controller-fixture.mjs');
+  const pending = { kind: 'pending', scope, reason: 'Waiting for the assigned editor' };
+  const f = fixture({ placement: { async acquire() { return pending; } } }); t.after(() => f.app.dispose());
+  await f.app.start(); await f.app.open(scope);
+  const reservation = { scope, viewId: 'view', label: 'chat', transitionId: 'transition', creationAgentId: null, phase: 'target-ready', bindingRevision: 1, writerGeneration: 1 };
+  const runtime = Object.create(WindowRuntime.prototype);
+  Object.assign(runtime, { context: { role: 'main' }, controller: f.app, port: { async request(command) { return command.kind === 'reservations' ? [] : { kind: opening ? 'opening' : 'ready', reservation }; } },
+    snapshot: { recovery: { kind: 'none' }, placementNotice: pending.reason }, listeners: new Set(), policyScope: scope });
+  await runtime.refreshRecovery();
+  assert.deepEqual(f.app.getSnapshot().lastPlacement, opening ? pending : { kind: 'detached', scope, label: 'chat' });
+  assert.equal(runtime.snapshot.placementNotice, opening ? pending.reason : null);
+  assert.equal(runtime.policyScope, opening ? scope : null);
+});
+
+test('a late ready lookup cannot clear a newer main placement or its notice', async t => {
+  const { WindowRuntime } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  const { fixture } = await import('./controller-fixture.mjs');
+  const f = fixture({ placement: { async acquire(request) { return { kind: 'pending', scope: request.scope, reason: `Waiting for ${request.scope.conversationId}` }; } } }); t.after(() => f.app.dispose());
+  await f.app.start(); await f.app.open(scope);
+  let release, entered; const gate = new Promise(resolve => { release = resolve; }), reading = new Promise(resolve => { entered = resolve; });
+  const runtime = Object.create(WindowRuntime.prototype);
+  Object.assign(runtime, { context: { role: 'main' }, controller: f.app, port: { async request(command) {
+    if (command.kind === 'reservations') return [];
+    entered(); await gate; return { kind: 'ready', reservation: { scope, viewId: 'view', label: 'chat', transitionId: 'transition', creationAgentId: null, phase: 'target-ready', bindingRevision: 1, writerGeneration: 1 } };
+  } }, snapshot: { recovery: { kind: 'none' }, placementNotice: 'Waiting for chat' }, listeners: new Set() });
+  const refreshing = runtime.refreshRecovery(); await reading;
+  const newer = { ...scope, conversationId: 'newer' }; await f.app.open(newer); runtime.snapshot.placementNotice = 'Waiting for newer';
+  const expected = f.app.getSnapshot().lastPlacement; release(); await refreshing;
+  assert.equal(f.app.getSnapshot().lastPlacement, expected); assert.equal(runtime.snapshot.placementNotice, 'Waiting for newer');
+});

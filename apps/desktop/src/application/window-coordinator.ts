@@ -5,8 +5,8 @@ import { sameScope } from '@openpane/contracts';
 import { count, identifier, record } from '@openpane/contracts/decode';
 import { BrowserViewStorage } from './browser-storage.js';
 import type { PlacementAcquisition, PlacementPort } from './placement-port.js';
-import { DesktopWindowPort, parseNativeReservation, parseNativePlacementIntent, childPlacementResult } from './window-context.js';
-import type { NativeReservation, NativePlacementIntent } from './window-context.js';
+import { DesktopWindowPort, parseNativeReservation, parseNativePlacementIntent, childPlacementResult, parseNativeWindowLookup } from './window-context.js';
+import type { NativeReservation, NativePlacementIntent, NativeWindowLookup } from './window-context.js';
 
 type Request = Parameters<PlacementPort['acquire']>[0];
 type Owner = Parameters<PlacementPort['acquire']>[1];
@@ -35,7 +35,9 @@ export class WindowCoordinator implements PlacementPort {
   }
   async restoresInline(scope: ConversationScope): Promise<boolean> {
     if (this.port?.context.role !== 'main' || !this.port.context.liveRelay) return true;
-    if (this.presentation.chats === 'separate' || (await this.lookup(scope)).live) return false;
+    if (this.presentation.chats === 'separate') return false;
+    const native = await this.lookup(scope);
+    if (native.kind === 'opening' || native.kind === 'ready') return false;
     const { binding } = await BrowserViewStorage.locateEditor(scope);
     return binding?.kind !== 'handoff-reserved' || binding.targetLabel === this.port.context.label;
   }
@@ -92,11 +94,8 @@ export class WindowCoordinator implements PlacementPort {
     let bounded = ''; for (const character of title) { if (bounded.length + character.length > 200) break; bounded += character; }
     return { width: policy.width, height: policy.height, titlebar: policy.titlebar, title: bounded };
   }
-  private async lookup(scope: ConversationScope): Promise<{ readonly reservation: NativeReservation | null; readonly live: boolean }> {
-    if (!this.port) return { reservation: null, live: false };
-    const value = record(await this.port.request({ kind: 'lookup', scope }), ['reservation', 'live']);
-    if (typeof value.live !== 'boolean') throw new Error('Invalid native reservation liveness');
-    return { reservation: value.reservation === null ? null : parseNativeReservation(value.reservation), live: value.live };
+  private async lookup(scope: ConversationScope): Promise<NativeWindowLookup> {
+    return this.port ? parseNativeWindowLookup(await this.port.request({ kind: 'lookup', scope }), scope) : { kind: 'absent' };
   }
   private launch(request: Request): Promise<Exclude<ConversationOpenResult, { readonly kind: 'inline' }>> {
     if (!this.port) return Promise.resolve({ kind: 'refused', reason: 'Native placement is unavailable.' });
@@ -141,10 +140,10 @@ export class WindowCoordinator implements PlacementPort {
         return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
       }
       const native = await this.lookup(request.scope);
-      if (native.live) {
-        if (native.reservation) await this.carryToNative(request, native.reservation);
+      if (native.kind === 'opening' || native.kind === 'ready') {
+        await this.carryToNative(request, native.reservation);
         const { binding } = await BrowserViewStorage.locateEditor(request.scope);
-        if (native.reservation && binding && binding.viewId === native.reservation.viewId && (binding.kind === 'editing' || binding.targetLabel === native.reservation.label && binding.transitionId === native.reservation.transitionId)) await this.track(native.reservation, binding);
+        if (binding && binding.viewId === native.reservation.viewId && (binding.kind === 'editing' || binding.targetLabel === native.reservation.label && binding.transitionId === native.reservation.transitionId)) await this.track(native.reservation, binding);
         return this.launch(request);
       }
       const located = await BrowserViewStorage.locateEditor(request.scope, owner.storage.viewId);
@@ -154,7 +153,7 @@ export class WindowCoordinator implements PlacementPort {
         return { kind: 'refused', reason: `Independent saved work exists in views ${located.legacyViewIds.join(', ')}. Open the saved view you want to recover before moving this chat. All records are preserved.` };
       }
       const sourceViewId = binding?.viewId ?? selectedLegacy ?? located.legacyViewIds[0] ?? null;
-      const viewId = binding?.viewId ?? native.reservation?.viewId ?? crypto.randomUUID();
+      const viewId = binding?.viewId ?? (native.kind === 'absent' ? null : native.reservation.viewId) ?? crypto.randomUUID();
       const separate = this.port?.context.role === 'main' && this.port.context.liveRelay && (this.forced.get(JSON.stringify(request.scope)) ?? this.presentation.chats) === 'separate';
       if (separate) {
         const reservation = parseNativeReservation(await this.port.request({ kind: 'reserve', scope: request.scope, viewId, creationAgentId: request.creation ? request.agentId : null, newTransition: binding?.kind === 'editing' }));
