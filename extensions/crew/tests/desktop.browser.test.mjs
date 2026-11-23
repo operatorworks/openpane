@@ -1,3 +1,4 @@
+import { qualifyCardRestyle } from '../../../tests/application/metrics-card-support.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -395,4 +396,14 @@ test('without a Crew installation the workspace shows setup guidance and calls n
   assert.equal(await setup.locator('input').count(), 0, 'no token entry field');
   assert.deepEqual(f.requests.filter(url => !url.startsWith(f.host.origin)), []);
   assert.deepEqual(f.violations, []);
+});
+
+ test('Crew transcript replacement keeps one app-owned metrics card through restyle', { timeout: 60000 }, async t => {
+  const f = await open(t), row = f.page.locator('[data-extension="crew"]');
+  await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Ready', 'Crew ready');
+  await f.page.getByRole('button', { name: 'Open Crew' }).click();
+  await f.page.getByRole('navigation', { name: 'Crew members' }).getByText('codex · test').waitFor();
+  await f.page.getByRole('button', { name: 'Start conversation' }).click();
+  await f.page.locator('[data-extension-workspace="crew"] #message').waitFor();
+  await qualifyCardRestyle(f.host, f.page);
 });

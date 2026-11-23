@@ -1,7 +1,7 @@
 # Agent experience implementation record
 
 The requested plan is `/Users/punk1290/git/openpane/.agents/plans/agent-driven-experiences/`.
-Implementation is in progress on `codex/agent-driven-experiences` from
+Implementation is on `codex/agent-driven-experiences` from
 `ca8814a` (origin/main on 2026-11-22). The original checkout's Cargo.lock and
 `.claude/` settings are preserved. No pairing or attestation is added.
 
@@ -135,17 +135,96 @@ The native broker tests and formatting also pass. The timeout regression in
 the installed-builder test now shortens only the deadline under test, so a
 healthy startup probe keeps its normal deadline during the execution test.
 
-The configured SSH destination is `punk1290@100.69.236.34`. Node 24.22.3 and pup
+The configured overlay SSH host is available. Node 24.22.3 and pup
 2.0.1 are available there. With `DD_SITE=us3.datadoghq.com` and
 `DD_TOKEN_STORAGE=file`, authentication and an actual fixed-range metrics query
 passed. Its response has `resp_version: 1` and epoch-millisecond pointlist times.
 Private raw evidence stays on that host under
 `~/.cache/openpane-qualification/pup-shape-20261122/`.
 
-## Remaining acceptance
+## Unit D implementation
 
-Units D and E, final native approval and eight-window delivery checks,
-bundled and SSH distribution, scoped card publication and restyling, the
-optional example, screenshots and edit video, full integration gates, and both
-review-gauntlet passes remain incomplete. Transport and parser fixtures cannot
-stand in for those checks.
+Saved display data lives in the separate UI database. Publications use an explicit
+conversation scope, strict named CUSTOM events and immutable payloads. Query
+reservations retain their absolute range and executable metadata. Direct pup
+processes have bounded output, deadlines and ownership fences. Replay and
+reconnect do not start another query; retry is explicit. Snapshot paging and
+native relay budgets bound delivery without discarding active cards.
+
+The app-owned card region follows transcript content, including extension
+layouts. SVG plots preserve null gaps, separate units and expose an exact values
+table. Experience tokens and semantic styles change the card without changing
+its saved event. Cards do not enter provider history or the command journal.
+
+## Unit E acceptance
+
+Launcher-default app-server Codex authored the optional violet Messenger 2002
+variation in an isolated workspace with ordinary one-time approvals. Fresh
+profiles remain builtin. Main navigation reached Chats, Extensions and Settings.
+Two actual native chats retained separate drafts and approval authority. Native
+restyle apply and refresh receipts report all-rendered for main and both chats
+plus one idle transition slot (three actual windows, four receipt slots).
+
+The local pup 1.23.6 publication retained all 179 points, timestamps, labels and
+units in an independent comparison against captured raw output. Its publication
+ID and immutable event remained identical after restyling, reconnect, child
+reopen and host restart. Its query counter remained one. The native plot uses
+the selected chart colors and complete theme tokens; the axis has no area fill.
+
+Eight production native children each received a nine-card snapshot, exercising
+multiple delivery pages. With main continuously minimized, each received a new
+publication after 326–349 seconds. A visible child also completed a normal
+Codex response during the minimized interval. Hidden windows retain explicit
+pending paint outcomes until activated. Builtin restore kept existing child
+owners and a future new chat opened inline in main.
+
+A plain shell followed context/targets/schema discovery, applied an optional
+bundle variation and published a normalized CUSTOM card to an explicitly chosen
+nonactive conversation. The correct native chat rendered it. Interrupting a
+wait preserved the original request and recoverable status. Invalid bundle
+input left the selected revision unchanged. Missing executable, failed auth,
+query cancellation and process limits are exercised with controlled fixtures;
+real credential configuration was preserved.
+
+The final SSH release used the same source bundle on the configured overlay
+host. Actual pup 2.0.1 published a fresh 179-point snapshot; exact replay returned
+the same reservation with one query for that publication. Independent raw-data
+comparison passed. The packaged macOS app displayed both retained remote cards
+in their assigned native chat through the SSH launcher, using the same selected
+bundle digest as local. No enrollment or provider credential copying was added.
+
+Private evidence is under `/tmp/op-live-3leonef4/evidence/`; remote raw evidence
+remains under `~/.cache/openpane-qualification/actual-publisher-20261122/` on the
+configured host. It includes builtin/main/chat/card screenshots, the 20-second
+`agent-apply-refresh.mp4`, per-window native identities and scoped delivery
+observations. Raw provider data and credentials are excluded from this repo.
+
+Observed experience digests:
+
+- Initial violet bundle: `ff50596ceb54c4173a9c7b4e7293e81095f5e58634aaf57fc84f61460d9fc565`.
+- Codex restyle: `253b2e88a736352254c95e2710f4d39738eed7c76e4ba9401e5090e16a4f9a10`.
+- Plain-shell/SSH variation: `dab81b2f3b44fa4c161fdeb398629d71fe36703f4262ccf4604671dc9e17918c`.
+
+No performance ratio is claimed. The 30-second CLI wait reports pending honestly;
+painted receipts and native observations establish delivery separately.
+
+## Final checks
+
+`npm run verify -- -- --test-concurrency=4` passed: 4,057 passed, five existing
+skips, zero failures (4,062 total). It includes workspace builds, iOS TypeScript
+checks, lint, provider suites, images, recovery, capture, SDK callers and the new
+experience/card tests. Rust formatting and all 48 native tests passed. The Mac
+bundle succeeded (15.11 MiB, local ad-hoc signing). Logs are
+`/tmp/openpane-e-quiet-final-{verify,fmt,rust,bundle}.log`.
+
+The same native approval ID and prompt survived another apply and refresh,
+both all-rendered. Its selected draft remained visible, and clicking Allow
+completed the scoped command successfully. Evidence is
+`native-approval-across-refresh.json` with before/after screenshots.
+
+Earlier failed and interrupted runs remain in the private logs. The compact
+approval fix initially affected extension scrolling; its scope was corrected.
+The directory notification acceptance fixture was changed to observe the durable
+file directly. A timing-sensitive inherited-pipe fixture passed independently
+after the eight-window exercise; the final full gate used four test processes.
+Both review-gauntlet passes follow this implementation checkpoint.

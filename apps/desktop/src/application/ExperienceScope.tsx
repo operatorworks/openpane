@@ -5,6 +5,7 @@ import { ThemeScope } from '@openpane/ui-primitives/desktop';
 import type { UiClientSnapshot } from '@openpane/contracts';
 import { UiConnection, type UiTransport } from './ui-connection.js';
 import './experience.css';
+import { DisplayTransportContext } from './display-state.js';
 
 const connectionSubscribers = new WeakMap<UiTransport, number>();
 function visibleFrame(): Promise<void> { return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); }
@@ -92,7 +93,7 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
   const applied = transport.localBuiltin ? null : visual;
   return <div className="experience-frame">
     <div className="experience-content" data-openpane-experience={applied?.digest} data-openpane-navigation={applied?.manifest.presentation.navigation}>
-      <UiActionsContext value={{ restore: () => connection.restore() }}><VisualContext value={applied}>{children}</VisualContext></UiActionsContext>
+      <DisplayTransportContext value={connection}><UiActionsContext value={{ restore: () => connection.restore() }}><VisualContext value={applied}>{children}</VisualContext></UiActionsContext></DisplayTransportContext>
     </div>
     {(applied || transport.localBuiltin || notice || transport.diagnostic) && <ThemeScope className="experience-recovery" aria-label="Appearance recovery">
       <button type="button" onClick={() => void connection.restore()}>Restore OpenPane appearance</button>

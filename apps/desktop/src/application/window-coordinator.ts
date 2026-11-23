@@ -21,8 +21,8 @@ export class WindowCoordinator implements PlacementPort {
   private presentation: ExperienceV1['presentation'] = { navigation: 'rail', chats: 'inline', chatWindow: DEFAULT_WINDOW };
   private track: (reservation: NativeReservation, binding: EditorBinding) => Promise<void> = async () => {};
   trackPlacement(handler: (reservation: NativeReservation, binding: EditorBinding) => Promise<void>): void { this.track = handler; }
-  private notice: (result: ConversationOpenResult) => void = () => {};
-  observeIntent(handler: (result: ConversationOpenResult) => void): void { this.notice = handler; }
+  private notice: (result: ConversationOpenResult, requestId: string) => void = () => {};
+  observeIntent(handler: (result: ConversationOpenResult, requestId: string) => void): void { this.notice = handler; }
   private capture: (requestId: string) => Promise<boolean> = async () => false;
   captureCarry(handler: (requestId: string) => Promise<boolean>): void { this.capture = handler; }
   private readonly browserLabel: () => string;
@@ -32,14 +32,20 @@ export class WindowCoordinator implements PlacementPort {
   setPresentation(value: ExperienceV1['presentation'] | null): void {
     this.presentation = value ?? { navigation: 'rail', chats: 'inline', chatWindow: DEFAULT_WINDOW };
   }
+  async restoresInline(scope: ConversationScope): Promise<boolean> {
+    if (this.port?.context.role !== 'main' || !this.port.context.liveRelay) return true;
+    if (this.presentation.chats === 'separate' || (await this.lookup(scope)).live) return false;
+    const { binding } = await BrowserViewStorage.locateEditor(scope);
+    return binding?.kind !== 'handoff-reserved' || binding.targetLabel === this.port.context.label;
+  }
   delegateCreate = async (agentId: string, carry: boolean): Promise<ConversationOpenResult | null> => {
     if (this.port?.context.role !== 'chat') return null;
     return this.intent({ kind: 'create', agentId, carry }, null);
   };
   private async intent(action: NativePlacementIntent['action'], scope: ConversationScope | null): Promise<Exclude<ConversationOpenResult, { readonly kind: 'inline' }>> {
     if (!this.port) return { kind: 'refused', reason: 'Native placement is unavailable.' };
+    const requestId = crypto.randomUUID();
     try {
-      const requestId = crypto.randomUUID();
       const canonical = { ...action, carry: action.carry ? await this.capture(requestId) : false };
       const intent = record(await this.port.request({ kind: 'placement-intent', requestId, action: canonical }));
       if (intent.result !== null && intent.result !== undefined) {
@@ -47,8 +53,8 @@ export class WindowCoordinator implements PlacementPort {
         return result.kind === 'inline' ? { kind: 'detached', scope: result.scope, label: 'main' } : result;
       }
       const target = intent.target === null ? null : parseNativeReservation(intent.target);
-      const pending = { kind: 'pending', scope: target?.scope ?? scope, reason: 'Main is coordinating the requested chat.' } as const; this.notice(pending); return pending;
-    } catch (error) { const result = { kind: 'refused', reason: error instanceof Error ? error.message : String(error) } as const; this.notice(result); return result; }
+      const pending = { kind: 'pending', scope: target?.scope ?? scope, reason: 'Main is coordinating the requested chat.' } as const; this.notice(pending, requestId); return pending;
+    } catch (error) { const result = { kind: 'refused', reason: error instanceof Error ? error.message : String(error) } as const; this.notice(result, requestId); return result; }
   }
   private geometry(request: Request): object {
     const policy = this.presentation.chatWindow;

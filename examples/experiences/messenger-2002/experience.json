@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "id": "messenger-2002",
+  "label": "Messenger 2002",
+  "theme": {
+    "mode": "system",
+    "light": {
+      "colors": {
+        "canvas": "#d4d0c8",
+        "surface": "#ffffff",
+        "raised": "#e6e3dc",
+        "text": "#161616",
+        "muted": "#484848",
+        "border": "#8a8780",
+        "controlBorder": "#777777",
+        "accent": "#153b7a",
+        "onAccent": "#ffffff",
+        "danger": "#9a1717",
+        "onDanger": "#ffffff",
+        "focus": "#084caa"
+      },
+      "chart": {
+        "background": "#ffffff",
+        "grid": "#c4c4c4",
+        "axis": "#484848",
+        "trace1": "#153b7a",
+        "trace2": "#823b77",
+        "trace3": "#236533",
+        "trace4": "#9a1717"
+      },
+      "fonts": {
+        "body": "Tahoma, Verdana, sans-serif",
+        "code": "Monaco, Consolas, monospace"
+      },
+      "spacing": {
+        "xs": 4,
+        "sm": 6,
+        "md": 10,
+        "lg": 14,
+        "xl": 20,
+        "xxl": 28
+      },
+      "radius": {
+        "control": 0,
+        "panel": 0
+      },
+      "typography": {
+        "body": {
+          "size": 12,
+          "lineHeight": 1.4
+        },
+        "label": {
+          "size": 11
+        },
+        "title": {
+          "size": 16
+        }
+      },
+      "treatments": {
+        "borderWidth": 2,
+        "shadow": "bevel"
+      }
+    },
+    "dark": {
+      "colors": {
+        "canvas": "#252b36",
+        "surface": "#161b23",
+        "raised": "#343c49",
+        "text": "#edf1f6",
+        "muted": "#c0c7d1",
+        "border": "#788290",
+        "controlBorder": "#8993a1",
+        "accent": "#3268b0",
+        "onAccent": "#ffffff",
+        "danger": "#f69696",
+        "onDanger": "#171717",
+        "focus": "#9bc8ff"
+      },
+      "chart": {
+        "background": "#161b23",
+        "grid": "#4d5867",
+        "axis": "#c0c7d1",
+        "trace1": "#9bc8ff",
+        "trace2": "#e5b0e2",
+        "trace3": "#a4d9ae",
+        "trace4": "#f69696"
+      },
+      "fonts": {
+        "body": "Tahoma, Verdana, sans-serif",
+        "code": "Monaco, Consolas, monospace"
+      },
+      "spacing": {
+        "xs": 4,
+        "sm": 6,
+        "md": 10,
+        "lg": 14,
+        "xl": 20,
+        "xxl": 28
+      },
+      "radius": {
+        "control": 0,
+        "panel": 0
+      },
+      "typography": {
+        "body": {
+          "size": 12,
+          "lineHeight": 1.4
+        },
+        "label": {
+          "size": 11
+        },
+        "title": {
+          "size": 16
+        }
+      },
+      "treatments": {
+        "borderWidth": 2,
+        "shadow": "bevel"
+      }
+    }
+  },
+  "presentation": {
+    "navigation": "pages",
+    "chats": "separate",
+    "chatWindow": {
+      "width": 640,
+      "height": 720,
+      "titlebar": "native",
+      "title": "agent-and-conversation"
+    }
+  },
+  "stylesheet": "style.css",
+  "assets": [
+    {
+      "name": "style.css",
+      "mimeType": "text/css",
+      "bytes": 2245,
+      "sha256": "f9ad3af845e8e3722c206d05fce4c97710076469bd5588502debd43f9040e9e0"
+    }
+  ]
+}

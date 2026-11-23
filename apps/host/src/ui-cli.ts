@@ -4,6 +4,7 @@ import { count, record } from '@openpane/contracts/decode';
 import { readExperienceDirectory } from './experience-bundle.js';
 import { requestUi } from './ui-control.js';
 import { UI_FRAME_BYTES } from './ui-protocol.js';
+import { runDisplayCli } from './ui-display-cli.js';
 
 async function stdin(): Promise<unknown> {
   const chunks: Buffer[] = []; let bytes = 0;
@@ -13,13 +14,16 @@ async function stdin(): Promise<unknown> {
     if (bytes > UI_FRAME_BYTES) throw new Error('UI stdin exceeds byte limit');
     chunks.push(buffer);
   }
-  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
+  try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))); }
+  catch { throw new Error('UI stdin must contain valid UTF-8 JSON'); }
 }
 export async function runUiCli(args: readonly string[]): Promise<void> {
   const { values, positionals } = parseArgs({ args: [...args], allowPositionals: true, options: {
     'data-dir': { type: 'string' }, 'request-id': { type: 'string' }, 'expected-revision': { type: 'string' },
     'expected-recovery-generation': { type: 'string' }, 'expected-epoch': { type: 'string' }, directory: { type: 'string' }, stdin: { type: 'boolean' },
     builtin: { type: 'boolean' }, after: { type: 'string' }, keep: { type: 'string' }, 'wait-ms': { type: 'string' },
+    'scope-json': { type: 'string' }, 'publication-id': { type: 'string' }, query: { type: 'string' }, title: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, pup: { type: 'string' },
+    'expected-attempt': { type: 'string' }, 'cursor-json': { type: 'string' }, 'subscription-id': { type: 'string' },
   } });
   if (!values['data-dir']) throw new Error('Provide --data-dir for the running host');
   const socket = join(resolve(values['data-dir']), 'ui.sock');
@@ -33,10 +37,14 @@ export async function runUiCli(args: readonly string[]): Promise<void> {
     context: [], targets: ['after'], 'experience schema': [], 'experience apply': ['request-id', 'expected-revision', 'directory', 'stdin'],
     'experience refresh': ['request-id', 'expected-revision'], 'experience restore': ['request-id', 'expected-revision', 'expected-recovery-generation', 'builtin'],
     'experience prune': ['request-id', 'keep'], 'maintenance compact': ['expected-epoch'], status: ['request-id'], wait: ['request-id', 'wait-ms'],
+    'display schema': [], 'display publish': ['scope-json', 'publication-id', 'stdin'], 'display status': ['scope-json', 'publication-id'],
+    'display remove': ['scope-json', 'publication-id', 'request-id'], 'display retry': ['scope-json', 'publication-id', 'expected-attempt'],
+    'display list': ['scope-json', 'after', 'cursor-json', 'subscription-id'], 'display datadog': ['scope-json', 'publication-id', 'query', 'title', 'from', 'to', 'pup'],
   };
   const commandName = `${category ?? ''} ${action ?? ''}`.trim();
   const allowed = Object.hasOwn(commandFlags, commandName) ? commandFlags[commandName] : undefined;
   if (!allowed || Object.keys(values).some(key => key !== 'data-dir' && !allowed.includes(key))) throw new Error('Unsupported UI command or flag');
+  if (category === 'display') { process.stdout.write(JSON.stringify(await runDisplayCli(action, socket, values, stdin)) + '\n'); return; }
   const expectedRevision = () => integer(values['expected-revision']);
   const requestId = () => { if (!values['request-id']) throw new Error('Provide --request-id from ui context'); return values['request-id']; };
   let request: unknown;

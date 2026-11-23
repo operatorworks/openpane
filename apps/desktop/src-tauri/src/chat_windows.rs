@@ -19,6 +19,7 @@ struct Document {
     view_id: String,
     visible: bool,
     presence_sequence: u64,
+    display: Option<Value>,
     ready: bool,
 }
 struct Broker {
@@ -260,6 +261,7 @@ impl ChatWindows {
                             view_id,
                             visible: true,
                             presence_sequence: 0,
+                            display: None,
                             ready: label == "main",
                         },
                     );
@@ -545,9 +547,11 @@ impl ChatWindows {
         }
     }
 }
-fn child_ui_state(snapshot: Option<&Value>, envelope: Option<&Value>) -> Option<Value> {
+fn child_ui_state(snapshot: Option<&Value>, child: Option<&Value>) -> Option<Value> {
     let mut scoped = snapshot?.clone();
-    scoped["envelope"] = envelope?.clone();
+    let child = child?;
+    scoped["envelope"] = child["envelope"].clone();
+    scoped["display"] = child["display"].clone();
     scoped["transitions"] = json!([]);
     Some(scoped)
 }
@@ -556,11 +560,15 @@ mod ui_tests {
     use super::*;
     #[test]
     fn a_child_never_falls_back_to_main_receipts_or_other_transition_scopes() {
-        let common = json!({"version":1,"envelope":{"requestId":"main-only"},"transitions":[{"foreignScope":"other"}],"selection":{"revision":4}});
+        let common = json!({"version":1,"envelope":{"requestId":"main-only"},"display":{"scope":"main-only"},"transitions":[{"foreignScope":"other"}],"selection":{"revision":4}});
         assert_eq!(child_ui_state(Some(&common), None), None);
-        let scoped =
-            child_ui_state(Some(&common), Some(&json!({"requestId":"child-only"}))).unwrap();
+        let scoped = child_ui_state(
+            Some(&common),
+            Some(&json!({"envelope":{"requestId":"child-only"},"display":{"scope":"child-only"}})),
+        )
+        .unwrap();
         assert_eq!(scoped["envelope"]["requestId"], "child-only");
+        assert_eq!(scoped["display"]["scope"], "child-only");
         assert_eq!(scoped["transitions"], json!([]));
         assert_eq!(scoped["selection"], common["selection"]);
         assert_eq!(

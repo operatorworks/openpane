@@ -10,6 +10,6 @@ async function main(): Promise<void> {
 }
 void main().catch(error => {
   const message = error instanceof Error ? error.message : 'Host operation failed';
-  process.stderr.write((process.argv[2] === 'ui' ? JSON.stringify({ ok: false, error: message }) : message) + '\n');
+  process.stderr.write((process.argv[2] === 'ui' ? JSON.stringify({ ok: false, error: message.slice(0, 500) }) : message) + '\n');
   process.exitCode = 1;
 });

@@ -130,6 +130,7 @@ export interface ApplicationController {
   /** Native allocation has already persisted this scope and agent. */
   createReserved(scope: ConversationScope, agentId: string): Promise<ConversationOpenResult>;
   openReserved(scope: ConversationScope): Promise<ConversationOpenResult>;
+  settlePlacement(expected: Extract<ConversationOpenResult, { readonly kind: 'pending' }>, result: Exclude<ConversationOpenResult, { readonly kind: 'pending' }>): boolean;
   inspectConversation(scope: ConversationScope): Promise<{ readonly agent: AgentDescriptor | null; readonly continuation: ContinuationView }>;
   recoverCreation(agentId?: string): Promise<void>;
   open(scope: ConversationScope): Promise<ConversationOpenResult>;
@@ -703,7 +704,8 @@ export function createApplicationController(deps: {
       owner.view = { borrow, saved, hostId: metadata.hostId };
       publish({ host: { kind: 'ready', metadata } });
       const { hostId } = metadata;
-      if (saved.route && storage.viewId === deps.ownedViewStorage.catalogViewId) {
+      if (saved.route && storage.viewId === deps.ownedViewStorage.catalogViewId &&
+        await current(owner, deps.placement?.restoresInline?.(saved.route) ?? Promise.resolve(true))) {
         const editor = await current(owner, deps.ownedViewStorage.locate?.(saved.route) ?? Promise.resolve(null));
         if (editor && editor !== storage.viewId) { await acquire(owner, editor); await refresh(owner); return; }
       }
@@ -875,6 +877,10 @@ export function createApplicationController(deps: {
       if (result.kind === 'inline') await save(owner, { ...requireSaved(owner).saved, route: scope });
       return result;
     }),
+    settlePlacement(expected, result) {
+      if (!session || state.lastPlacement !== expected) return false;
+      publish({ lastPlacement: result }); return true;
+    },
     async inspectConversation(scope) {
       const owner = session;
       if (!owner || requireHost(owner).hostId !== scope.hostId) throw new Error('Conversation belongs to another host.');

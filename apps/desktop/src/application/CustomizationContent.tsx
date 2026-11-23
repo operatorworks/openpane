@@ -5,13 +5,15 @@ import { Suspense, type ReactNode } from 'react';
 import type { ConversationContentLayoutProps } from '@openpane/sdk/react';
 import { CustomizationBoundary, type ContentLayoutSelection } from './DesktopCustomizations.js';
 
-export function CustomizationContent({ contentPalette = palettes, selection, conversationKey, transcript, nativeTranscript, modules, before = null }: ConversationContentLayoutProps & {
+export function CustomizationContent({ contentPalette = palettes, selection, conversationKey, transcript, nativeTranscript, modules, before = null, after = null }: ConversationContentLayoutProps & {
   readonly contentPalette?: Readonly<Record<Appearance, ThemeColors>>;
   readonly selection: ContentLayoutSelection;
   readonly conversationKey: string;
   readonly nativeTranscript: ReactNode;
   /** Shown first inside the same scroll area, outside any claimed layout. */
   readonly before?: ReactNode;
+  /** App-owned cards remain outside all replaceable content. */
+  readonly after?: ReactNode;
 }) {
   const fallback = <>{transcript}{modules}</>;
   let content = fallback;
@@ -27,5 +29,5 @@ export function CustomizationContent({ contentPalette = palettes, selection, con
       </CustomizationBoundary>
     </Suspense>;
   }
-  return <ThemeScope className="conversation-content" palette={contentPalette}>{before}{content}</ThemeScope>;
+  return <ThemeScope className="conversation-content" palette={contentPalette}>{before}{content}{after}</ThemeScope>;
 }

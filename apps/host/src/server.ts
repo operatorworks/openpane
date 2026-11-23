@@ -274,7 +274,7 @@ export async function startBrowserHost(options: BrowserHostOptions) {
               if (startup.kind === 'desktop') await promisify(execFile)(provider.executable ?? 'codex', ['login', 'status'], { timeout: 5000, maxBuffer: 4096, env });
               const codex = createCodexDriver({ cwd: provider.cwd, version: CODEX_RUNTIME.version,
                 ...(provider.executable ? { executable: provider.executable } : {}), env, append, readImage,
-                ...(uiCli ? { uiContext: (scope: ConversationScope) => `<openpane-ui version="1">\nThis host provides a UI CLI. argvPrefix: ${JSON.stringify([uiCli.node, uiCli.entry, 'ui', '--data-dir', uiCli.directory])}\nConversationScope: ${canonicalJson(scope)}\nAppend context or experience schema to argvPrefix to discover the contract. Author visual data in the user-requested workspace and apply through this CLI, with existing approvals. Publish display data only to this exact scope. Keep provider credentials out of UI data.\n</openpane-ui>` } : {}) });
+                ...(uiCli ? { uiContext: (scope: ConversationScope) => `<openpane-ui version="1">\nThis host provides a UI CLI. argvPrefix: ${JSON.stringify([uiCli.node, uiCli.entry, 'ui', '--data-dir', uiCli.directory])}\nConversationScope: ${canonicalJson(scope)}\nAppend context, experience schema, display schema or targets to argvPrefix to discover the contract. Author visual data in the user-requested workspace and apply through this CLI, with existing approvals. Publish display data only to this exact scope. Keep provider credentials out of UI data.\n</openpane-ui>` } : {}) });
               driver = codex;
               break;
             }
@@ -303,7 +303,7 @@ export async function startBrowserHost(options: BrowserHostOptions) {
       if (!host) throw new Error('Conversation catalog unavailable');
       const scopes = host.listConversations(hostId, after, 50, { everySegment: true });
       return { items: scopes.map(scope => ({ scope, label: scope.conversationId })), after: scopes.length === 50 ? scopes.at(-1)?.conversationId ?? null : null };
-    }); }
+    }, scope => host?.installation(scope) != null); }
     catch { uiFault = 'UI database unavailable; repair ui.sqlite without deleting conversation data. Builtin appearance remains available.'; }
     const readyHost = startup.kind === 'recorded'
       ? openRecordedHost({ path: join(owner.directory, 'host.sqlite'), backendPath: join(owner.directory, 'recorded.jsonl'),
@@ -364,12 +364,12 @@ export async function startBrowserHost(options: BrowserHostOptions) {
     if (!address || typeof address === 'string') throw new Error('Invalid host address');
     const origin = `http://127.0.0.1:${address.port}`;
     control = await startControl(join(owner.directory, 'control.sock'), isClosing, selectionControl, providers.discover, refresh);
-    uiControl = await startUiControl(join(owner.directory, 'ui.sock'), async request => {
+    uiControl = await startUiControl(join(owner.directory, 'ui.sock'), async (request, session) => {
       const startTime = performance.timeOrigin + performance.now(); let outcome: 'ok' | 'unavailable' = 'ok';
-      try { if (closing) throw new UiRefusal('unavailable', 'UI service is shutting down'); if (!uiStore) throw new UiRefusal('unavailable', uiFault ?? 'UI database unavailable'); return await uiStore.execute(request); }
+      try { if (closing) throw new UiRefusal('unavailable', 'UI service is shutting down'); if (!uiStore) throw new UiRefusal('unavailable', uiFault ?? 'UI database unavailable'); return await uiStore.execute(request, session); }
       catch (error) { outcome = 'unavailable'; throw error; }
       finally { observability.record({ operation: 'ui', client: 'local-ui', outcome, startTime, statusCode: null }); }
-    });
+    }, { disconnected: owner => uiStore?.endUiSession(owner) });
     return { origin, hostId, close, fatal, discoverProviders: providers.discover,
       extensionStatus: providers.status, callOperation: providers.callOperation,
       async replaceProviderExtensions(selected: readonly BrowserProviderExtension[]) {

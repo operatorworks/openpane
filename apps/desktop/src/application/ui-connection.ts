@@ -1,8 +1,10 @@
 import { parseUiClientSnapshot, parseUiContext, parseApplyReceipt } from '@openpane/contracts';
-import type { DeliveryEnvelope, NativePlacementTarget, PlacementTransition, UiClientSnapshot, UiContextV1, WindowContext } from '@openpane/contracts';
+import type { ConversationScope, DeliveryEnvelope, NativePlacementTarget, PlacementTransition, UiClientSnapshot, UiContextV1, WindowContext } from '@openpane/contracts';
 import { record } from '@openpane/contracts/decode';
 import { parseUiRecovery, reserveRecovery, UI_RECOVERY_KEY } from './ui-recovery.js';
 import type { UiRecovery } from './ui-recovery.js';
+import { DisplayClient, NO_DISPLAY } from './display-client.js';
+import type { DisplayView } from './display-client.js';
 
 class UiServiceError extends Error { constructor(readonly code: string, message: string) { super(message); } }
 
@@ -14,19 +16,24 @@ export interface UiTransport {
   failed(state: UiClientSnapshot, reason: string): Promise<void>;
   restore(): Promise<void>;
   close(): void;
+  selectScope(scope: ConversationScope | null): void;
+  refreshCards(): void;
 }
 export interface NativeUiRelayPort {
-  publish(snapshot: UiClientSnapshot, main: WindowContext, post: (request: unknown) => Promise<unknown>): Promise<void>;
+  publish(snapshot: UiClientSnapshot, main: WindowContext, post: (request: unknown) => Promise<unknown>): Promise<boolean>;
   close(): void;
 }
-export const noChildUiRelay: NativeUiRelayPort = { async publish() {}, close() {} };
+export const noChildUiRelay: NativeUiRelayPort = { async publish() { return false; }, close() {} };
 export interface UiConnectionSnapshot {
   readonly state: UiClientSnapshot | null;
   readonly diagnostic: string | null;
   readonly localBuiltin: boolean;
+  readonly cards: DisplayView;
 }
 export class UiConnection {
-  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false };
+  private snapshot: UiConnectionSnapshot = { state: null, diagnostic: null, localBuiltin: false, cards: NO_DISPLAY };
+  private readonly cards = new DisplayClient();
+  private relayPaging = false;
   private readonly listeners = new Set<() => void>();
   private readonly abort = new AbortController();
   private context: UiContextV1 | null = null;
@@ -61,12 +68,15 @@ export class UiConnection {
     if (this.started) return; this.started = true;
     void this.readLoop();
   }
+  selectScope(scope: ConversationScope | null): void { if (this.cards.select(scope)) this.update({ cards: this.cards.getSnapshot() }); }
+  refreshCards(): void { if (this.cards.refresh()) this.update({ cards: this.cards.getSnapshot() }); }
   private async readLoop(): Promise<void> {
     let delay = 300;
     while (!this.abort.signal.aborted) {
       try {
         if (!this.context || !this.window) {
           this.context = parseUiContext(await this.post({ op: 'context' })); this.lastContext = this.context;
+          if (this.cards.profile(this.context.profileId, this.context.hostId)) this.update({ cards: this.cards.getSnapshot() });
           if (!this.window || this.window.hostId !== this.context.hostId || this.window.profileId !== this.context.profileId) {
           this.window = this.identify ? await this.identify(this.context) : { role: 'main', profileId: this.context.profileId, hostId: this.context.hostId,
             brokerInstance: `browser:${crypto.randomUUID()}`, label: 'browser', documentIncarnation: crypto.randomUUID(), viewId: crypto.randomUUID() };
@@ -75,12 +85,13 @@ export class UiConnection {
         }
         if (this.recovery?.kind === 'reserved') await this.finishRecovery();
         const state = parseUiClientSnapshot(await this.post({ op: 'state', context: this.window, presenceSequence: ++this.sequence,
-          visible: document.visibilityState === 'visible', nativePlacement: this.nativePlacement, after: this.snapshot.state?.change ?? null, waitMs: 2000 }));
+          visible: document.visibilityState === 'visible', nativePlacement: this.nativePlacement, display: this.cards.subscription(), after: this.snapshot.state?.change ?? null, waitMs: this.cards.needsPaging() || this.relayPaging ? 50 : 2000 }));
         if (this.context) this.lastContext = { ...this.context, revision: state.selection.revision, selection: state.selection };
         if (!this.recovery && (state.selection.selected.kind === 'builtin' || this.recoveryFloor !== null && state.selection.deliveryGeneration >= this.recoveryFloor)) this.update({ localBuiltin: false });
         const recoveryNotice = this.recovery?.kind === 'conflicted' ? this.recovery.reason : this.recovery?.kind === 'needs-context' ? 'Builtin appearance is local. Retry restore when connected to save it.' : null;
-        this.update({ state, diagnostic: state.fault ?? recoveryNotice });
-        await this.relay.publish(state, this.window, request => this.post(request));
+        this.cards.accept(state.display);
+        this.update({ state, cards: this.cards.getSnapshot(), diagnostic: state.fault ?? recoveryNotice });
+        this.relayPaging = await this.relay.publish(state, this.window, request => this.post(request));
         if (this.painted?.selection.deliveryGeneration === state.selection.deliveryGeneration && document.visibilityState === 'visible' && !this.snapshot.localBuiltin) await this.reportPaint(state).catch(() => {});
         delay = 300;
       } catch (error) {

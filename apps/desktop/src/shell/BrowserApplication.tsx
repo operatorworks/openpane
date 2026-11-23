@@ -1,4 +1,5 @@
 import { useExperience, useUiActions } from '../application/experience-state.js';
+import { useDisplayScope } from '../application/display-state.js';
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { DesktopShell } from './Shell.js';
@@ -83,6 +84,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   readonly placementNotice?: string | null;
 }) {
   const { controller, snapshot: app } = useApplication(supplied, managedLifecycle);
+  useDisplayScope(catalogOnly ? null : app.active?.scope ?? null);
   // The new-conversation composer's text, and whether it is opening a conversation. While it opens, the new-conversation
   // screen stays up; the conversation replaces it in one step once its first message is on its way.
   const [launchText, setLaunchText] = useState('');
@@ -309,7 +311,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     </button>
   </nav>;
   if (personalization.readiness === 'loading') return <ThemeScope><p role="status">Loading local preferences…</p></ThemeScope>;
-  if (fixedChat) return <ThemeScope palette={contentPalette} className="application-chat-window" data-openpane-part="main">
+  if (fixedChat) return <ThemeScope variants={experience?.manifest.theme} appearance={experience?.manifest.theme.mode === 'system' ? undefined : experience?.manifest.theme.mode} palette={contentPalette} className="application-chat-window" data-openpane-part="main">
     <header className="application-chat-header" data-openpane-part="page-header"><h1>{app.active?.agent.label ?? 'Opening chat'}</h1>
       <button type="button" data-openpane-essential="new-chat" disabled={!enabled || !app.active} onClick={() => void controller.create(app.active?.agent.id)}>New chat</button>
     </header>

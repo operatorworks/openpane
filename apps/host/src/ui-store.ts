@@ -2,11 +2,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { chmodSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { ApplyReceipt, NativePlacementTarget, UiClientSnapshot, ExperienceBundle, UiAppearance, UiSelection, WindowContext } from '@openpane/contracts';
-import { canonicalJson, experienceSchema, parseUiAppearance, parseUiSelection, parseApplyReceipt } from '@openpane/contracts';
+import { canonicalJson, experienceSchema, parseUiAppearance, parseUiSelection, parseApplyReceipt, DISPLAY_PAGE_LIMITS } from '@openpane/contracts';
 import { count, identifier, record } from '@openpane/contracts/decode';
 import { EXPERIENCE_PARTS, parseExperienceBundle, sha256 } from './experience-bundle.js';
 import { UiRefusal } from './ui-protocol.js';
 import type { UiRequest } from './ui-protocol.js';
+import { UiDisplayStore } from './ui-display-store.js';
+import type { ConversationScope, DisplayDelivery, DeliveryEnvelope, DisplaySubscription } from '@openpane/contracts';
 
 const MAX_BUNDLES = 16, MAX_BUNDLE_BYTES = 32 * 1024 * 1024, MAX_RECEIPTS = 4096, MAX_METADATA_BYTES = 32 * 1024 * 1024;
 const PRESENCE_MS = 15000;
@@ -48,13 +50,15 @@ export function receiptStatus(receipt: ApplyReceipt): string {
 }
 export class UiStore {
   private readonly db: DatabaseSync;
+  private readonly display: UiDisplayStore;
   private state: StoreState;
   private readonly sessions = new Map<string, Session>();
+  private readonly relayPositions = new Map<string, number>();
   private readonly listeners = new Set<() => void>();
   private change = 0;
   private closed = false;
   readonly recoveryReason: string | null;
-  constructor(path: string, readonly hostId: string, private readonly targets: (after: string | null) => unknown = () => { throw new UiRefusal('unavailable', 'Conversation catalog unavailable'); }) {
+  constructor(path: string, readonly hostId: string, private readonly targets: (after: string | null) => unknown = () => { throw new UiRefusal('unavailable', 'Conversation catalog unavailable'); }, checkScope: (scope: ConversationScope) => boolean = () => false) {
     this.db = new DatabaseSync(path);
     try {
       chmodSync(path, 0o600);
@@ -66,6 +70,8 @@ export class UiStore {
         CREATE INDEX IF NOT EXISTS ui_receipts_generation ON ui_receipts(generation);`);
       const row = this.db.prepare('SELECT value FROM ui_state WHERE id=1').get();
       this.state = row ? parseState(JSON.parse(text(row.value))) : initial();
+      this.display = new UiDisplayStore({ db: this.db, hostId, epoch: () => this.state.epoch, checkScope,
+        transaction: run => this.transaction(run), capacity: (bytes, entries) => this.capacity(bytes, entries), notify: () => this.notify() });
       this.recoveryReason = this.validateSelection();
       this.transaction(() => {
         for (const row of this.db.prepare('SELECT id,result FROM ui_receipts').all()) {
@@ -101,7 +107,7 @@ export class UiStore {
   private notify(): void { this.change = next(this.change); for (const listener of this.listeners) listener(); }
   context(): object {
     return { version: 1, hostId: this.hostId, profileId: this.state.profileId, requestEpoch: this.state.epoch, recoveryGeneration: this.state.recoveryGeneration,
-      revision: this.state.selection.revision, selection: this.state.selection, capabilities: ['experiences-v1'], fault: this.recoveryReason };
+      revision: this.state.selection.revision, selection: this.state.selection, capabilities: ['experiences-v1', 'display-v1'], fault: this.recoveryReason };
   }
   bundle(digest: string): ExperienceBundle {
     const row = this.db.prepare('SELECT value FROM ui_bundles WHERE digest=?').get(digest);
@@ -142,9 +148,12 @@ export class UiStore {
     return values;
   }
   private receiptBytes(receipt: ApplyReceipt): number { return Buffer.byteLength(canonicalJson(receipt)) + receipt.participants.reduce((bytes, participant) => bytes + (participant.slot.kind === 'transition' ? 16384 : 4096), 0); }
-  private capacity(reservedBytes = 0): void {
-    const row = this.db.prepare('SELECT count(*) AS count, coalesce(sum(bytes),0) AS bytes FROM (SELECT reserved_bytes AS bytes FROM ui_receipts UNION ALL SELECT length(CAST(result AS BLOB)) AS bytes FROM ui_operations)').get();
-    if (!row || count(row.count) >= MAX_RECEIPTS || count(row.bytes) + reservedBytes > MAX_METADATA_BYTES) throw new UiRefusal('capacity', 'UI receipt capacity reached; run maintenance compact');
+  private capacity(reservedBytes = 0, entries = 1): void {
+    const row = this.db.prepare(`SELECT coalesce(sum(entries),0) AS count,coalesce(sum(bytes),0) AS bytes FROM (
+      SELECT 1 AS entries,reserved_bytes AS bytes FROM ui_receipts UNION ALL SELECT 1,length(CAST(result AS BLOB)) FROM ui_operations
+      UNION ALL SELECT 1+CASE WHEN reserved_event_bytes>0 THEN 1 ELSE 0 END,metadata_bytes+reserved_event_bytes FROM ui_display_keys
+      UNION ALL SELECT 1,bytes FROM ui_display_events UNION ALL SELECT 1,bytes FROM ui_display_removals)`).get();
+    if (!row || count(row.count) + entries > MAX_RECEIPTS || count(row.bytes) + reservedBytes > MAX_METADATA_BYTES) throw new UiRefusal('capacity', 'UI receipt capacity reached; run maintenance compact');
   }
   private select(request: Extract<UiRequest, { op: 'apply' | 'refresh' | 'restore' }>): ApplyReceipt {
     const requestDigest = sha256(canonicalJson(request));
@@ -210,7 +219,7 @@ export class UiStore {
     if (current) this.sessions.set(session, { ...current, initialized: true, digest: current.initialized ? current.digest : digestOf(selected), stagedDigest: digestOf(selected) });
     const pending = this.receipts().find(receipt => receipt.deliveryGeneration === this.state.selection.deliveryGeneration && receipt.participants.some(participant => (participantSession(participant.slot) === session || participant.slot.kind === 'transition' && participant.slot.resolved === null && participant.slot.source.documentIncarnation === session) && participant.visual.kind === 'pending'));
     return { version: 1, change: this.change, selection: this.state.selection, bundle: selected.kind === 'builtin' ? null : { manifest: this.bundle(selected.digest).manifest, digest: selected.digest },
-      envelope: pending ? { requestId: pending.requestId, deliveryGeneration: pending.deliveryGeneration, selectionRevision: pending.selectionRevision, digest: pending.digest } : null, fault: this.recoveryReason,
+      envelope: pending ? { requestId: pending.requestId, deliveryGeneration: pending.deliveryGeneration, selectionRevision: pending.selectionRevision, digest: pending.digest } : null, fault: this.recoveryReason, display: null,
       transitions: this.receipts().flatMap(receipt => receipt.participants.flatMap(participant => participant.slot.kind === 'transition' && participant.slot.source.documentIncarnation === session && participant.placement.kind === 'pending'
         ? [{ envelope: { requestId: receipt.requestId, deliveryGeneration: receipt.deliveryGeneration, selectionRevision: receipt.selectionRevision, digest: receipt.digest }, slot: participant.slot }] : [])) };
   }
@@ -261,7 +270,47 @@ export class UiStore {
       if (changed) this.writeReceipt({ ...receipt, participants });
     }
   }
-  async execute(request: UiRequest): Promise<unknown> {
+  endUiSession(owner: string): void { this.display.interrupt(owner); }
+  readDisplay(subscription: DisplaySubscription, options?: { readonly items?: number; readonly bytes?: number }) { return this.display.read(subscription, options); }
+  private displayDelivery(subscription: DisplaySubscription | null | undefined, options?: { readonly items?: number; readonly bytes?: number }): DisplayDelivery | null {
+    if (!subscription) return null;
+    try { const page = this.display.read(subscription, options); return page === null ? null : { kind: 'page', page }; }
+    catch { return { kind: 'unavailable', scope: subscription.scope, subscriptionId: subscription.subscriptionId, from: subscription.cursor, reason: 'Card data is unavailable. Refresh cards, or repair the affected UI data.' }; }
+  }
+  private relay(request: Extract<UiRequest, { readonly op: 'relay' }>): object {
+    const pairs = this.transaction(() => {
+      this.expire();
+      const main = this.sessions.get(request.main.documentIncarnation);
+      if (!main || canonicalJson(main.context) !== canonicalJson(request.main) || main.context.role !== 'main') throw new UiRefusal('conflict', 'Unregistered native main relay');
+      for (const id of request.departed) {
+        const child = this.sessions.get(id);
+        if (!child) continue;
+        if (child.context.role !== 'chat' || child.context.brokerInstance !== request.main.brokerInstance) throw new UiRefusal('conflict', 'Foreign relay departure');
+        this.depart(id); this.sessions.delete(id);
+      }
+      for (const child of request.children) { this.present({ op: 'state', ...child, after: null, waitMs: 0 }); if (child.placement) this.childReady(child.context, child.placement); }
+      return request.children.map(child => {
+        const reply: { incarnation: string; envelope: DeliveryEnvelope | null; display: DisplayDelivery | null } = { incarnation: child.context.documentIncarnation, envelope: this.snapshot(child.context.documentIncarnation).envelope, display: null };
+        return { child, reply };
+      });
+    });
+    for (const id of this.relayPositions.keys()) if (!this.sessions.has(id)) this.relayPositions.delete(id);
+    const position = pairs.length ? (this.relayPositions.get(request.main.documentIncarnation) ?? 0) % pairs.length : 0;
+    const response = { children: pairs.map(pair => pair.reply) }; let remaining = DISPLAY_PAGE_LIMITS.items;
+    for (const pair of [...pairs.slice(position), ...pairs.slice(0, position)]) {
+      if (!pair.child.visible || !pair.child.display) continue;
+      const available = DISPLAY_PAGE_LIMITS.bytes - Buffer.byteLength(canonicalJson({ ok: true, value: response })) - 64;
+      if (remaining < 1 || available < 256) break;
+      const delivery = this.displayDelivery(pair.child.display, { items: remaining, bytes: available });
+      if (!delivery) continue;
+      pair.reply.display = delivery;
+      if (Buffer.byteLength(canonicalJson({ ok: true, value: response })) > DISPLAY_PAGE_LIMITS.bytes) { pair.reply.display = null; continue; }
+      if (delivery.kind === 'page') remaining -= delivery.page.kind === 'snapshot' ? delivery.page.publications.length : delivery.page.kind === 'changes' ? delivery.page.changes.length : 0;
+    }
+    this.relayPositions.set(request.main.documentIncarnation, (position + 1) % Math.max(1, pairs.length));
+    return response;
+  }
+  async execute(request: UiRequest, session?: { readonly owner: string }): Promise<unknown> {
     switch (request.op) {
       case 'context': return this.context();
       case 'placement-reserve': case 'placement-idle': case 'placement-failed': {
@@ -273,11 +322,15 @@ export class UiStore {
         const receipt = this.transaction(() => this.select(request)); this.notify(); return { receipt, outcome: receiptStatus(receipt) };
       }
       case 'status': return this.transaction(() => { this.expire(); return this.status(request.requestId); });
-      case 'compact': return this.transaction(() => {
+      case 'compact': {
+        const result = this.transaction(() => {
         if (request.expectedEpoch !== this.state.epoch) throw new UiRefusal('expired', 'Request epoch already advanced');
+        this.display.compactInTransaction();
         this.db.exec('DELETE FROM ui_receipts; DELETE FROM ui_operations;'); this.state = { ...this.state, epoch: next(this.state.epoch) };
         return { epoch: this.state.epoch, abandoned: 'Unconfirmed visual deliveries are abandoned; no drafts or query attempts are changed' };
-      });
+        });
+        this.display.compacted(); this.notify(); return result;
+      }
       case 'prune': return this.transaction(() => {
         this.checkEpoch(request.requestId);
         const digest = sha256(canonicalJson(request));
@@ -297,29 +350,14 @@ export class UiStore {
         this.db.prepare('INSERT INTO ui_operations VALUES (?,?,?)').run(request.requestId, digest, canonicalJson(result));
         return result;
       });
-      case 'relay': return this.transaction(() => {
-        this.expire();
-        const main = this.sessions.get(request.main.documentIncarnation);
-        if (!main || canonicalJson(main.context) !== canonicalJson(request.main) || main.context.role !== 'main') throw new UiRefusal('conflict', 'Unregistered native main relay');
-        for (const id of request.departed) {
-          const child = this.sessions.get(id);
-          if (!child) continue;
-          if (child.context.role !== 'chat' || child.context.brokerInstance !== request.main.brokerInstance) throw new UiRefusal('conflict', 'Foreign relay departure');
-          this.depart(id); this.sessions.delete(id);
-        }
-        for (const child of request.children) {
-          this.present({ op: 'state', ...child, after: null, waitMs: 0 });
-          if (child.placement) this.childReady(child.context, child.placement);
-        }
-        return { children: request.children.map(child => ({ incarnation: child.context.documentIncarnation, envelope: this.snapshot(child.context.documentIncarnation).envelope })) };
-      });
+      case 'relay': return this.relay(request);
       case 'state': {
         this.transaction(() => { this.expire(); this.present(request); });
         if (request.after === this.change && request.waitMs) await new Promise<void>(resolve => {
           const finish = () => { clearTimeout(timer); this.listeners.delete(finish); resolve(); };
           const timer = setTimeout(finish, request.waitMs); this.listeners.add(finish);
         });
-        return this.snapshot(request.context.documentIncarnation);
+        return { ...this.snapshot(request.context.documentIncarnation), display: this.displayDelivery(request.display) };
       }
       case 'paint': return this.transaction(() => {
         const session = this.sessions.get(request.session), selection = this.state.selection;
@@ -349,7 +387,8 @@ export class UiStore {
         });
         this.notify(); return result;
       }
+      default: return this.display.execute(request, session?.owner ?? null);
     }
   }
-  close(): void { if (this.closed) return; this.notify(); this.closed = true; this.db.close(); }
+  close(): void { if (this.closed) return; try { this.display.close(); } finally { this.notify(); this.closed = true; this.db.close(); } }
 }

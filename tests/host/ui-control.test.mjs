@@ -31,6 +31,8 @@ test('installed UI chunks include runtime CSS validation without importing host 
   assert.equal(context.hostId, host.hostId);
   const schema = await command(installed, ['ui', '--data-dir', host.directory, 'experience', 'schema']);
   assert.equal(schema.code, 0, schema.stderr); assert.equal(JSON.parse(schema.stdout).manifest.type, 'object');
+  const targets = await command(installed, ['ui', '--data-dir', host.directory, 'targets']);
+  assert.equal(targets.code, 0, targets.stderr); assert.ok(Array.isArray(JSON.parse(targets.stdout).items));
   const source = join(directory, 'source'); await mkdir(source);
   const { writeFile } = await import('node:fs/promises');
   const { sha256 } = await import('../../apps/host/build/tsc/experience-bundle.js');

@@ -50,6 +50,7 @@ export class WindowRuntime {
   private historyExtended = false;
   private nativeRecoverySeen = false;
   private policyScope: ConversationScope | null = null;
+  private pendingIntent: { readonly requestId: string; readonly result: Extract<ConversationOpenResult, { readonly kind: 'pending' }> } | null = null;
   private lastPlacement: ConversationOpenResult | null = null;
   constructor(readonly context: DesktopWindowContext) {
     this.port = context.role === 'browser' ? null : new DesktopWindowPort(context);
@@ -108,7 +109,7 @@ export class WindowRuntime {
     }
   }
   private configurePlacementTracking(): void {
-    this.coordinator.observeIntent(result => { this.recoveryDirty = true; this.update({ placementNotice: result.kind === 'pending' || result.kind === 'refused' ? result.reason : null }); });
+    this.coordinator.observeIntent((result, requestId) => { this.pendingIntent = result.kind === 'pending' ? { requestId, result } : null; this.recoveryDirty = true; this.update({ placementNotice: result.kind === 'pending' || result.kind === 'refused' ? result.reason : null }); });
     this.coordinator.captureCarry(async requestId => {
       const active = this.controller.getSnapshot().active, binding = this.childOwner?.editorBinding();
       if (this.context.role !== 'chat' || !active || !binding || active.viewId !== this.childOwner?.viewId || !sameScope(active.scope, this.context.reservation.scope)) throw new Error('The source editor is not ready to carry its draft.');
@@ -280,10 +281,22 @@ export class WindowRuntime {
     const pending = value.pending.map(parseNativePlacementIntent), items = value.items.map(parseNativePlacementIntent);
     if ([...pending, ...items].some(intent => !sameScope(intent.sourceScope, this.context.role === 'chat' ? this.context.reservation.scope : intent.sourceScope))) throw new Error('Foreign source in native request history');
     const previous = this.snapshot.recovery.kind === 'chat' ? this.snapshot.recovery.pending : [];
-    for (const old of previous) if (!pending.some(item => item.requestId === old.requestId) && !items.some(item => item.requestId === old.requestId)) {
-      const saved = await this.port.request({ kind: 'read-intent', requestId: old.requestId }); if (saved !== null) items.push(parseNativePlacementIntent(saved));
+    const recheck = new Set(previous.map(item => item.requestId));
+    if (this.pendingIntent) recheck.add(this.pendingIntent.requestId);
+    for (const requestId of recheck) if (!pending.some(item => item.requestId === requestId) && !items.some(item => item.requestId === requestId)) {
+      const saved = await this.port.request({ kind: 'read-intent', requestId });
+      if (saved !== null) {
+        const intent = parseNativePlacementIntent(saved);
+        if (intent.requestId !== requestId || !sameScope(intent.sourceScope, this.context.reservation.scope)) throw new Error('Foreign native request result');
+        items.push(intent);
+      }
     }
     for (const item of items) this.requestHistory.set(item.requestId, item);
+    const completed = this.pendingIntent ? this.requestHistory.get(this.pendingIntent.requestId)?.result : null;
+    if (completed && completed.kind !== 'pending' && this.pendingIntent && this.controller.settlePlacement(this.pendingIntent.result, completed)) {
+      this.pendingIntent = null;
+      this.update({ placementNotice: completed.kind === 'refused' ? completed.reason : null });
+    }
     if (append || !this.historyExtended) this.historyAfter = value.after;
     if (append) this.historyExtended = true;
     const carries = (await sourceCarries(this.context.reservation.scope)).flatMap(carry => carry.kind === 'offered' || carry.kind === 'applied' ? [{ requestId: carry.requestId, kind: carry.kind, target: carry.target }] : []);

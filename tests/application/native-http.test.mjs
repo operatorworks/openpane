@@ -3,7 +3,7 @@ import { recordedInstallation } from '@openpane/host/recorded';
 const recordedAgentId = describeAgent(recordedInstallation, { kind: 'ready' }, { kind: 'unsupported', reason: 'Recorded text-only fixture.' }).id;
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, watch } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -103,12 +103,12 @@ test('separate native engine processes recover one original command after client
   const acceptedPath = join(f.directory, 'recorded.jsonl');
   let watcher;
   const acceptance = new Promise(resolve => {
-    watcher = watch(f.directory, () => { if (existsSync(acceptedPath) && readFileSync(acceptedPath, 'utf8').trim()) resolve(); });
+    watcher = setInterval(() => { if (existsSync(acceptedPath) && readFileSync(acceptedPath, 'utf8').trim()) resolve(); }, 10);
   });
-  t.after(() => watcher.close());
+  t.after(() => clearInterval(watcher));
   const first = run({ recover: false });
   await Promise.race([acceptance, first.exited.then(() => { throw new Error(`Native client exited before acceptance ${first.stderr}`); })]);
-  watcher.close();
+  clearInterval(watcher);
   first.child.kill('SIGKILL');
   assert.equal((await first.exited).signal, 'SIGKILL');
   assert.equal(f.host.child.exitCode, null);

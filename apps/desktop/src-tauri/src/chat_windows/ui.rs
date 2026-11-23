@@ -73,7 +73,48 @@ impl ChatWindows {
                     {
                         return Err("invalid-ui-state");
                     }
-                    if scoped.insert(child.incarnation, child.envelope).is_some() {
+                    if let Some(delivery) = &child.display {
+                        let document = broker
+                            .documents
+                            .values()
+                            .find(|document| document.incarnation == child.incarnation)
+                            .ok_or("stale-child-snapshot")?;
+                        let identity =
+                            if delivery.get("kind").and_then(Value::as_str) == Some("page") {
+                                delivery.get("page")
+                            } else {
+                                Some(delivery)
+                            }
+                            .ok_or("invalid-ui-state")?;
+                        if identity.get("scope")
+                            != document
+                                .scope
+                                .as_ref()
+                                .and_then(|scope| serde_json::to_value(scope).ok())
+                                .as_ref()
+                        {
+                            return Err("foreign-child-display");
+                        }
+                    }
+                    let previous = broker.child_snapshots.get(&child.incarnation);
+                    let display = child
+                        .display
+                        .or_else(|| previous.and_then(|value| value.get("display")).cloned())
+                        .unwrap_or(Value::Null);
+                    if serde_json::to_vec(&display)
+                        .map_err(|_| "invalid-ui-state")?
+                        .len()
+                        > 512 * 1024
+                    {
+                        return Err("invalid-ui-state");
+                    }
+                    if scoped
+                        .insert(
+                            child.incarnation,
+                            json!({"envelope":child.envelope,"display":display}),
+                        )
+                        .is_some()
+                    {
                         return Err("duplicate-child-snapshot");
                     }
                 }
@@ -84,7 +125,7 @@ impl ChatWindows {
                     .keys()
                     .filter(|target| target.as_str() != "main")
                 {
-                    let _ = app.emit_to(target, "openpane-ui-wakeup", ());
+                    let _ = app.emit_to(target, "openpane-ui-cache", ());
                 }
                 Ok(json!({"ok":true}))
             }
@@ -105,12 +146,37 @@ impl ChatWindows {
             Command::Presence {
                 incarnation,
                 visible,
+                display,
             } => {
                 self.document(broker, label, &incarnation)?;
                 let document = broker.documents.get_mut(label).ok_or("stale-document")?;
+                if let Some(subscription) = &display {
+                    if serde_json::to_vec(subscription)
+                        .map_err(|_| "invalid-display-subscription")?
+                        .len()
+                        > 8192
+                        || subscription.get("scope")
+                            != document
+                                .scope
+                                .as_ref()
+                                .and_then(|scope| serde_json::to_value(scope).ok())
+                                .as_ref()
+                        || subscription
+                            .get("subscriptionId")
+                            .and_then(Value::as_str)
+                            .is_none()
+                        || subscription.get("cursor").is_none()
+                    {
+                        return Err("invalid-display-subscription");
+                    }
+                }
+                let visibility_changed = document.visible != visible;
+                document.display = display;
                 document.visible = visible;
                 document.presence_sequence += 1;
-                let _ = app.emit_to("main", "openpane-ui-wakeup", ());
+                if visibility_changed {
+                    let _ = app.emit_to("main", "openpane-ui-wakeup", ());
+                }
                 Ok(json!({"ok":true}))
             }
             Command::ReportUi {
@@ -149,7 +215,7 @@ impl ChatWindows {
                         document.presence_sequence += 1;
                     }
                 }
-                let contexts: Vec<_> = broker.documents.iter().filter(|(target,document)| target.as_str() != "main" && document.ready).filter_map(|(target,document)|self.context(broker,target,document).map(|context|json!({"context":context,"visible":document.visible,"presenceSequence":document.presence_sequence,"placement":document.scope.as_ref().and_then(|scope|broker.storage.profile(&self.origin).ok()?.windows.get(&scope.key())).and_then(|entry|entry.binding_revision.map(|revision|json!({"nativeTransitionId":entry.transition_id,"bindingRevision":revision})))}))).collect();
+                let contexts: Vec<_> = broker.documents.iter().filter(|(target,document)| target.as_str() != "main" && document.ready).filter_map(|(target,document)|self.context(broker,target,document).map(|context|json!({"context":context,"visible":document.visible,"presenceSequence":document.presence_sequence,"display":document.display,"placement":document.scope.as_ref().and_then(|scope|broker.storage.profile(&self.origin).ok()?.windows.get(&scope.key())).and_then(|entry|entry.binding_revision.map(|revision|json!({"nativeTransitionId":entry.transition_id,"bindingRevision":revision})))}))).collect();
                 Ok(
                     json!({"children":contexts,"reports":broker.reports.values().collect::<Vec<_>>(),"localBuiltin":broker.local_builtin}),
                 )

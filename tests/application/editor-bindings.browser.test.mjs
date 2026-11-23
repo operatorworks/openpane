@@ -8,10 +8,11 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 async function fixture(t) {
   const bundle = await build({ stdin: { contents: `import { BrowserViewStorage } from './apps/desktop/src/application/browser-storage.ts';
     import { transferEditor, readEditorBinding } from './apps/desktop/src/application/editor-bindings.ts';
+    import { WindowCoordinator } from './apps/desktop/src/application/window-coordinator.ts';
     import { createConversationStore } from '@openpane/client';
     import { transcriptProjection } from '@openpane/contracts/conversation';
     import * as carries from './apps/desktop/src/application/draft-carry.ts';
-    Object.assign(globalThis, { BrowserViewStorage, transferEditor, readEditorBinding, createConversationStore, transcriptProjection, carries });`, resolveDir: root }, bundle: true, write: false, format: 'iife' });
+    Object.assign(globalThis, { BrowserViewStorage, WindowCoordinator, transferEditor, readEditorBinding, createConversationStore, transcriptProjection, carries });`, resolveDir: root }, bundle: true, write: false, format: 'iife' });
   const browser = await chromium.launch(); t.after(() => browser.close());
   const page = await browser.newPage();
   await page.route('http://localhost/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Editor ownership</title>' }));
@@ -221,4 +222,24 @@ test('a closed failed native handoff can return to main using the same binding a
   assert.equal(result.recovered.writerGeneration, result.reserved.writerGeneration + 1); assert.deepEqual(result.recovered, result.replay);
   assert.equal(result.saved.draft, 'Retain'); assert.deepEqual(result.saved.outbox, [{ original: true }]); assert.deepEqual(result.image, [3]);
   assert.equal(result.pending.pendingCreation.agentId, 'original-agent'); assert.equal(result.foreign, 'SupersededDrafts');
+});
+
+
+test('native restoration keeps separate policy, live windows and foreign handoffs out of the main editor', async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const scope = { hostId: 'host', conversationId: 'restore' }, Storage = globalThis.BrowserViewStorage;
+    let live = false;
+    const coordinator = new globalThis.WindowCoordinator({ context: { role: 'main', label: 'main', liveRelay: true }, async request(command) { if (command.kind !== 'lookup') throw new Error('Unexpected native command'); return { reservation: null, live }; } });
+    const initial = await coordinator.restoresInline(scope);
+    live = true; const active = await coordinator.restoresInline(scope); live = false;
+    coordinator.setPresentation({ chats: 'separate' }); const separate = await coordinator.restoresInline(scope); coordinator.setPresentation(null);
+    const source = await Storage.claimEditor({ scope, viewId: 'restore-editor', label: 'main', transitionId: null, creation: { agentId: 'agent' } }, () => {});
+    await source.saveView('host', { version: 2, route: scope, pendingCreation: { scope, agentId: 'agent' } });
+    const plan = { scope, sourceViewId: source.viewId, targetViewId: source.viewId, transitionId: 'handoff', targetLabel: 'child', expectedBinding: source.editorBinding() };
+    await source.reserveHandoff(plan); await source.close();
+    const reserved = await coordinator.restoresInline(scope);
+    return { initial, active, separate, reserved, browser: await new globalThis.WindowCoordinator(null).restoresInline(scope) };
+  });
+  assert.deepEqual(result, { initial: true, active: false, separate: false, reserved: false, browser: true });
 });

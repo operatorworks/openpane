@@ -66,3 +66,39 @@ test('live token and scoped CSS edits preserve the editor, composition, pending 
   await page.reload(); await connected(page);
   assert.equal(await editor.inputValue(), 'Preserve composed draft');
 });
+
+test('fixed native chats apply the complete selected theme and explicit mode while retaining their draft', { timeout: 45000 }, async t => {
+  const host = await fixture(t);
+  const bundle = await build({ stdin: { resolveDir: root, loader: 'tsx', contents: `
+    import React from 'react'; import {createRoot} from 'react-dom/client';
+    import {BrowserApplication} from './apps/desktop/src/shell/BrowserApplication.tsx';
+    import {VisualContext} from './apps/desktop/src/application/experience-state.ts';
+    import {PersonalizationProvider} from './apps/desktop/src/application/use-personalization.tsx';
+    import {DesktopCustomizationProvider} from './apps/desktop/src/application/DesktopCustomizations.tsx';
+    import './apps/desktop/src/shell/styles.css';
+    function Probe() {
+      const [experience,setExperience]=React.useState(null); window.selectNativeTheme=setExperience;
+      return <VisualContext value={experience}><PersonalizationProvider><DesktopCustomizationProvider><BrowserApplication fixedChat={experience!==null}/></DesktopCustomizationProvider></PersonalizationProvider></VisualContext>;
+    }
+    createRoot(document.getElementById('root')).render(<Probe/>);
+  ` }, bundle:true,write:false,outfile:'native-theme.js',jsx:'automatic',define:{'process.env.NODE_ENV':'"production"'} });
+  const page=await host.browser.newPage();
+  await page.route('**/native-theme.js',r=>r.fulfill({contentType:'text/javascript',body:Buffer.from(bundle.outputFiles.find(f=>f.path.endsWith('.js')).contents)}));
+  await page.route('**/native-theme.css',r=>r.fulfill({contentType:'text/css',body:Buffer.from(bundle.outputFiles.find(f=>f.path.endsWith('.css')).contents)}));
+  await page.route('**/native-theme.html',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><link rel="stylesheet" href="/native-theme.css"><div id="root"></div><script src="/native-theme.js"></script>'}));
+  await page.goto(`${host.origin}/native-theme.html`);
+  await page.getByRole('button',{name:'New recorded conversation',exact:true}).click(); await connected(page); await draft(page,'Native theme draft');
+  const editor=page.getByRole('textbox',{name:'Message',exact:true});
+  const theme={mode:'dark',light:{chart:{trace1:'#224466'},fonts:{body:'Verdana, sans-serif'}},dark:{chart:{trace1:'#8ed6b3'},fonts:{body:'Tahoma, sans-serif'},spacing:{sm:6}}};
+  const experience={digest:'a'.repeat(64),manifest:{theme,presentation:{navigation:'pages',chats:'separate',chatWindow:{width:640,height:720,titlebar:'native',title:'conversation'}}}};
+  await page.evaluate(value=>window.selectNativeTheme(value),experience);
+  const native=page.locator('.application-chat-window'); await native.waitFor();
+  assert.equal(await native.getAttribute('data-appearance'),'dark');
+  assert.equal(await native.evaluate(n=>getComputedStyle(n).getPropertyValue('--aui-chart-trace1').trim()),'#8ed6b3');
+  assert.match(await editor.evaluate(n=>getComputedStyle(n).fontFamily),/Tahoma/);
+  const original=await editor.elementHandle();
+  await page.evaluate(value=>window.selectNativeTheme(value),{...experience,manifest:{...experience.manifest,theme:{...theme,mode:'light'}}});
+  await wait(async()=>await native.getAttribute('data-appearance')==='light','explicit native light mode');
+  assert.equal(await native.evaluate(n=>getComputedStyle(n).getPropertyValue('--aui-chart-trace1').trim()),'#224466');
+  assert.equal(await editor.inputValue(),'Native theme draft'); assert.equal(await editor.evaluate((n,old)=>n===old,original),true);
+});

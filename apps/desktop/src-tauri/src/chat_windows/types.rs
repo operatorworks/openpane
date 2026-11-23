@@ -79,6 +79,7 @@ pub enum Command {
     Presence {
         incarnation: String,
         visible: bool,
+        display: Option<Value>,
     },
     ReportUi {
         incarnation: String,
@@ -152,6 +153,7 @@ pub enum Command {
 pub struct ChildSnapshot {
     pub(super) incarnation: String,
     pub(super) envelope: Value,
+    pub(super) display: Option<Value>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -20,6 +20,7 @@ import { CustomizationActivity, CustomizationTranscript, type ActivitySelection,
 import { CustomizationContent } from './CustomizationContent.js';
 import { ImageAttachmentCard, imageSize } from './ImageAttachmentCard.js';
 import { dragVerdict, intakeFile, type DropVerdict } from './image-intake.js';
+import { DisplayCards, NewCardNotice, useDisplayCards } from './DisplayCards.js';
 import { Composer } from './Composer.js';
 
 const OBSERVATION_NOTICE: Record<ObservationStopReason, string> = {
@@ -63,6 +64,8 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
   readonly customizationNotices?: boolean;
   readonly composerControls?: (canSwitch: boolean) => ReactNode;
 }) {
+  const cards = useDisplayCards(active.scope);
+  const hasCards = cards.view.kind !== 'none' && cards.view.publications.length > 0;
   const presentation = conversationPresentation(active.agent, agent);
   const view = useConversation(active.store);
   const [editor, setEditor] = useState<DraftEditor>({ kind: 'saved', text: view.draft });
@@ -229,7 +232,7 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
     active.agent.availability.kind === 'ready' &&
     transcript.kind === 'default' && activity.kind === 'default' && contentLayout.kind === 'default' &&
     recovery.retained.length === 0 && recovery.uncertain.length === 0 && recovery.pending.length === 0 &&
-    !customizationNotices && !showPermissions;
+    !customizationNotices && !showPermissions && !hasCards;
 
   const conversationKey = `${active.viewId}/${active.scope.hostId}/${active.scope.conversationId}`;
   const context = { conversation: active.scope, activity: view.document, commands: actions.commands, permissions: actions.permissions };
@@ -273,22 +276,23 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
       {continuation && <ContinuationChoices continuation={continuation} actions={actions} enabled={enabled && available} />}
     </div>}
     <CustomizationContent contentPalette={contentPalette} before={continuation && <ContinuationHistory continuation={continuation} actions={actions} enabled={enabled} assistant={presentation.assistant} />}
-      selection={contentLayout} conversationKey={conversationKey} modules={modules} nativeTranscript={nativeTranscript}
+      after={<DisplayCards cards={cards} />} selection={contentLayout} conversationKey={conversationKey} modules={modules} nativeTranscript={nativeTranscript}
       transcript={<CustomizationTranscript selection={transcript} conversationKey={conversationKey}
         context={context}
         fallback={transcript.kind === 'claimed' ? nativeTranscript : selectiveTranscript}
         appendix={sentImages.length > 0 && <section className="sent-images" aria-label="Sent images">
           <h2>Sent images</h2>{sentImages.map(sent => <ImageAttachmentCard key={sent.messageId} attachment={sent.image} read={actions.readImage} />)}
         </section>} />} />
-    {Object.values(view.document.decisions).map(decision => <section className="decision-card" key={decision.pendingId} aria-label="Approval required">
-      <h2>Approval required</h2><p>{decision.prompt}</p><div className="action-row">
+    {Object.keys(view.document.decisions).length > 0 && <div className="conversation-approvals" role="region" aria-label="Pending approvals">{Object.values(view.document.decisions).map(decision => <section className="decision-card" key={decision.pendingId} aria-label="Approval required">
+      <h2>Approval required</h2><p tabIndex={0} role="region" aria-label="Approval request details">{decision.prompt}</p><div className="action-row">
         {decision.choices.map(choice => <button data-openpane-part="button" key={choice} disabled={!connected || !active.agent.commands.includes('approve') || decision.reserved || approving.has(decision.pendingId)} onClick={() => approve(decision.pendingId, choice)}>{decision.choiceLabels?.[choice] ?? (agent === 'codex' && choice === 'accept' ? 'Allow' : agent === 'codex' && choice === 'decline' ? 'Deny' : choice)}</button>)}
       </div>
-    </section>)}
+    </section>)}</div>}
     {permissionState && showPermissions && <ConversationPermissions retained={recovery.retained} state={permissionState} actions={actions} enabled={connected} />}
     <Composer id="message" text={editor.text} onText={value => void edit(value)} placeholder={presentation.placeholder} readOnly={Boolean(storageFailure)}
       canSend={canSend} onSend={() => void actions.submit(() => active.store.send())} textareaRef={composer} centred={empty} drop={drop?.kind}
       above={<>
+        <NewCardNotice cards={cards} />
         {drop && <p className="composer-drop-hint" aria-hidden="true">{drop.kind === 'reject' ? drop.reason : image ? `Drop to replace ${image.name}` : 'Drop to attach image'}</p>}
         {image && <div className="composer-image" aria-label="Attached image">
           <span>{image.name} · {imageSize(image.byteLength)}</span>

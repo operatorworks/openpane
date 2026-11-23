@@ -31,7 +31,7 @@ export function uiEndpoint(store: UiStore | null, fault: string | null, observab
       }
       if (request.url !== '/api/ui/v1' || request.method !== 'POST' || request.headersDistinct.origin?.length !== 1 || request.headers.origin !== origin || request.headersDistinct['content-type']?.length !== 1 || request.headers['content-type'] !== 'application/json') throw new Error('Origin or content type mismatch');
       const operation = parseUiRequest(await readJson(request, UI_FRAME_BYTES, 5000));
-      if (!['context', 'state', 'relay', 'placement-reserve', 'placement-idle', 'placement-failed', 'ack', 'paint', 'restore'].includes(operation.op)) throw new Error('UI operation requires the local CLI');
+      if (!['context', 'state', 'relay', 'placement-reserve', 'placement-idle', 'placement-failed', 'ack', 'paint', 'restore', 'display-list'].includes(operation.op)) throw new Error('UI operation requires the local CLI');
       if (!store) throw new UiRefusal('unavailable', fault ?? 'UI database unavailable; builtin appearance remains active');
       json(response, 200, { ok: true, value: await store.execute(operation) }, {}, 1024 * 1024);
     } catch (error) { outcome = 'unavailable'; if (!response.headersSent) json(response, error instanceof UiRefusal && error.code === 'not-found' ? 404 : 400, uiFailure(error)); }

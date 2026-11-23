@@ -53,7 +53,7 @@ export async function loadWindowContext(): Promise<DesktopWindowContext> {
 export class DesktopWindowPort {
   constructor(readonly context: Exclude<DesktopWindowContext, { readonly role: 'browser' }>) {}
   request = (command: object): Promise<unknown> => invoke('desktop_window', { command: { ...command, incarnation: this.context.documentIncarnation } });
-  listen = (event: 'openpane-ui-wakeup' | 'openpane-placement-intent' | 'openpane-close-requested', handler: () => void): Promise<() => void> => listen(event, handler, { target: { kind: 'WebviewWindow', label: this.context.label } });
+  listen = (event: 'openpane-ui-wakeup' | 'openpane-ui-cache' | 'openpane-placement-intent' | 'openpane-close-requested', handler: () => void): Promise<() => void> => listen(event, handler, { target: { kind: 'WebviewWindow', label: this.context.label } });
 }
 
 export interface NativePlacementIntent {

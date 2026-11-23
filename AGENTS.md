@@ -11,3 +11,7 @@ OpenPane, Crew and Switchboard run for one user on a private NetBird or Tailscal
 Pairing was removed once and came back. Keep it out.
 
 Credentials that OpenPane uses to call other services, such as the Crew owner token, stay protected. This rule covers how clients reach OpenPane, not how OpenPane reaches its providers.
+
+## Live experience authoring
+
+Use the per-turn `openpane-ui` CLI prefix and exact ConversationScope for live UI edits or card publication. Read `ui context`, `experience schema` and `display schema` before authoring. Follow [the agent experience guide](docs/customization/agent-experiences.md); keep provider credentials out of bundles and receipts.

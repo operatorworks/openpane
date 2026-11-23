@@ -1614,3 +1614,47 @@ for (const kind of ['refused', 'pending', 'detached']) test(`a ${kind} placement
   assert.equal(f.app.getSnapshot().active, null); assert.deepEqual(f.created, []);
   if (kind === 'refused') assert.equal(f.app.getSnapshot().error, 'Window could not open');
 });
+
+
+test('a catalog route to a committed native chat honors placement without reacquiring the child editor', async t => {
+  const placed = [], f = fixture({ placement: { async restoresInline() { return false; }, async acquire(request) { placed.push(request.scope); return { kind: 'detached', scope: request.scope, label: 'native-chat' }; } } });
+  t.after(() => f.app.dispose());
+  f.storage.catalogViewId = 'original-view';
+  f.storage.locate = async () => 'child-owned-view';
+  f.behavior.reopen = async () => { throw new Error('This saved view is reserved for its recorded chat window'); };
+  f.views.set('original-view/host', { ...empty(), route: scope });
+  await f.app.start();
+  assert.deepEqual(placed, [scope]);
+  assert.equal(f.app.getSnapshot().error, ''); assert.equal(f.app.getSnapshot().active, null);
+  assert.equal(applicationEnabled(f.app.getSnapshot()), true);
+  assert.equal((await f.app.create()).kind, 'detached', 'main can create another chat after restoring a detached route');
+  assert.equal(placed.length, 2); assert.equal(f.leases.length, 1, 'the child editor was never acquired by main');
+});
+
+
+test('an uncommitted catalog route assigned to a native window leaves main ready for another chat', async t => {
+  const f = fixture({ placement: { async restoresInline() { return false; }, async acquire(request) { return { kind: 'detached', scope: request.scope, label: 'native-chat' }; } } });
+  t.after(() => f.app.dispose());
+  f.storage.catalogViewId = 'original-view';
+  f.storage.locate = async () => { throw new Error('Main must not locate the assigned editor'); };
+  f.behavior.agentLookup = async () => null;
+  f.views.set('original-view/host', { ...empty(), route: scope });
+  await f.app.start();
+  assert.equal(f.app.getSnapshot().host.kind, 'ready'); assert.equal(f.app.getSnapshot().active, null);
+  assert.match(f.app.getSnapshot().error, /does not exist/);
+  assert.equal(applicationEnabled(f.app.getSnapshot()), true);
+  assert.equal((await f.app.create()).kind, 'detached');
+});
+
+
+test('terminal native placement resolves only its still-current pending outcome and cannot mount a chat', async t => {
+  const f = fixture({ placement: { async acquire(request) { return { kind: 'pending', scope: request.scope, reason: 'Waiting for main' }; } } });
+  t.after(() => f.app.dispose()); await f.app.start();
+  const first = await f.app.create(), second = await f.app.create();
+  assert.equal(first.kind, 'pending'); assert.equal(second.kind, 'pending');
+  assert.equal(f.app.settlePlacement(first, { kind: 'refused', reason: 'Old failure' }), false);
+  assert.equal(f.app.getSnapshot().lastPlacement, second);
+  assert.equal(f.app.settlePlacement(second, { kind: 'detached', scope: second.scope, label: 'native-chat' }), true);
+  assert.equal(f.app.getSnapshot().lastPlacement.kind, 'detached'); assert.equal(f.app.getSnapshot().active, null);
+  await f.app.dispose(); assert.equal(f.app.settlePlacement(second, { kind: 'refused', reason: 'Late after close' }), false);
+});

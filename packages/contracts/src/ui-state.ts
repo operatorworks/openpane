@@ -4,6 +4,8 @@ import type { MetricsCardV1, METRICS_EVENT_NAME } from './metrics-card.js';
 import { count, hex, identifier, record } from './decode.js';
 import { parseScope } from './durable.js';
 import { parsePlacementTransition } from './ui-receipt.js';
+import { parseDisplayDelivery } from './display.js';
+import type { DisplayDelivery } from './display.js';
 
 export type UiAppearance = { readonly kind: 'builtin' } | { readonly kind: 'experience'; readonly digest: string };
 export interface UiSelection {
@@ -79,7 +81,7 @@ export type QueryReservation = {
 } & (
   | { readonly kind: 'reserved' | 'running' }
   | { readonly kind: 'interrupted' | 'failed'; readonly reason: string }
-  | { readonly kind: 'published'; readonly sequence: number; readonly digest: string }
+  | { readonly kind: 'published' | 'removed'; readonly sequence: number; readonly digest: string }
 );
 export function parseUiAppearance(value: unknown): UiAppearance {
   const input = record(value);
@@ -130,6 +132,7 @@ export interface UiClientSnapshot {
   readonly envelope: DeliveryEnvelope | null;
   readonly fault: string | null;
   readonly transitions: readonly PlacementTransition[];
+  readonly display: DisplayDelivery | null;
 }
 export function parseDelivery(value: unknown): DeliveryEnvelope {
   const input = record(value, ['requestId', 'deliveryGeneration', 'selectionRevision', 'digest']);
@@ -144,7 +147,7 @@ export function parseUiContext(value: unknown): UiContextV1 {
 }
 
 export function parseUiClientSnapshot(value: unknown): UiClientSnapshot {
-  const input = record(value, ['version', 'change', 'selection', 'bundle', 'envelope', 'fault', 'transitions']);
+  const input = record(value, ['version', 'change', 'selection', 'bundle', 'envelope', 'fault', 'transitions', 'display']);
   if (input.version !== 1 || (input.fault !== null && typeof input.fault !== 'string')) throw new Error('Unsupported UI snapshot');
   const selection = parseUiSelection(input.selection);
   const rawBundle = input.bundle === null ? null : record(input.bundle, ['manifest', 'digest']);
@@ -155,5 +158,5 @@ export function parseUiClientSnapshot(value: unknown): UiClientSnapshot {
   if (!Array.isArray(input.transitions) || input.transitions.length > 32) throw new Error('Invalid placement transition list');
   const transitions = input.transitions.map(parsePlacementTransition);
   if (transitions.some(item => item.envelope.deliveryGeneration !== selection.deliveryGeneration || item.envelope.selectionRevision !== selection.revision || item.envelope.digest !== (bundle?.digest ?? null))) throw new Error('Placement transition generation mismatch');
-  return { version: 1, change: count(input.change), selection, bundle, envelope, fault: input.fault, transitions };
+  return { version: 1, change: count(input.change), selection, bundle, envelope, fault: input.fault, transitions, display: input.display === null ? null : parseDisplayDelivery(input.display) };
 }

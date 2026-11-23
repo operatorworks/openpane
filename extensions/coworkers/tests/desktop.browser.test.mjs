@@ -1,3 +1,4 @@
+import { qualifyCardRestyle } from '../../../tests/application/metrics-card-support.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -394,4 +395,14 @@ test('with both extensions each workspace renders its own transcript style and C
   assert.equal(await chatsComposer(), before, 'the Chats composer looks the same with both extensions loaded');
   assert.equal(await view.page.locator('#message').count(), 1);
   assert.deepEqual(view.violations, []);
+});
+
+ test('Coworkers transcript replacement keeps one app-owned metrics card through restyle', { timeout: 60000 }, async t => {
+  const remote = await coworkersService(t), host = await extensionFixture(t, { extensions: [await coworkersEntry(remote)] }), view = await page(t, host);
+  await openWorkspace(view, 'Coworkers');
+  const workspace = view.page.locator('[data-extension-workspace="coworkers"]');
+  await workspace.getByRole('button', { name: 'Coworkers', exact: true }).click();
+  await workspace.getByRole('button', { name: 'Chat with Ada' }).click();
+  await workspace.locator('#message').waitFor();
+  await qualifyCardRestyle(host, view.page);
 });
