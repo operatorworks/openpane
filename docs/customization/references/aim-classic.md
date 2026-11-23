@@ -14,7 +14,7 @@ Inspected on November 23, 2026:
 
 The earlier AIM+ vendor screenshots were discoverable but their files timed out from the implementation environment. They are not claimed as inspected evidence.
 
-Reference images are not bundled or redistributed. Their hosting terms allow personal reference use; links and observations above are sufficient provenance for comparison. OpenPane test captures use only recorded agents and synthetic data.
+Reference images are linked, not bundled or redistributed. OpenPane test captures use only recorded agents and synthetic data.
 
 ## Compare the whole interface
 
