@@ -37,7 +37,7 @@ export function WindowRecoveryControls({ runtime, recovery }: { readonly runtime
   </details> : null;
   const request = (intent: NativePlacementIntent) => <section key={intent.requestId}>
     <p>{intent.action.kind === 'create' ? 'New chat request' : 'Continuation request'} · {intent.target?.scope.conversationId.slice(-8) ?? 'Waiting to start'}</p>
-    <p data-openpane-part="status" role="status">{intent.result?.kind === 'refused' || intent.result?.kind === 'pending' ? intent.result.reason : intent.result ? 'Chat is ready.' : 'Waiting for main to finish opening this chat.'}</p>
+    <p data-openpane-part="status" role="status">{intent.result?.kind === 'refused' || intent.result?.kind === 'pending' ? intent.result.reason : intent.result ? 'Chat is ready.' : intent.target?.phase === 'target-ready' ? 'Chat is ready. Main is finishing the saved request.' : 'Waiting for main to finish opening this chat.'}</p>
     <button data-openpane-part="button" type="button" onClick={() => void runtime.retryIntent(intent)}>{intent.result?.kind === 'inline' || intent.result?.kind === 'detached' ? 'Open saved chat' : 'Retry same request'}</button>
   </section>;
   if (!recovery.pending.length && !recovery.history.length && !carries.length) return null;

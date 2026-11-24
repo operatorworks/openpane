@@ -20,7 +20,7 @@ export function ContinuationChoices({ continuation, actions, enabled }: {
     {notice.choices.length > 0 && <div className="action-row">{notice.choices.map(choice =>
       <button data-openpane-part="button" key={choice} type="button" disabled={!ready} onClick={() => void run[choice]()}>{choice}</button>)}</div>}
     {notice.choices.includes('Start a new chat') && <p>{NEW_CHAT_NOTE}</p>}
-    {continuation.error && <p role="alert">{continuation.error}</p>}
+    {continuation.error && continuation.error !== notice.status && <p role="alert">{continuation.error}</p>}
   </div>;
 }
 
@@ -40,7 +40,7 @@ export function ContinuationHistory({ continuation, actions, enabled, assistant 
       <section className="transcript earlier-segment" data-openpane-part="transcript" aria-label="Earlier messages">
         {segment.messages.map(message => <article data-openpane-part="transcript-row" data-openpane-state={message.role === 'user' ? 'local' : 'remote'} className={`message message-${message.role}`} key={message.messageId}>
           <strong data-openpane-part="message-author" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.role === 'user' ? 'You' : assistant}{experience?.manifest.presentation.transcript === 'lines' ? ': ' : ''}</strong>
-          <div data-openpane-part="message-body" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.role === 'assistant' ? <AssistantReply text={message.text} /> : message.text && <p data-openpane-part="message-text">{message.text}</p>}</div>
+          <div data-openpane-part="message-body" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.role === 'assistant' ? <AssistantReply text={message.text} /> : message.text && <p data-openpane-part="message-text" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.text}</p>}</div>
           {!message.complete && <span className="progress-label">Did not finish</span>}
         </article>)}
       </section>

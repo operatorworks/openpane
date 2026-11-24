@@ -74,6 +74,91 @@ test('creation recovery persists and reuses the original identity before sending
   assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
 });
 
+test('pending creation keeps the host failure that explains why confirmation is needed', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); await f.app.start();
+  f.behavior.create = async () => { throw new ServiceError('unavailable', 'Host is still applying this creation'); };
+  assert.equal((await f.app.create()).kind, 'pending');
+  assert.equal(f.app.getSnapshot().host.kind, 'ready');
+  assert.equal(f.app.getSnapshot().error, 'Host is still applying this creation');
+});
+
+for (const kind of ['inline', 'detached']) test(`confirmed creation clears its persisted reservation after pending placement settles ${kind}`, async t => {
+  let separate = false, pending;
+  const f = fixture({ placement: { async acquire(request, owner) {
+    if (request.creation || !separate) return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+    pending = { kind: 'pending', scope: request.scope, reason: 'Waiting for assigned creation editor' }; return pending;
+  } } });
+  t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), route: scope });
+  await f.app.start(); separate = true;
+  const result = await f.app.create(); assert.equal(result, pending);
+  assert.deepEqual(f.views.get('original-view/host').pendingCreation.scope, result.scope);
+  assert.equal(f.app.settlePlacement(result, kind === 'inline' ? { kind, scope: result.scope } : { kind, scope: result.scope, label: 'confirmed-child' }), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.views.get('original-view/host').pendingCreation, null);
+  assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
+  separate = false; await f.app.reconnect(); assert.deepEqual(f.app.getSnapshot().active.scope, scope);
+  assert.equal((await f.app.create()).kind, 'inline'); assert.equal(f.created.length, 2);
+});
+
+test('successful placement cannot clear a creation that the host has not confirmed', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); await f.app.start();
+  f.behavior.create = async () => { throw new ServiceError('unavailable', 'Creation has not been confirmed'); };
+  const pending = await f.app.create();
+  assert.equal(f.app.settlePlacement(pending, { kind: 'detached', scope: pending.scope, label: 'unconfirmed-child' }), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.views.get('original-view/host').pendingCreation.scope, pending.scope);
+});
+
+test('accepted new-chat creation survives lookup failure and restart with its source draft', async t => {
+  const f = fixture(); t.after(() => f.app.dispose());
+  f.views.set('original-view/host', { ...empty(), route: scope });
+  f.behavior.observation = async () => ({ kind: 'concluded', cause: 'cancelled' });
+  f.behavior.continuation = async () => ({ predecessor: null, carried: null, closure: 'cancelled', successor: null });
+  await f.app.start();
+  const source = f.app.getSnapshot().active;
+  await source.store.setDraft('Carry only this unsent source text');
+  f.behavior.agentLookup = async selected => {
+    if (selected.conversationId !== scope.conversationId) throw new Error('Created-agent lookup interrupted');
+    return f.descriptor();
+  };
+  await f.app.conversationActions(source).startNewChat();
+  const createdScope = f.created[0];
+  assert.notDeepEqual(createdScope, scope);
+  await f.app.dispose();
+  const restored = fixture(); t.after(() => restored.app.dispose());
+  for (const [key, value] of f.views) restored.views.set(key, structuredClone(value));
+  for (const [key, value] of f.drafts) restored.drafts.set(key, structuredClone(value));
+  await restored.app.start();
+  await restored.app.recoverCreation();
+  const active = restored.app.getSnapshot().active;
+  assert.deepEqual(active.scope, createdScope, 'recovery opens the already accepted unrelated chat');
+  assert.equal(active.store.getSnapshot().draft, 'Carry only this unsent source text');
+  assert.equal(restored.drafts.get('original-view/host/conversation').draft, '');
+  assert.deepEqual(restored.views.get('original-view/host'), { version: 2, route: createdScope, pendingCreation: null });
+  assert.equal(f.created.length, 1, 'the first controller requested one creation');
+  assert.deepEqual(restored.created, [createdScope], 'recovery repeats only the original idempotent create request');
+  assert.deepEqual([...f.submitted, ...restored.submitted], []);
+});
+
+test('workspace pagination reaches every namespace page after later global pages arrive', async t => {
+  const f = fixture(); t.after(() => f.app.dispose());
+  const entries = Array.from({ length: 350 }, (_, n) => ({ scope: { ...scope, conversationId: `w-${String(n).padStart(3, '0')}` }, preview: null,
+    provider: { namespace: 'ledger', installationId: 'books', providerAgentId: 'desk' } }));
+  const page = after => entries.slice(after === null ? 0 : entries.findIndex(entry => entry.scope.conversationId === after) + 1,
+    (after === null ? 0 : entries.findIndex(entry => entry.scope.conversationId === after) + 1) + 100);
+  const agent = { ...f.descriptor('provider-agent'), kind: 'provider', namespace: 'ledger', installationId: 'books', providerAgentId: 'desk' };
+  f.behavior.agents = [agent]; f.behavior.defaultId = agent.id; f.behavior.agentLookup = async () => agent;
+  f.behavior.catalogEntries = page;
+  f.behavior.workspaceCatalog = page;
+  await f.app.start(); await f.app.moreConversations();
+  await f.app.loadWorkspace('ledger'); await f.app.moreConversations();
+  await f.app.create();
+  const created = { ...entries[0], scope: f.created[0] };
+  await f.app.moreWorkspace('ledger'); await f.app.moreWorkspace('ledger'); await f.app.moreWorkspace('ledger');
+  assert.deepEqual(f.app.getSnapshot().workspaces.ledger.entries, [created, ...entries], 'browsing both catalogs never skips or reorders namespace conversations and keeps the new chat first');
+  assert.equal(f.app.getSnapshot().workspaces.ledger.hasMore, false);
+});
+
 test('a synchronous storage failure blocks actions captured before failure', async t => {
   const f = fixture(); t.after(() => f.app.dispose());
   f.views.set('original-view/host', { ...empty(), route: scope });
@@ -87,8 +172,11 @@ test('a synchronous storage failure blocks actions captured before failure', asy
   await f.app.reconnect();
   assert.equal(commands, 0);
   assert.equal(f.created.length, 0);
-  assert.equal(f.metadataCalls(), 1);
-  assert.match(f.app.getSnapshot().storageFailure, /Storage unavailable/);
+  assert.equal(f.metadataCalls(), 2);
+  assert.equal(f.app.getSnapshot().storageFailure, '');
+  assert.equal(applicationEnabled(f.app.getSnapshot()), true);
+  await actions.submit(async () => { commands++; return { kind: 'rejected', reason: 'old actions stay invalid after recovery' }; });
+  assert.equal(commands, 0);
 });
 
 test('late writes from a replaced storage owner cannot poison the reopened view', async t => {
@@ -1631,7 +1719,7 @@ for (const kind of ['refused', 'pending', 'detached']) test(`a ${kind} placement
 });
 
 
-test('a catalog route to a committed native chat honors placement without reacquiring the child editor', async t => {
+test('a catalog route assigned to a native chat leaves its editor untouched during startup', async t => {
   const placed = [], f = fixture({ placement: { async restoresInline() { return false; }, async acquire(request) { placed.push(request.scope); return { kind: 'detached', scope: request.scope, label: 'native-chat' }; } } });
   t.after(() => f.app.dispose());
   f.storage.catalogViewId = 'original-view';
@@ -1639,11 +1727,11 @@ test('a catalog route to a committed native chat honors placement without reacqu
   f.behavior.reopen = async () => { throw new Error('This saved view is reserved for its recorded chat window'); };
   f.views.set('original-view/host', { ...empty(), route: scope });
   await f.app.start();
-  assert.deepEqual(placed, [scope]);
+  assert.deepEqual(placed, []); assert.equal(f.app.getSnapshot().lastPlacement, null);
   assert.equal(f.app.getSnapshot().error, ''); assert.equal(f.app.getSnapshot().active, null);
   assert.equal(applicationEnabled(f.app.getSnapshot()), true);
-  assert.equal((await f.app.create()).kind, 'detached', 'main can create another chat after restoring a detached route');
-  assert.equal(placed.length, 2); assert.equal(f.leases.length, 1, 'the child editor was never acquired by main');
+  assert.equal((await f.app.create()).kind, 'detached', 'main can create another chat after skipping automatic route placement');
+  assert.equal(placed.length, 1); assert.equal(f.leases.length, 1, 'the child editor was never acquired by main');
 });
 
 
@@ -1656,7 +1744,7 @@ test('an uncommitted catalog route assigned to a native window leaves main ready
   f.views.set('original-view/host', { ...empty(), route: scope });
   await f.app.start();
   assert.equal(f.app.getSnapshot().host.kind, 'ready'); assert.equal(f.app.getSnapshot().active, null);
-  assert.match(f.app.getSnapshot().error, /does not exist/);
+  assert.equal(f.app.getSnapshot().error, ''); assert.equal(f.app.getSnapshot().lastPlacement, null);
   assert.equal(applicationEnabled(f.app.getSnapshot()), true);
   assert.equal((await f.app.create()).kind, 'detached');
 });
@@ -1708,7 +1796,7 @@ test('confirmed creation releases its reservation even when final placement deta
   } };
   f = fixture({ placement }); t.after(() => f.app.dispose()); await f.app.start();
   const result = await f.app.create(); assert.equal(result.kind, 'detached');
-  assert.equal(pendingAtPlacement, null); assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
+  assert.deepEqual(pendingAtPlacement, { scope: f.created[0], agentId: 'default' }); assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
   assert.equal(f.app.getSnapshot().saved.route, null); assert.equal(f.created.length, 1);
   assert.equal((await f.app.create()).kind, 'detached'); assert.equal(f.created.length, 2);
 });
@@ -1906,13 +1994,19 @@ test('a refused quiesce preserves the original captured tools and their journal'
   await assert.rejects(store.retry(row.command.clientCommandId), /Reply lost/); assert.equal(f.submitted.length, 2);
 });
 
-test('creation recovery publishes a refusal from placing the confirmed editor', async t => {
+test('creation recovery preserves its reserved editor through a placement refusal and retry', async t => {
+  let refused = true;
   const f = fixture({ placement: { async acquire(request, owner) {
-    return request.creation ? { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } } : { kind: 'refused', reason: 'Confirmed editor refused' };
+    return request.creation || !refused ? { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } } : { kind: 'refused', reason: 'Confirmed editor refused' };
   } } });
   t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), pendingCreation: { scope, agentId: 'default' } }); await f.app.start();
   await f.app.recoverCreation(); assert.equal(f.app.getSnapshot().lastPlacement.kind, 'refused'); assert.equal(f.app.getSnapshot().error, 'Confirmed editor refused');
+  assert.deepEqual(f.app.getSnapshot().saved.pendingCreation, { scope, agentId: 'default' });
+  assert.deepEqual(f.views.get('original-view/host').pendingCreation, { scope, agentId: 'default' }, 'the refused placement remains recoverable after restart');
+  refused = false; await f.app.recoverCreation();
+  assert.deepEqual(f.app.getSnapshot().active.scope, scope);
   assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
+  assert.deepEqual(f.created, [scope, scope]); assert.deepEqual(f.submitted, []);
 });
 
 test('an old pending refusal cannot add an error while a newer open is waiting', async t => {
@@ -2006,4 +2100,693 @@ test('pending creation placement preserves the connection-loss guidance until an
   assert.equal((await f.app.create()).kind, 'pending'); assert.equal(f.app.getSnapshot().host.kind, 'unavailable');
   assert.match(f.app.getSnapshot().error, /different OpenPane host.*Reconnect/);
   assert.equal((await f.app.create()).kind, 'refused'); assert.equal(f.created.length, 1);
+});
+
+test('confirmed creation settlement waits for the same editor to reconnect without replacing its disconnect error', async t => {
+  let separate = false;
+  const f = fixture({ placement: { async acquire(request, owner) {
+    if (request.creation || !separate) return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+    return { kind: 'pending', scope: request.scope, reason: 'Waiting for assigned creation editor' };
+  } } });
+  t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), route: scope });
+  await f.app.start(); separate = true;
+  const pending = await f.app.create();
+  f.connectionLost(new ServiceConnectionLost('Host disconnected while native lookup was in flight'));
+  const before = f.app.getSnapshot().error;
+  assert.match(before, /Host disconnected/);
+  assert.equal(f.app.settlePlacement(pending, { kind: 'detached', scope: pending.scope, label: 'confirmed-reconnect-child' }), true);
+  await new Promise(resolve => setImmediate(resolve));
+  const errorWhileDown = f.app.getSnapshot().error;
+  assert.deepEqual(f.views.get('original-view/host').pendingCreation.scope, pending.scope, 'cleanup waits while the host is unavailable');
+  separate = false; await f.app.reconnect();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.views.get('original-view/host').pendingCreation, null, 'the successful settlement is retained across reconnect');
+  assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
+  assert.equal(errorWhileDown, before, 'terminal native evidence does not replace the connection diagnostic');
+  assert.equal((await f.app.create()).kind, 'inline');
+  assert.equal(f.created.length, 2, 'no manual creation recovery was required');
+});
+
+test('confirmed creation background cleanup preserves an unrelated current error', async t => {
+  const f = fixture({ placement: { async acquire(request, owner) {
+    return request.creation ? { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } }
+      : { kind: 'pending', scope: request.scope, reason: 'Waiting for assigned creation editor' };
+  } } });
+  t.after(() => f.app.dispose()); await f.app.start();
+  const pending = await f.app.create();
+  assert.deepEqual(f.app.getSnapshot().saved.pendingCreation.scope, pending.scope);
+  assert.deepEqual(f.views.get('original-view/host').pendingCreation.scope, pending.scope);
+  f.behavior.catalog = async () => { throw new Error('Unrelated catalog page could not load'); };
+  await f.app.refreshCatalog();
+  assert.equal(f.app.getSnapshot().error, 'Unrelated catalog page could not load');
+  assert.equal(f.app.settlePlacement(pending, { kind: 'detached', scope: pending.scope, label: 'confirmed-error-child' }), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.views.get('original-view/host').pendingCreation, null);
+  assert.equal(f.app.getSnapshot().error, 'Unrelated catalog page could not load');
+});
+
+for (const outcome of ['detached', 'refused before commit']) test(`main retains a usable owner after a released editor is ${outcome}`, async t => {
+  let moving = false, handedOff = false, f;
+  const second = { ...scope, conversationId: 'second-native-chat' };
+  const placement = { async acquire(request, owner) {
+    if (!moving) return { kind: 'inline', view: { kind: 'acquired', storage: await f.storage.reopen('inline-editor', () => {}) } };
+    assert.equal(owner.storage.closed, false, 'placement receives a current physical owner');
+    if (request.scope.conversationId === scope.conversationId) {
+      await owner.release();
+      if (outcome === 'refused before commit') throw new Error('Native request refused before commit');
+      handedOff = true;
+    }
+    return { kind: 'detached', scope: request.scope, label: `child-${request.scope.conversationId}` };
+  } };
+  f = fixture({ placement }); t.after(() => f.app.dispose()); f.storage.catalogViewId = 'original-view';
+  f.behavior.reopen = async id => { if (handedOff && id === 'inline-editor') throw new Error('The editor belongs to its recorded child window'); };
+  f.views.set('inline-editor/host', { ...empty(), route: scope });
+  await f.app.start(); assert.equal((await f.app.openReserved(scope)).kind, 'inline');
+  await f.app.getSnapshot().active.store.setDraft('Native draft one — keep this exact text'); moving = true;
+  const result = await f.app.openReserved(scope);
+  if (outcome === 'detached') {
+    assert.equal(result.kind, 'detached'); assert.equal(f.app.getSnapshot().active, null);
+    assert.equal((await f.app.openReserved(second)).kind, 'detached', 'main can still open the next catalog chat');
+    assert.equal(f.app.getSnapshot().error, '');
+  } else {
+    assert.equal(result.kind, 'refused'); assert.deepEqual(f.app.getSnapshot().active.scope, scope);
+    assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft, 'Native draft one — keep this exact text');
+    await f.app.getSnapshot().active.store.setDraft('Still writable after refusal');
+  }
+  assert.equal(f.app.getSnapshot().storageFailure, '');
+  assert.equal(f.drafts.get('inline-editor/host/conversation').draft, outcome === 'detached' ? 'Native draft one — keep this exact text' : 'Still writable after refusal');
+  assert.deepEqual(f.submitted, []);
+});
+
+test('a source activation failure after refused placement remains visible', async t => {
+  let moving = false, f;
+  const placement = { async acquire(request, owner) {
+    if (!moving) return { kind: 'inline', view: { kind: 'acquired', storage: await f.storage.reopen('source-editor', () => {}) } };
+    await owner.release();
+    f.behavior.navigation = async () => { throw new Error('Source navigation could not be restored'); };
+    throw new Error('Native placement refused');
+  } };
+  f = fixture({ placement }); f.storage.catalogViewId = 'original-view'; t.after(() => f.app.dispose());
+  await f.app.start(); await f.app.openReserved(scope); moving = true;
+  assert.equal((await f.app.openReserved(scope)).kind, 'refused');
+  assert.match(f.app.getSnapshot().error, /Source navigation could not be restored/);
+});
+
+for (const native of ['refused', 'thrown']) test(`released-source read abort returns to catalog and retains ${native} placement guidance`, async t => {
+  let moving=false, readSource=false, f;
+  const guidance='Inspect saved window recovery before retrying: the native reservation could not be confirmed cancelled.';
+  const second={...scope,conversationId:'catalog-after-read-abort'};
+  const placement={async acquire(request,owner){
+    assert.equal(owner.storage.closed,false,'placement receives a current lease');
+    if(!moving)return{kind:'inline',view:{kind:'acquired',storage:await f.storage.reopen('read-abort-source',()=>{})}};
+    if(request.scope.conversationId!==scope.conversationId)return{kind:'detached',scope:request.scope,label:'next-catalog-child'};
+    await owner.release();
+    if(native==='thrown')throw new Error(guidance);
+    return{kind:'refused',reason:guidance};
+  }};
+  f=fixture({placement});f.storage.catalogViewId='original-view';t.after(()=>f.app.dispose());
+  f.behavior.reopen=async id=>{if(moving&&id==='read-abort-source')readSource=true;};
+  f.behavior.read=async()=>{if(readSource){readSource=false;throw new Error('Source saved-view transaction aborted');}};
+  await f.app.start();await f.app.openReserved(scope);
+  await f.app.getSnapshot().active.store.setDraft('Preserve source through a readonly load abort');moving=true;
+  const result=await f.app.openReserved(scope);
+  assert.equal(result.kind,'refused');assert.match(result.reason,/Inspect saved window recovery/);assert.match(result.reason,/Source saved-view transaction aborted/);
+  assert.match(f.app.getSnapshot().error,/Inspect saved window recovery/);assert.match(f.app.getSnapshot().error,/Source saved-view transaction aborted/);
+  assert.equal(f.app.getSnapshot().active,null);assert.equal(f.app.getSnapshot().storageFailure,'');
+  assert.equal(f.app.getSnapshot().saved,f.views.get('original-view/host'),'the retained catalog is loaded');
+  assert.equal((await f.app.openReserved(second)).kind,'detached','a subsequent catalog action remains usable');
+  assert.equal(f.drafts.get('read-abort-source/host/conversation').draft,'Preserve source through a readonly load abort');
+  assert.deepEqual(f.submitted,[]);
+});
+
+for(const native of ['refused','thrown'])test(`source activation failure keeps both ${native} native guidance and the restoration cause`,async t=>{
+  let moving=false,f;
+  const guidance='Inspect saved window recovery before retrying: cancellation is unconfirmed.';
+  const placement={async acquire(_request,owner){
+    if(!moving)return{kind:'inline',view:{kind:'acquired',storage:await f.storage.reopen('activation-source',()=>{})}};
+    await owner.release();f.behavior.navigation=async()=>{throw new Error('Source navigation could not be restored');};
+    if(native==='thrown')throw new Error(guidance);
+    return{kind:'refused',reason:guidance};
+  }};
+  f=fixture({placement});f.storage.catalogViewId='original-view';t.after(()=>f.app.dispose());
+  await f.app.start();await f.app.openReserved(scope);moving=true;
+  const result=await f.app.openReserved(scope);
+  assert.equal(result.kind,'refused');assert.match(result.reason,/Inspect saved window recovery/);assert.match(result.reason,/Source navigation could not be restored/);
+  assert.match(f.app.getSnapshot().error,/Inspect saved window recovery/);assert.match(f.app.getSnapshot().error,/Source navigation could not be restored/);
+  assert.equal(f.app.getSnapshot().saved,f.views.get('activation-source/host'),'activation failure is not hidden by a catalog fallback');
+  assert.match(f.app.getSnapshot().storageFailure,/Source navigation could not be restored/);
+  assert.equal(applicationEnabled(f.app.getSnapshot()),false);
+});
+
+test('a current pending native refusal preserves the unavailable-host reconnect diagnostic',async t=>{
+  const f=fixture({placement:{async acquire(request){return{kind:'pending',scope:request.scope,reason:'Native request is pending'};}}});
+  t.after(()=>f.app.dispose());await f.app.start();const pending=await f.app.openReserved(scope);
+  f.connectionLost(new ServiceConnectionLost('Host disconnected. Reconnect before continuing.'));const before=f.app.getSnapshot().error;
+  assert.equal(f.app.settlePlacement(pending,{kind:'refused',reason:'Native window refused after disconnect'}),true);
+  assert.equal(f.app.getSnapshot().lastPlacement.kind,'refused');assert.equal(f.app.getSnapshot().lastPlacement.reason,'Native window refused after disconnect');
+  assert.equal(f.app.getSnapshot().error,before);
+});
+
+for(const terminal of ['refused','thrown'])test(`an in-flight ${terminal} native response preserves unavailable-host guidance`,async t=>{
+  const entered=deferred(),gate=deferred();
+  const f=fixture({placement:{async acquire(){entered.resolve();return gate.promise;}}});
+  t.after(()=>f.app.dispose());await f.app.start();const opening=f.app.openReserved(scope);await entered.promise;
+  f.connectionLost(new ServiceConnectionLost('Connection lost. Reconnect to restore host access.'));const before=f.app.getSnapshot().error;
+  if(terminal==='refused')gate.resolve({kind:'refused',reason:'Native request refused while host was away'});else gate.reject(new Error('Native request threw while host was away'));
+  const result=await opening;assert.equal(result.kind,'refused');assert.match(result.reason,/Native request/);assert.equal(f.app.getSnapshot().lastPlacement,result);
+  assert.equal(f.app.getSnapshot().error,before);
+});
+
+for(const kind of ['pending','detached'])test(`known ${kind} placement survives a failed main catalog read`,async t=>{
+  let moving=false,abortCatalog=false,f,native;
+  const placement={async acquire(request,owner){
+    if(!moving)return{kind:'inline',view:{kind:'acquired',storage:await f.storage.reopen('known-placement-source',()=>{})}};
+    if(owner.storage.viewId==='known-placement-source'){await owner.release();abortCatalog=true;}
+    native??=kind==='pending'?{kind,scope:request.scope,reason:'Assigned child is still becoming ready'}:{kind,scope:request.scope,label:'known-child'};
+    return native;
+  }};
+  f=fixture({placement});f.storage.catalogViewId='original-view';t.after(()=>f.app.dispose());
+  f.behavior.read=async()=>{if(abortCatalog){abortCatalog=false;throw new Error('Retained main catalog read aborted');}};
+  await f.app.start();await f.app.openReserved(scope);await f.app.getSnapshot().active.store.setDraft('Exact source before known handoff');moving=true;
+  const result=await f.app.openReserved(scope);
+  assert.equal(result,native,'local restoration cannot change a known native result');assert.equal(f.app.getSnapshot().lastPlacement,native);
+  assert.match(f.app.getSnapshot().error,/Retained main catalog read aborted/);assert.equal(f.app.getSnapshot().active,null);
+  assert.equal(applicationEnabled(f.app.getSnapshot()),false);assert.match(f.app.getSnapshot().storageFailure,/Retained main catalog read aborted/);
+  const failedOwner=f.leases.find(lease=>lease.viewId==='original-view'&&!lease.closed);
+  assert.equal(f.drafts.get('known-placement-source/host/conversation').draft,'Exact source before known handoff');
+  await f.app.reconnect();assert.equal(f.app.getSnapshot().error,'');assert.equal(f.app.getSnapshot().storageFailure,'');assert.equal(applicationEnabled(f.app.getSnapshot()),true);assert.equal(f.app.getSnapshot().saved,f.views.get('original-view/host'));
+  assert.equal(failedOwner.closed,true,'explicit reconnect releases the failed physical catalog owner');assert.ok(f.leases.some(lease=>lease!==failedOwner&&lease.viewId==='original-view'&&!lease.closed));
+  await f.app.refreshCatalog();assert.ok(f.app.getSnapshot().catalog.items.length);assert.equal(f.drafts.get('known-placement-source/host/conversation').draft,'Exact source before known handoff');
+});
+
+for(const kind of ['pending','detached'])test(`confirmed creation keeps known ${kind} placement after main restoration fails`,async t=>{
+  let abortCatalog=false,f,native;
+  const placement={async acquire(request,owner){
+    if(request.creation)return{kind:'inline',view:{kind:'acquired',storage:await f.storage.reopen('known-creation-source',()=>{})}};
+    if(owner.storage.viewId!=='known-creation-source')return native;
+    await owner.release();abortCatalog=true;
+    native=kind==='pending'?{kind,scope:request.scope,reason:'Created child is becoming ready'}:{kind,scope:request.scope,label:'created-child'};return native;
+  }};
+  f=fixture({placement});f.storage.catalogViewId='original-view';t.after(()=>f.app.dispose());
+  f.behavior.read=async()=>{if(abortCatalog){abortCatalog=false;throw new Error('Created chat main catalog read aborted');}};
+  await f.app.start();const result=await f.app.create();
+  assert.equal(result,native);assert.equal(f.app.getSnapshot().lastPlacement,native);assert.match(f.app.getSnapshot().error,/Created chat main catalog read aborted/);
+  assert.deepEqual(f.created,[native.scope]);assert.deepEqual(f.views.get('known-creation-source/host').pendingCreation.scope,native.scope,'local uncertainty never erases the creation record');
+  assert.equal(applicationEnabled(f.app.getSnapshot()),false);assert.match(f.app.getSnapshot().storageFailure,/Created chat main catalog read aborted/);const sourceSaved=structuredClone(f.views.get('known-creation-source/host'));
+  await f.app.reconnect();assert.equal(f.app.getSnapshot().storageFailure,'');assert.equal(applicationEnabled(f.app.getSnapshot()),true);await f.app.refreshCatalog();assert.deepEqual(f.views.get('known-creation-source/host'),sourceSaved);assert.deepEqual(f.created,[native.scope]);
+});
+
+test('unavailable-host precheck preserves disconnect guidance before opening',async t=>{
+  let requests=0;const f=fixture({placement:{async acquire(){requests++;throw new Error('No placement while host is unavailable');}}});t.after(()=>f.app.dispose());
+  await f.app.start();f.connectionLost(new ServiceConnectionLost('Host disconnected during native intent lookup. Reconnect to continue.'));
+  const before=f.app.getSnapshot().error,result=await f.app.openReserved(scope);
+  assert.equal(result.kind,'refused');assert.equal(f.app.getSnapshot().error,before);assert.equal(requests,0);assert.equal(f.app.getSnapshot().busy,false);
+});
+
+test('double source and catalog read failure retains both causes with native guidance',async t=>{
+  let moving=false,f;const failures=[];
+  const placement={async acquire(_request,owner){
+    if(!moving)return{kind:'inline',view:{kind:'acquired',storage:await f.storage.reopen('double-read-source',()=>{})}};
+    await owner.release();failures.push('Original source read aborted','Fallback catalog read aborted');return{kind:'refused',reason:'Inspect uncertain native reservation before retrying'};
+  }};
+  f=fixture({placement});f.storage.catalogViewId='original-view';t.after(()=>f.app.dispose());f.behavior.read=async()=>{if(failures.length)throw new Error(failures.shift());};
+  await f.app.start();await f.app.openReserved(scope);moving=true;const result=await f.app.openReserved(scope);
+  assert.equal(result.kind,'refused');for(const part of ['Inspect uncertain native reservation','Original source read aborted','Fallback catalog read aborted']){assert.ok(result.reason.includes(part));assert.ok(f.app.getSnapshot().error.includes(part));}
+});
+
+for(const action of ['release','quiesce'])test(`late native refusal after ${action} does not restart a disconnected source feed`,async t=>{
+  let moving=false,f;const entered=deferred(),gate=deferred();
+  const placement={async acquire(_request,owner){
+    if(!moving)return owner.storage.viewId==='feed-source'?{kind:'inline',view:{kind:'owned',viewId:owner.storage.viewId}}:{kind:'inline',view:{kind:'acquired',storage:await f.storage.reopen('feed-source',()=>{})}};
+    await owner[action]();entered.resolve();return gate.promise;
+  }};
+  f=fixture({placement});f.storage.catalogViewId='original-view';t.after(()=>f.app.dispose());await f.app.start();await f.app.openReserved(scope);
+  const draft='Keep exact draft across disconnected source restore';await f.app.getSnapshot().active.store.setDraft(draft);const feeds=f.feeds.length;moving=true;
+  const opening=f.app.openReserved(scope);await entered.promise;f.connectionLost(new ServiceConnectionLost('Disconnected after source handoff. Explicitly reconnect.'));const before=f.app.getSnapshot().error;
+  gate.resolve({kind:'refused',reason:'Native request refused after source pause'});assert.equal((await opening).kind,'refused');
+  assert.equal(f.feeds.length,feeds,'no new host feed opens before explicit reconnect');assert.equal(f.app.getSnapshot().active,null);assert.equal(f.app.getSnapshot().error,before);
+  moving=false;await f.app.reconnect();assert.equal(f.feeds.length,feeds+1);assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft,draft);
+});
+
+for(const stage of ['startup','reconnect'])test(`${stage} saved-route late placement failure preserves authoritative disconnect guidance`,async t=>{
+  let holding=stage==='startup';const entered=deferred(),gate=deferred();
+  const f=fixture({placement:{async acquire(_request,owner){if(holding){entered.resolve();return gate.promise;}return{kind:'inline',view:{kind:'owned',viewId:owner.storage.viewId}};}}});
+  t.after(()=>f.app.dispose());f.views.set('original-view/host',{...empty(),route:scope});
+  f.drafts.set('original-view/host/conversation',{version:3,scope,draft:'Saved route exact draft',draftRevision:1,image:null,outbox:[],frontendSends:[]});
+  let restoring;if(stage==='startup')restoring=f.app.start();else{await f.app.start();holding=true;restoring=f.app.reconnect();}
+  await entered.promise;const feeds=f.feeds.length;f.connectionLost(new ServiceConnectionLost('Connection lost during saved-route placement. Reconnect required.'));const before=f.app.getSnapshot().error;
+  gate.reject(new Error('Late native saved-route placement failed'));await restoring;
+  assert.equal(f.app.getSnapshot().host.kind,'unavailable');assert.equal(f.app.getSnapshot().error,before);assert.equal(f.feeds.length,feeds);
+  assert.equal(f.app.getSnapshot().lastPlacement.kind,'refused');assert.match(f.app.getSnapshot().lastPlacement.reason,/Late native saved-route placement failed/);
+  holding=false;await f.app.reconnect();assert.equal(f.app.getSnapshot().error,'');assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft,'Saved route exact draft');
+});
+
+for(const stage of ['initial','reconnect'])test(`${stage} handshake still exposes its fresh failure cause`,async t=>{
+  const f=fixture();t.after(()=>f.app.dispose());if(stage==='reconnect'){await f.app.start();f.connectionLost(new ServiceConnectionLost('Old connection diagnostic'));}
+  f.behavior.metadata=async()=>{throw new Error('Fresh handshake metadata failure');};if(stage==='initial')await f.app.start();else await f.app.reconnect();
+  assert.equal(f.app.getSnapshot().error,'Fresh handshake metadata failure');assert.equal(f.app.getSnapshot().host.kind,'unavailable');
+});
+
+async function failedRestoration(t,native,fault,{catalog=true,disconnect=false}={}){
+  let f,moving=false,selectFailure=false,requests=0,known;const reads=[];
+  const placement={async acquire(request,owner){
+    requests++;
+    if(!moving)return owner.storage.viewId==='unhealthy-source'?{kind:'inline',view:{kind:'owned',viewId:owner.storage.viewId}}:{kind:'inline',view:{kind:'acquired',storage:await f.storage.reopen('unhealthy-source',()=>{})}};
+    if(owner.storage.viewId==='unhealthy-source'){
+      await owner.release();
+      if(fault==='select')selectFailure=true;else reads.push(...(native==='pending'?['Catalog load aborted']:['Source load aborted','Catalog load aborted']));
+      if(disconnect)f.connectionLost(new ServiceConnectionLost('Connection lost after release. Reconnect required.'));
+    }
+    if(native==='thrown')throw new Error('Native launch threw; inspect its reservation');
+    known??=native==='pending'?{kind:'pending',scope:request.scope,reason:'Recorded child remains pending'}:{kind:'refused',reason:'Native reservation needs inspection'};
+    return known;
+  }};
+  f=fixture({placement});if(catalog)f.storage.catalogViewId='original-view';t.after(()=>f.app.dispose());
+  f.behavior.read=async()=>{if(reads.length)throw new Error(reads.shift());};
+  f.behavior.reopen=async id=>{if(moving&&fault==='select'&&id==='unhealthy-source'&&(native!=='pending'||!catalog))throw new Error('Former source is unavailable');};
+  f.behavior.select=()=>{if(selectFailure){selectFailure=false;throw new Error('Catalog selection aborted');}};
+  await f.app.start();await f.app.openReserved(scope);await f.app.getSnapshot().active.store.setDraft('C8 source bytes');moving=true;
+  const result=await f.app.openReserved(scope);
+  return{f,result,known:()=>known,requests:()=>requests,ready:()=>{moving=false;selectFailure=false;reads.length=0;}};
+}
+
+for(const native of ['pending','refused','thrown'])for(const fault of ['read','select'])test(`${native} placement with ${fault} restoration failure has the same disabled local-owner state`,async t=>{
+  const x=await failedRestoration(t,native,fault),{f,result}=x;
+  assert.equal(result.kind,native==='pending'?'pending':'refused');if(native==='pending')assert.equal(result,x.known());
+  assert.equal(applicationEnabled(f.app.getSnapshot()),false);assert.match(f.app.getSnapshot().storageFailure,/Catalog (load|selection) aborted/);
+  if(native!=='pending'){assert.match(result.reason,/Native/);assert.match(result.reason,/Catalog (load|selection) aborted/);}
+  const requests=x.requests();await f.app.openReserved({...scope,conversationId:'must-not-place-while-unloaded'});assert.equal(x.requests(),requests,'failed local storage cannot issue another native placement');
+  x.ready();await f.app.reconnect();assert.equal(f.app.getSnapshot().storageFailure,'');assert.equal(applicationEnabled(f.app.getSnapshot()),true);assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft,'C8 source bytes');
+});
+
+test('explicit reconnect recovers a missing owner without a retained catalog',async t=>{
+  const x=await failedRestoration(t,'thrown','select',{catalog:false}),{f}=x;
+  assert.equal(applicationEnabled(f.app.getSnapshot()),false);assert.match(f.app.getSnapshot().storageFailure,/Former source is unavailable/);
+  x.ready();await f.app.reconnect();assert.equal(f.app.getSnapshot().storageFailure,'');assert.equal(applicationEnabled(f.app.getSnapshot()),true);assert.equal((await f.app.openReserved(scope)).kind,'inline');assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft,'C8 source bytes');
+});
+
+test('later teardown cancels a storage-recovery restart while its original disposal drains',async t=>{
+  const x=await failedRestoration(t,'pending','read'),{f}=x;const entered=deferred(),close=deferred();t.after(close.resolve);
+  f.behavior.close=async owner=>{if(owner.viewId==='original-view'){entered.resolve();await close.promise;}};
+  const owners=f.leases.length,metadata=f.metadataCalls(),feeds=f.feeds.length;x.ready();const reconnecting=f.app.reconnect();await entered.promise;
+  const teardown=f.app.dispose();
+  try { assert.equal(f.app.dispose(),teardown,'repeated teardown shares disposal while cancelling the queued restart'); }
+  finally { close.resolve(); }
+  await Promise.all([reconnecting,teardown]);
+  assert.equal(f.leases.length,owners,'no replacement owner starts after teardown');assert.equal(f.metadataCalls(),metadata);assert.equal(f.feeds.length,feeds);assert.ok(f.leases.every(owner=>owner.closed));
+  assert.equal(f.drafts.get('unhealthy-source/host/conversation').draft,'C8 source bytes');
+});
+
+for(const fault of ['draft','route'])test(`saved-route ${fault} recovery failure preserves the already reported inline placement`,async t=>{
+  const newest={...scope,conversationId:'reported-inline-successor'};let f;
+  const placement={async acquire(_request,owner){
+    if(fault==='route')owner.storage.saveView=async()=>{throw new Error('Recovered route write aborted');};
+    return{kind:'inline',view:{kind:'owned',viewId:owner.storage.viewId}};
+  }};
+  f=fixture({placement});t.after(()=>f.app.dispose());f.views.set('original-view/host',{...empty(),route:scope});
+  f.drafts.set('original-view/host/conversation',{version:3,scope,draft:'Original predecessor bytes',draftRevision:1,image:null,outbox:[],frontendSends:[]});
+  f.behavior.continuation=async input=>input.scope.conversationId===scope.conversationId?{predecessor:null,carried:null,closure:'cancelled',successor:{kind:'confirmed',scope:newest}}:{predecessor:null,carried:null,closure:null,successor:null};
+  f.storage.locate=async selected=>{if(fault==='draft'&&selected.conversationId===scope.conversationId&&f.app.getSnapshot().active?.scope.conversationId===newest.conversationId)throw new Error('Predecessor draft lookup aborted');return null;};
+  await f.app.start();assert.deepEqual(f.app.getSnapshot().active.scope,newest);assert.equal(f.app.getSnapshot().lastPlacement.kind,'inline');assert.deepEqual(f.app.getSnapshot().lastPlacement.scope,newest);
+  assert.match(f.app.getSnapshot().error,fault==='draft'?/Predecessor draft lookup aborted/:/Recovered route write aborted/);assert.equal(f.drafts.get('original-view/host/conversation').draft,'Original predecessor bytes');
+});
+
+test('a known pending outcome with local read failure keeps the authoritative disconnect diagnostic',async t=>{
+  const x=await failedRestoration(t,'pending','read',{disconnect:true}),{f,result}=x;
+  assert.equal(result,x.known());assert.equal(f.app.getSnapshot().lastPlacement,result);assert.match(f.app.getSnapshot().storageFailure,/Catalog load aborted/);
+  assert.equal(f.app.getSnapshot().error,'Connection lost after release. Reconnect required.');assert.equal(applicationEnabled(f.app.getSnapshot()),false);
+});
+
+test('detached creation cleanup waits for reconnect without placing the confirmed creation again',async t=>{
+  let f,native,disconnect=true;let requests=0;const placement={async acquire(request,owner){
+    if(request.creation)return{kind:'inline',view:{kind:'owned',viewId:owner.storage.viewId}};
+    requests++;
+    if(disconnect)f.connectionLost(new ServiceConnectionLost('Disconnected before local creation cleanup. Reconnect.'));
+    native={kind:'detached',scope:request.scope,label:'already-open-child'};return native;
+  }};
+  f=fixture({placement});t.after(()=>f.app.dispose());await f.app.start();const result=await f.app.create();
+  assert.equal(result,native);assert.equal(f.app.getSnapshot().lastPlacement,native);assert.equal(f.app.getSnapshot().error,'Disconnected before local creation cleanup. Reconnect.');assert.deepEqual(f.views.get('original-view/host').pendingCreation.scope,native.scope);
+  const created=f.created.length;disconnect=false;await f.app.reconnect();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.views.get('original-view/host').pendingCreation,null);assert.equal(f.app.getSnapshot().saved.pendingCreation,null);
+  assert.equal(f.created.length,created,'confirmed host creation is not replayed');assert.equal(requests,1,'confirmed native placement is not replayed');
+  assert.equal((await f.app.create()).kind,'detached');assert.equal(f.created.length,created+1);
+});
+
+test('explicit refresh clears stale connection guidance while loading',async t=>{
+  const f=fixture();t.after(()=>f.app.dispose());await f.app.start();f.connectionLost(new ServiceConnectionLost('Old disconnect guidance'));
+  const entered=deferred(),metadata=deferred();t.after(metadata.resolve);f.behavior.metadata=async()=>{entered.resolve();await metadata.promise;};const reconnecting=f.app.reconnect();await entered.promise;
+  assert.equal(f.app.getSnapshot().host.kind,'loading');assert.equal(f.app.getSnapshot().error,'');metadata.resolve();await reconnecting;assert.equal(f.app.getSnapshot().host.kind,'ready');
+});
+
+test('definitive incompatible metadata replaces stale disconnect guidance',async t=>{
+  const f=fixture();t.after(()=>f.app.dispose());await f.app.start();f.connectionLost(new ServiceConnectionLost('Stale unavailable-host message'));f.behavior.wireVersion='incompatible-wire';await f.app.reconnect();
+  assert.equal(f.app.getSnapshot().host.kind,'incompatible');assert.equal(f.app.getSnapshot().error,'');
+});
+
+test('a new disconnect during refresh remains authoritative over late incompatible metadata',async t=>{
+  const f=fixture();t.after(()=>f.app.dispose());await f.app.start();f.connectionLost(new ServiceConnectionLost('Old disconnect'));
+  const entered=deferred(),metadata=deferred();t.after(metadata.resolve);f.behavior.metadata=async()=>{entered.resolve();await metadata.promise;};f.behavior.wireVersion='incompatible-wire';const reconnecting=f.app.reconnect();await entered.promise;
+  f.connectionLost(new ServiceConnectionLost('New disconnect during explicit refresh'));metadata.resolve();await reconnecting;
+  assert.equal(f.app.getSnapshot().host.kind,'unavailable');assert.equal(f.app.getSnapshot().error,'New disconnect during explicit refresh');
+});
+
+
+test('loaded catalog storage read failure can be retried explicitly after storage recovers', async t => {
+  const f = fixture(); t.after(() => f.app.dispose());
+  await f.app.start();
+  const firstOwner = f.leases[0];
+  f.connectionLost(new ServiceConnectionLost('Reconnect to inspect local storage.'));
+  let reads = 0;
+  f.behavior.read = async () => { if (++reads === 1) throw new Error('Transient saved-view read failure'); };
+  await f.app.reconnect();
+  assert.match(f.app.getSnapshot().storageFailure, /Transient saved-view read failure/);
+  await f.app.reconnect();
+  assert.ok(reads >= 2, 'a fresh explicit retry reaches saved-view storage');
+  assert.equal(applicationEnabled(f.app.getSnapshot()), true);
+  assert.equal(firstOwner.closed, true);
+  assert.equal(f.app.getSnapshot().storageFailure, '');
+});
+
+test('restoration navigation failure disables the owning catalog and explicit reconnect restores its saved draft', async t => {
+  let f, moving = false;
+  const placement = { async acquire(request, owner) {
+    if (moving) { await owner.quiesce(); f.behavior.navigation = async () => { throw new Error('Catalog navigation transaction failed'); }; return { kind: 'refused', reason: 'Child placement refused' }; }
+    return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+  } };
+  f = fixture({ placement }); f.storage.catalogViewId = 'original-view'; t.after(() => f.app.dispose());
+  f.views.set('original-view/host', { ...empty(), route: scope });
+  await f.app.start(); await f.app.getSnapshot().active.store.setDraft('Navigation recovery exact bytes');
+  moving = true;
+  const result = await f.app.openReserved({ ...scope, conversationId: 'other' });
+  assert.equal(result.kind, 'refused');
+  assert.equal(applicationEnabled(f.app.getSnapshot()), false);
+  assert.match(f.app.getSnapshot().storageFailure, /Catalog navigation transaction failed/);
+  assert.equal(f.app.getSnapshot().active, null);
+  moving = false; f.behavior.navigation = async () => {};
+  await f.app.reconnect();
+  assert.equal(applicationEnabled(f.app.getSnapshot()), true);
+  assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft, 'Navigation recovery exact bytes');
+});
+
+test('an opening rejected by local storage preserves the previously admitted pending placement identity', async t => {
+  const x = await failedRestoration(t, 'pending', 'read'), { f, result } = x;
+  assert.equal(f.app.getSnapshot().lastPlacement, result);
+  const rejected = await f.app.openReserved({ ...scope, conversationId: 'cannot-open' });
+  assert.equal(rejected.kind, 'refused');
+  assert.equal(f.app.getSnapshot().lastPlacement, result, 'no new placement request displaced its pending owner');
+  const terminal = { kind: 'detached', scope: result.scope, label: 'original-child' };
+  assert.equal(f.app.settlePlacement(result, terminal), true);
+  assert.equal(f.app.getSnapshot().lastPlacement, terminal);
+});
+
+test('a principal transition interrupted by disconnect clears the old active editor before publishing ready', async t => {
+  const f = fixture(), gate = deferred(), entered = deferred(), lookup = deferred(), lookupEntered = deferred();
+  t.after(async () => { gate.resolve(); lookup.resolve(); await f.app.dispose(); });
+  f.behavior.frontendOffers = 'ag-ui-capture-and-bind';
+  f.views.set('original-view/host', { ...empty(), route: scope });
+  const generation = await createFrontendToolGeneration({ namespace: 'fixture', generation: 'principal-transition', platform: 'desktop', capture: () => undefined,
+    activate({ frontendTools }) { frontendTools.add({ definition: { name: 'echo', description: 'Retained callback' }, decodeInput: x => x, async execute() { throw new Error('No effects'); } }); return { dispose() {} }; } });
+  t.after(() => generation.generation.retire());
+  const token = {}; f.app.frontendGenerations.begin(token); f.app.frontendGenerations.publish(token, { kind: 'ready', generations: [generation.generation] });
+  await f.app.start(); const original = f.app.getSnapshot().active;
+  await assert.rejects(original.store.send('Retain original principal capture'), /Reply lost/);
+  let held = true;
+  f.behavior.write = async () => { if (held) { entered.resolve(); await gate.promise; } };
+  f.behavior.principalId = 'replacement';
+  const transitioning = f.app.reconnect(); await entered.promise;
+  f.connectionLost(new ServiceConnectionLost('Disconnected during principal authority transition'));
+  held = false; gate.resolve(); await transitioning;
+  assert.equal(f.app.getSnapshot().host.kind, 'unavailable');
+  f.behavior.agentLookup = async () => { lookupEntered.resolve(); await lookup.promise; return f.descriptor(); };
+  const ready = []; const unsubscribe = f.app.subscribe(() => { const state = f.app.getSnapshot(); if (state.host.kind === 'ready') ready.push(state.active); });
+  try {
+    const reconnecting = f.app.reconnect(); await lookupEntered.promise;
+    assert.ok(ready.length > 0);
+    assert.equal(ready[0], null, 'the old principal active editor is cleared before ready publication');
+    lookup.resolve(); await reconnecting;
+  } finally { unsubscribe(); lookup.resolve(); }
+  assert.equal(f.drafts.get('original-view/host/conversation').frontendSends[0].ownerId, 'principal');
+});
+
+
+for (const fault of ['read', 'same-navigation', 'other-navigation']) test(`active editor storage recovery restores exact saved bytes after ${fault} fault`, async t => {
+  const f = fixture(); f.storage.catalogViewId = 'original-view'; t.after(() => f.app.dispose());
+  f.views.set('original-view/host', { ...empty(), route: scope }); await f.app.start();
+  await f.app.getSnapshot().active.store.setDraft('Active storage recovery exact bytes');
+  const original = f.leases[0];
+  if (fault === 'read') { let once = true; f.behavior.read = async () => { if (once) { once = false; throw new Error('One-shot active read abort'); } }; await f.app.reconnect(); }
+  else { let once = true; f.behavior.navigation = async () => { if (once) { once = false; throw new Error('One-shot active navigation abort'); } }; await f.app.openReserved(fault === 'same-navigation' ? scope : { ...scope, conversationId: 'other-active-target' }); }
+  assert.equal(applicationEnabled(f.app.getSnapshot()), false); assert.ok(f.app.getSnapshot().active);
+  await f.app.reconnect();
+  assert.equal(applicationEnabled(f.app.getSnapshot()), true); assert.equal(original.closed, true);
+  assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft, 'Active storage recovery exact bytes');
+  assert.deepEqual(f.app.getSnapshot().active.scope, scope); assert.deepEqual(f.submitted, []);
+});
+
+for (const kind of ['pending', 'detached']) test(`one reconnect reactivates retained source while confirmed ${kind} creation cleanup completes`, async t => {
+  let f, separate = false;
+  const placement = { async acquire(request, owner) {
+    if (request.creation || !separate) return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+    f.connectionLost(new ServiceConnectionLost('Creation placement disconnected the source'));
+    return kind === 'pending' ? { kind, scope: request.scope, reason: 'Awaiting known child' } : { kind, scope: request.scope, label: 'known-created-child' };
+  } };
+  f = fixture({ placement }); t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), route: scope }); await f.app.start();
+  const original = f.app.getSnapshot().active; await original.store.setDraft('Retained source exact bytes'); separate = true;
+  const result = await f.app.create(); if (kind === 'pending') f.app.settlePlacement(result, { kind: 'detached', scope: result.scope, label: 'settled-child' });
+  const feeds = f.feeds.length; separate = false; await f.app.reconnect();
+  assert.equal(f.app.getSnapshot().saved.pendingCreation, null); assert.equal(f.feeds.length, feeds + 1, 'one explicit reconnect opens the retained source feed');
+  assert.equal(f.app.getSnapshot().active.store, original.store); assert.equal(f.app.getSnapshot().active.store.getSnapshot().draft, 'Retained source exact bytes');
+  assert.equal(f.created.length, 1);
+});
+
+for (const kind of ['pending', 'detached']) test(`confirmed ${kind} creation marker cleanup survives a failed commit and storage reacquisition`, async t => {
+  let f, finalPlacements = 0, fail = true;
+  const placement = { async acquire(request, owner) {
+    if (request.creation) return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } };
+    finalPlacements++;
+    const save = owner.storage.saveView.bind(owner.storage);
+    owner.storage.saveView = async (host, next) => { if (fail && next.pendingCreation === null) throw new Error('Creation cleanup commit aborted'); return save(host, next); };
+    return kind === 'pending' ? { kind, scope: request.scope, reason: 'Waiting for child' } : { kind, scope: request.scope, label: 'known-created-child' };
+  } };
+  f = fixture({ placement }); t.after(() => f.app.dispose()); await f.app.start(); const result = await f.app.create();
+  if (kind === 'pending') { f.app.settlePlacement(result, { kind: 'detached', scope: result.scope, label: 'settled-child' }); await new Promise(resolve => setImmediate(resolve)); }
+  assert.match(f.app.getSnapshot().storageFailure, /Creation cleanup commit aborted/); assert.deepEqual(f.views.get('original-view/host').pendingCreation.scope, result.scope);
+  fail = false; await f.app.reconnect();
+  assert.equal(f.app.getSnapshot().storageFailure, ''); assert.equal(f.views.get('original-view/host').pendingCreation, null);
+  assert.equal(f.created.length, 1, 'completed host creation was not replayed'); assert.equal(finalPlacements, 1, 'known detached placement was not replayed');
+  assert.equal((await f.app.create()).kind, kind); assert.equal(f.created.length, 2);
+});
+
+for (const target of ['other-view', 'new-marker']) test(`late confirmed creation cannot clear ${target} pending record`, async t => {
+  const placement = { async acquire(request, owner) { return request.creation ? { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } } : { kind: 'pending', scope: request.scope, reason: 'Late creation child' }; } };
+  const f = fixture({ placement }); t.after(() => f.app.dispose()); await f.app.start(); const pending = await f.app.create();
+  const other = { scope: { ...scope, conversationId: 'unrelated-pending-marker' }, agentId: 'other' };
+  if (target === 'other-view') { f.views.set('other-view/host', { ...empty(), pendingCreation: other }); await f.app.reopenView('other-view'); }
+  else { f.views.set('original-view/host', { ...empty(), pendingCreation: other }); await f.app.reconnect(); }
+  assert.equal(f.app.settlePlacement(pending, { kind: 'detached', scope: pending.scope, label: 'late-child' }), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.app.getSnapshot().saved.pendingCreation, other);
+  if (target === 'other-view') { await f.app.reopenView('original-view'); assert.equal(f.views.get('original-view/host').pendingCreation, null, 'original view cleanup resumes only when its matching marker is loaded'); }
+});
+
+test('storage-blocked placement refusal fits the placement parser and preserves prior identity', async t => {
+  const { parseConversationOpenResult } = await import('@openpane/contracts');
+  const x = await failedRestoration(t, 'pending', 'read'), { f, result } = x;
+  for (const diagnostic of ['x'.repeat(999) + '😀'.repeat(300), '\uD800']) {
+    f.leases.find(owner => !owner.closed).failure(new Error(diagnostic));
+    assert.equal(f.app.getSnapshot().storageFailure, diagnostic, 'the diagnostic reaches the failed owner before refusal');
+    const refused = await f.app.openReserved(scope);
+    assert.doesNotThrow(() => parseConversationOpenResult(refused)); assert.equal(f.app.getSnapshot().lastPlacement, result);
+  }
+});
+
+
+test('late pending creation settlement survives a storage restart without replaying creation', async t => {
+  let placements = 0;
+  const placement = { async acquire(request, owner) { if (!request.creation) { placements++; return { kind: 'pending', scope: request.scope, reason: 'Pending across local recovery' }; } return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } }; } };
+  const f = fixture({ placement }); t.after(() => f.app.dispose()); await f.app.start(); const pending = await f.app.create();
+  f.leases[0].failure(new Error('Reacquire original editor')); await f.app.reconnect();
+  assert.equal(f.app.getSnapshot().storageFailure, ''); assert.deepEqual(f.app.getSnapshot().saved.pendingCreation.scope, pending.scope);
+  assert.equal(f.app.settlePlacement(pending, { kind: 'detached', scope: pending.scope, label: 'late-after-restart' }), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.app.getSnapshot().saved.pendingCreation, null); assert.equal(f.created.length, 1); assert.equal(placements, 1);
+});
+
+test('active storage recovery retains image bytes and captured journal identity through the real lease pool', async t => {
+  const f = fixture(); t.after(() => f.app.dispose()); f.views.set('original-view/host', { ...empty(), route: scope });
+  f.drafts.set('original-view/host/conversation', journalRecord(scope));
+  f.behavior.binding = async request => ({ kind: 'pending', id: request.id }); f.behavior.uuids = true;
+  f.behavior.uploadImage = async input => ({ imageId: '00000000-0000-4000-8000-aaaaaaaaaaaa', name: input.name, mediaType: 'image/png', byteLength: input.bytes.byteLength, width: 1, height: 1 });
+  await f.app.start(); const active = f.app.getSnapshot().active;
+  await active.store.setDraft('Pinned capture and image exact draft');
+  await active.store.selectImage({ name: 'recovery.png', bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]) });
+  const saved = structuredClone(f.drafts.get('original-view/host/conversation'));
+  let once = true; f.behavior.read = async () => { if (once) { once = false; throw new Error('Read aborted with retained image and capture'); } };
+  await f.app.reconnect(); await f.app.reconnect();
+  const restored = f.app.getSnapshot().active.store.getSnapshot(), durable = f.drafts.get('original-view/host/conversation');
+  assert.equal(applicationEnabled(f.app.getSnapshot()), true); assert.equal(restored.draft, saved.draft); assert.equal(restored.image.status, 'ready');
+  assert.deepEqual(durable.image, saved.image); assert.deepEqual(durable.frontendSends[0].command, saved.frontendSends[0].command); assert.equal(durable.frontendSends[0].ownerId, saved.frontendSends[0].ownerId);
+  const imageBytes = await f.leases.find(owner => !owner.closed).drafts(() => {}).loadImage(scope, durable.image.selectionId);
+  assert.deepEqual([...imageBytes], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
+});
+
+
+test('confirmed creation arriving while storage recovery drains survives the sessionless interval', async t => {
+  let placements = 0;
+  const placement = { async acquire(request, owner) { if (!request.creation) { placements++; return { kind: 'pending', scope: request.scope, reason: 'Pending during physical recovery' }; } return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } }; } };
+  const f = fixture({ placement }), gate = deferred(), entered = deferred();
+  t.after(async () => { gate.resolve(); await f.app.dispose(); }); await f.app.start(); const pending = await f.app.create();
+  f.leases[0].failure(new Error('Recover original storage after closure'));
+  f.behavior.close = async () => { entered.resolve(); await gate.promise; };
+  const reconnecting = f.app.reconnect(); await entered.promise;
+  try { assert.equal(f.app.settlePlacement(pending, { kind: 'detached', scope: pending.scope, label: 'known-during-drain' }), true); }
+  finally { gate.resolve(); await reconnecting; }
+  assert.equal(f.app.getSnapshot().storageFailure, ''); assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
+  assert.equal(f.created.length, 1); assert.equal(placements, 1);
+});
+
+
+test('native readiness settling during a held send clears confirmed creation before commands become idle', async t => {
+  const { WindowRuntime } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  const { BrowserViewStorage } = await import('../../apps/desktop/dist/application/browser-storage.js');
+  const locate = BrowserViewStorage.locateEditor;
+  BrowserViewStorage.locateEditor = async () => ({ binding: null, legacyViewIds: [] });
+  t.after(() => { BrowserViewStorage.locateEditor = locate; });
+  const lookup = deferred(), lookupEntered = deferred(), send = deferred(), sendEntered = deferred();
+  let ready = false, holdRecovery = false, reservation;
+  const port = { context: { role: 'main', label: 'main', liveRelay: true }, async request(command) {
+    if (command.kind === 'reservations') return [reservation];
+    if (command.kind === 'lookup') {
+      if (holdRecovery) { holdRecovery = false; lookupEntered.resolve(); await lookup.promise; }
+      reservation = { scope: command.scope, viewId: 'native-target', label: 'known-child', transitionId: 'transition', creationAgentId: 'default', phase: ready ? 'target-ready' : 'requested', bindingRevision: ready ? 1 : null, writerGeneration: ready ? 1 : null };
+      return { kind: ready ? 'ready' : 'opening', reservation };
+    }
+    if (command.kind === 'launch') return { kind: 'pending', scope: command.scope, reason: 'Native readiness is in flight' };
+    throw new Error(command.kind);
+  } };
+  const coordinator = new WindowCoordinator(port);
+  const placement = { async acquire(request, owner) { return request.creation || request.scope.conversationId === scope.conversationId ? { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } } : coordinator.acquire(request, owner); } };
+  const f = fixture({ placement });
+  t.after(async () => { lookup.resolve(); send.resolve(); await f.app.dispose(); });
+  f.views.set('original-view/host', { ...empty(), route: scope }); await f.app.start(); await deliver(f);
+  const active = f.app.getSnapshot().active, pending = await f.app.create();
+  const runtime = Object.assign(Object.create(WindowRuntime.prototype), { context: { role: 'main' }, controller: f.app, coordinator, carryRecoveryAfter: null, policyScope: null,
+    snapshot: { placementNotice: null }, listeners: new Set(), port });
+  ready = true; holdRecovery = true;
+  const recovering = runtime.readRecovery(); await lookupEntered.promise;
+  f.behavior.submit = async command => { sendEntered.resolve(); await send.promise; return resultFor(command, { kind: 'completed' }); };
+  const sending = f.app.conversationActions(active).commands.send('Held fixture send'); await sendEntered.promise;
+  lookup.resolve(); await recovering;
+  assert.equal(f.app.getSnapshot().busy, true); assert.deepEqual(f.app.getSnapshot().saved.pendingCreation.scope, pending.scope);
+  send.resolve(); await sending;
+  assert.equal(f.app.getSnapshot().busy, false); assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
+  ready = false;
+  assert.equal((await f.app.create()).kind, 'pending', 'the next New Chat needs no failed click or creation replay');
+  assert.equal(f.created.length, 2);
+});
+
+test('coordinator refusal diagnostics stay nonempty, bounded and valid Unicode for the native boundary', async () => {
+  const { parseConversationOpenResult } = await import('@openpane/contracts');
+  for (const diagnostic of ['x'.repeat(999) + '😀', 'bad\uD800diagnostic', '']) {
+    const coordinator = new WindowCoordinator({ context: { role: 'main' }, async request() { throw new Error(diagnostic); } });
+    const result = await coordinator.acquire({ scope, creation: false, agentId: 'agent', agentLabel: 'Agent', carryFrom: null, initialDraft: null },
+      { storage: { viewId: 'source' }, holds: () => false, async quiesce() {}, async release() {} });
+    assert.equal(result.kind, 'refused'); assert.doesNotThrow(() => parseConversationOpenResult(result));
+    assert.doesNotMatch(result.reason, /[\uD800-\uDFFF]/u);
+  }
+});
+
+
+test('storage reconnect republishes the original pending creation identity for native recovery', async t => {
+  const { WindowRuntime } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  const { BrowserViewStorage } = await import('../../apps/desktop/dist/application/browser-storage.js');
+  const locate = BrowserViewStorage.locateEditor;
+  BrowserViewStorage.locateEditor = async () => ({ binding: null, legacyViewIds: [] });
+  t.after(() => { BrowserViewStorage.locateEditor = locate; });
+  let placements = 0, lookups = 0, ready = false, reservation;
+  const port = { context: { role: 'main', label: 'main', liveRelay: true }, async request(command) {
+    if (command.kind === 'reservations') return [reservation];
+    if (command.kind === 'lookup') { lookups++; reservation = { scope: command.scope, viewId: 'original-target', label: 'known-child', transitionId: 'original-attempt', creationAgentId: 'default', phase: ready ? 'target-ready' : 'requested', bindingRevision: ready ? 1 : null, writerGeneration: ready ? 1 : null }; return { kind: ready ? 'ready' : 'opening', reservation }; }
+    if (command.kind === 'launch') return { kind: 'pending', scope: command.scope, reason: 'Awaiting durable target readiness' };
+    throw new Error(command.kind);
+  } };
+  const coordinator = new WindowCoordinator(port);
+  const placement = { async acquire(request, owner) { if (!request.creation) { placements++; return coordinator.acquire(request, owner); } return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } }; } };
+  const f = fixture({ placement }); t.after(() => f.app.dispose()); await f.app.start(); const pending = await f.app.create();
+  assert.equal(pending.kind, 'pending');
+  f.leases[0].failure(new Error('Recover the original source editor')); await f.app.reconnect();
+  ready = true; const before = lookups;
+  const runtime = Object.assign(Object.create(WindowRuntime.prototype), { context: { role: 'main' }, controller: f.app, coordinator, carryRecoveryAfter: null, policyScope: null,
+    snapshot: { placementNotice: null }, listeners: new Set(), port });
+  await runtime.readRecovery(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(lookups, before + 1, 'native recovery discovers the retained pending placement after storage restart');
+  assert.equal(f.app.getSnapshot().saved.pendingCreation, null); assert.equal(f.app.getSnapshot().lastPlacement.kind, 'detached');
+  assert.equal(f.created.length, 1); assert.equal(placements, 1, 'recovery never repeats native placement');
+});
+
+
+test('native recovery discovers an earlier creation after another pending placement becomes current', async t => {
+  const { WindowRuntime } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  const { BrowserViewStorage } = await import('../../apps/desktop/dist/application/browser-storage.js');
+  const locate = BrowserViewStorage.locateEditor;
+  BrowserViewStorage.locateEditor = async () => ({ binding: null, legacyViewIds: [] });
+  t.after(() => { BrowserViewStorage.locateEditor = locate; });
+  const reservations = new Map(), calls = []; let completedScope = null, placements = 0;
+  const port = { context: { role: 'main', label: 'main', liveRelay: true }, async request(command) {
+    if (command.kind === 'reservations') return [...reservations.values()];
+    if (command.kind === 'lookup') {
+      calls.push(command.scope.conversationId); const completed = completedScope?.conversationId === command.scope.conversationId;
+      const reservation = { scope: command.scope, viewId: `target-${command.scope.conversationId}`, label: `child-${command.scope.conversationId}`, transitionId: `attempt-${command.scope.conversationId}`, creationAgentId: 'default', phase: completed ? 'target-ready' : 'requested', bindingRevision: completed ? 1 : null, writerGeneration: completed ? 1 : null };
+      reservations.set(command.scope.conversationId, reservation); return { kind: completed ? 'closed' : 'opening', reservation };
+    }
+    if (command.kind === 'launch') return { kind: 'pending', scope: command.scope, reason: 'Waiting for original target' };
+    throw new Error(command.kind);
+  } };
+  const coordinator = new WindowCoordinator(port);
+  const placement = { async acquire(request, owner) { if (!request.creation) { placements++; return coordinator.acquire(request, owner); } return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } }; } };
+  const f = fixture({ placement }); t.after(() => f.app.dispose()); await f.app.start(); const creation = await f.app.create();
+  assert.deepEqual(f.app.pendingPlacements(), [creation], 'the current creation identity is deduplicated');
+  const later = await f.app.openReserved({ hostId: 'host', conversationId: 'other-pending-chat' });
+  assert.equal(f.app.getSnapshot().lastPlacement, later); assert.deepEqual(f.app.pendingPlacements(), [creation, later]);
+  await f.app.reconnect(); assert.equal(f.app.getSnapshot().lastPlacement, later, 'a healthy refresh preserves the later opening identity');
+  completedScope = creation.scope; const before = calls.length;
+  const runtime = Object.assign(Object.create(WindowRuntime.prototype), { context: { role: 'main' }, controller: f.app, coordinator, carryRecoveryAfter: null, policyScope: null,
+    snapshot: { placementNotice: null }, listeners: new Set(), port });
+  await runtime.readRecovery(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.app.getSnapshot().saved.pendingCreation, null, 'earlier confirmed creation clears without being the current placement');
+  assert.deepEqual(calls.slice(before), [creation.scope.conversationId, later.scope.conversationId]);
+  assert.equal(f.app.getSnapshot().lastPlacement, later, 'earlier completion does not replace the later opening');
+  assert.deepEqual(f.app.pendingPlacements(), [later]); assert.equal(f.created.length, 1); assert.equal(placements, 2);
+});
+
+
+for (const recovery of ['rejected', 'ambiguous']) test(`native creation recovery preserves its ${recovery} outcome and unsent draft`, async t => {
+  const { WindowRuntime } = await import('../../apps/desktop/dist/application/window-runtime.js');
+  const targetScope = { hostId: 'host', conversationId: 'native-pending-creation' }, sourceScope = { hostId: 'host', conversationId: 'native-create-requester' };
+  const placement = { async acquire(_request, owner) { return { kind: 'inline', view: { kind: 'owned', viewId: owner.storage.viewId } }; } };
+  const f = fixture({ placement }); t.after(() => f.app.dispose());
+  f.drafts.set('original-view/host/native-pending-creation', { version: 3, scope: targetScope, draft: 'Preserve original unsent creation text', draftRevision: 1, image: null, outbox: [], frontendSends: [] });
+  f.behavior.agentLookup = async selected => selected.conversationId === sourceScope.conversationId ? f.descriptor() : null;
+  f.behavior.create = async () => { if (f.created.length === 1) throw new ServiceError('unavailable', 'First creation reply is ambiguous'); if (f.created.length === 2) throw new ServiceError(recovery === 'rejected' ? 'create-rejected' : 'unavailable', recovery === 'rejected' ? 'Creation definitively refused' : 'Creation still needs confirmation'); };
+  await f.app.start(); assert.equal((await f.app.createReserved(targetScope, 'default')).kind, 'pending');
+  const target = { scope: targetScope, viewId: 'original-view', label: 'creation-child', transitionId: 'creation-attempt', creationAgentId: 'default', phase: 'assigned', bindingRevision: null, writerGeneration: null };
+  let saved = { sourceScope, requestId: '1:recover-saved-creation', action: { kind: 'create', agentId: 'default', carry: false }, target, result: null };
+  const runtime = Object.assign(Object.create(WindowRuntime.prototype), { context: { role: 'main' }, controller: f.app, snapshot: { placementNotice: null }, listeners: new Set(), async syncDraftCarries() {},
+    port: { async request(command) {
+      if (command.kind === 'read-intent') return saved;
+      if (command.kind === 'lookup') return { kind: 'opening', reservation: target };
+      if (command.kind === 'complete-intent') { saved = { ...saved, result: command.result }; return { ok: true }; }
+      throw new Error(command.kind);
+    } } });
+  await runtime.processIntent(saved);
+  if (recovery === 'rejected') {
+    await runtime.processIntent(saved);
+    assert.equal(f.created.length, 2, 'a definitive refusal is terminal for the admitted native request');
+    assert.equal(saved.result?.kind, 'refused'); assert.match(saved.result.reason, /Creation definitively refused/);
+    assert.equal(f.app.getSnapshot().saved.pendingCreation, null);
+  } else {
+    assert.equal(f.created.length, 2); assert.equal(saved.result, null); assert.deepEqual(f.app.getSnapshot().saved.pendingCreation.scope, targetScope);
+    assert.match(runtime.snapshot.placementNotice, /confirmation/);
+  }
+  assert.equal(f.drafts.get('original-view/host/native-pending-creation').draft, 'Preserve original unsent creation text'); assert.deepEqual(f.submitted, []);
 });

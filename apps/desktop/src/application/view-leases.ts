@@ -9,7 +9,8 @@ export interface CaptureBorrow { failed(error: unknown): void; release(): void }
 export interface CaptureStore { borrow(): CaptureBorrow }
 export interface StoreBorrow extends ViewBorrow, CaptureBorrow { readonly store: Store }
 interface Slot { readonly store: Store; agentId: string | null; borrows: number; closing: Promise<void> | null }
-interface Lease { readonly closed: Promise<void>; readonly didClose: () => void; readonly didFail: (error: unknown) => void; readonly storage: OwnedViewStorage; readonly stores: Map<string, Slot>; borrows: number; failureInterest: number; closing: Promise<void> | null }
+type LeaseKind = 'editor' | 'recovery';
+interface Lease { readonly kind: LeaseKind; readonly closed: Promise<void>; readonly didClose: () => void; readonly didFail: (error: unknown) => void; readonly storage: OwnedViewStorage; readonly stores: Map<string, Slot>; borrows: number; failureInterest: number; closing: Promise<void> | null }
 export function createViewLeasePool(deps: {
   createStore(storage: OwnedViewStorage, scope: ConversationScope, agentId: () => string | null, capture: CaptureStore): Store;
   failed(storage: OwnedViewStorage | null, error: unknown): void;
@@ -61,7 +62,7 @@ export function createViewLeasePool(deps: {
   }
   async function acquire(view: ViewBorrow, scope: ConversationScope, purpose: { readonly kind: 'active'; readonly agentId: string } | { readonly kind: 'recovery' }): Promise<StoreBorrow> {
     const lease = leases.get(view.storage.viewId);
-    if (!lease || lease.storage !== view.storage) throw new Error('The original view lease is unavailable.');
+    if (!lease || lease.storage !== view.storage || purpose.kind === 'active' && lease.kind !== 'editor') throw new Error('The original view lease is unavailable.');
     const interested = purpose.kind === 'active';
     const agentId = purpose.kind === 'active' ? purpose.agentId : null;
     const pending = viewBorrow(lease, interested), key = JSON.stringify([scope.hostId, scope.conversationId]);
@@ -80,22 +81,29 @@ export function createViewLeasePool(deps: {
       catch (error) { if (interested) borrow.failed(error); borrow.release(); throw error; }
     } finally { pending.release(); }
   }
-  function adopt(storage: OwnedViewStorage): ViewBorrow {
+  function adopt(storage: OwnedViewStorage, kind: LeaseKind = 'editor'): ViewBorrow {
     let didClose = () => {}, didFail = (_error: unknown) => {};
     const closed = new Promise<void>((resolve, reject) => { didClose = resolve; didFail = reject; });
     void closed.catch(() => {});
-    const lease: Lease = { closed, didClose, didFail, storage, stores: new Map(), borrows: 0, failureInterest: 0, closing: null };
+    const lease: Lease = { kind, closed, didClose, didFail, storage, stores: new Map(), borrows: 0, failureInterest: 0, closing: null };
     leases.set(storage.viewId, lease);
     if (disposal) { closeView(lease); throw new Error('This application has closed.'); }
     return viewBorrow(lease, true);
   }
-  const acquisitions = new Map<string, { users: number; readonly task: Promise<ViewBorrow | null>; readonly required: boolean }>();
-  async function open(viewId: string, load: () => Promise<OwnedViewStorage | null>, options: { readonly interested?: boolean; readonly required?: boolean } = {}): Promise<ViewBorrow | null> {
-    const interested = options.interested !== false;
+  const acquisitions = new Map<string, { users: number; readonly task: Promise<ViewBorrow | null>; readonly required: boolean; readonly kind: LeaseKind }>();
+  async function open(viewId: string, load: () => Promise<OwnedViewStorage | null>, options: { readonly interested?: boolean; readonly required?: boolean; readonly kind?: LeaseKind } = {}): Promise<ViewBorrow | null> {
+    const interested = options.interested !== false, kind = options.kind ?? 'editor';
     if (disposal) return null;
     const held = leases.get(viewId);
-    if (held && !held.closing) return viewBorrow(held, interested);
+    if (held && !held.closing) {
+      if (kind === 'editor' && held.kind === 'recovery') { await held.closed; return open(viewId, load, options); }
+      return viewBorrow(held, interested);
+    }
     let pending = acquisitions.get(viewId);
+    if (pending?.kind === 'recovery' && kind === 'editor') {
+      await pending.task.catch(() => null);
+      return open(viewId, load, options);
+    }
     if (!pending) {
       const task = Promise.resolve().then(async () => {
         await leases.get(viewId)?.closed;
@@ -106,9 +114,9 @@ export function createViewLeasePool(deps: {
         if (!storage) return null;
         if (storage.viewId !== viewId) { await storage.close(); throw new Error('The recovered view ID changed.'); }
         if (disposal) { await track(Promise.resolve().then(() => storage.close())); return null; }
-        return adopt(storage);
+        return adopt(storage, kind);
       });
-      pending = { users: 0, task, required: options.required === true }; acquisitions.set(viewId, pending);
+      pending = { users: 0, task, required: options.required === true, kind }; acquisitions.set(viewId, pending);
     }
     pending.users++;
     try {
@@ -143,10 +151,16 @@ export function createViewLeasePool(deps: {
       await Promise.all(slots.map(slot => slot.closing));
     },
     closed: (viewId: string): Promise<void> => leases.get(viewId)?.closed ?? Promise.resolve(),
-    holds: (viewId: string) => { const lease = leases.get(viewId); return Boolean(lease && !lease.closing); },
+    releaseRecovery(view: ViewBorrow): Promise<void> | null {
+      const lease = leases.get(view.storage.viewId);
+      view.release();
+      if (!lease || lease.storage !== view.storage || lease.borrows || [...lease.stores.values()].some(slot => slot.borrows)) return null;
+      return track(Promise.all([...lease.stores.values()].map(slot => slot.closing)).then(() => lease.closing ?? undefined));
+    },
+    holds: (viewId: string) => { const lease = leases.get(viewId); return Boolean(lease?.kind === 'editor' && !lease.closing); },
     reserve(viewId: string, interested = true): ViewBorrow | null {
       const lease = leases.get(viewId);
-      return lease && !lease.closing ? viewBorrow(lease, interested) : null;
+      return lease?.kind === 'editor' && !lease.closing ? viewBorrow(lease, interested) : null;
     },
     retainRecovery: (view: ViewBorrow): ViewBorrow => {
       const lease = leases.get(view.storage.viewId);

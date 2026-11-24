@@ -27,6 +27,9 @@ pub fn identifier(value: &str, max: usize) -> Result<(), &'static str> {
         Ok(())
     }
 }
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Action {
@@ -34,6 +37,8 @@ pub enum Action {
         scope: Scope,
         #[serde(default)]
         carry: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        passive: bool,
     },
     Create {
         #[serde(rename = "agentId")]
@@ -65,8 +70,16 @@ pub enum Phase {
     TransferCommitted,
     SourceReleased,
     TargetReady,
+    InlineReady,
     Failed,
 }
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IntentRef {
+    pub source_scope: Scope,
+    pub request_id: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Reservation {
@@ -236,7 +249,15 @@ impl Profile {
             }
             return Ok(());
         }
-        // Main carries live in IndexedDB; this notification only wakes its fenced writer.
+        if request_id.split_once(':').is_some_and(|(epoch, request)| {
+            !request.is_empty()
+                && epoch
+                    .parse::<u64>()
+                    .is_ok_and(|epoch| epoch > 0 && epoch < self.intent_epoch)
+        }) {
+            return Ok(());
+        }
+        // Carries live in IndexedDB; this notification only wakes their fenced writer.
         if request_id
             .split_once(":main-")
             .is_some_and(|(epoch, transition)| {
@@ -324,6 +345,17 @@ impl Profile {
                 Err("intent-result-conflict")
             };
         }
+        if intent
+            .target
+            .as_ref()
+            .is_some_and(|target| target.phase == Phase::TargetReady)
+            && matches!(
+                completed_placement(&result)?,
+                CompletedPlacement::Refused { .. }
+            )
+        {
+            return Err("confirmed-opening-cannot-be-refused");
+        }
         if intent.completion_is_inline(&result)? {
             let target = intent.target.as_ref().ok_or("unassigned-intent")?;
             let entry = self
@@ -336,30 +368,50 @@ impl Profile {
             if matches!(entry.phase, Phase::Assigned | Phase::Requested)
                 && entry.transition_id == target.transition_id
             {
-                entry.phase = Phase::TargetReady;
+                entry.phase = Phase::InlineReady;
             }
         }
         self.intents.get_mut(&key).ok_or("unknown-intent")?.result = Some(result);
         Ok(())
     }
     pub fn reconcile_inline_completions(&mut self) -> Result<bool, &'static str> {
+        let mut changed = false;
+        for entry in self.windows.values_mut() {
+            if entry.phase == Phase::TargetReady && entry.transition_id.starts_with("inline:") {
+                entry.phase = Phase::InlineReady;
+                changed = true;
+            }
+        }
+        for intent in self.intents.values_mut() {
+            if let Some(target) = &mut intent.target {
+                if target.phase == Phase::TargetReady && target.transition_id.starts_with("inline:")
+                {
+                    target.phase = Phase::InlineReady;
+                    changed = true;
+                }
+            }
+        }
         let mut completed = Vec::new();
         for intent in self.intents.values() {
             if let Some(result) = &intent.result {
                 if intent.completion_is_inline(result)? {
-                    completed.push(intent.target.as_ref().ok_or("unassigned-intent")?.clone());
+                    let target = intent.target.as_ref().ok_or("unassigned-intent")?;
+                    if matches!(target.phase, Phase::Assigned | Phase::Requested) {
+                        completed.push(target.clone());
+                    }
                 }
             }
         }
-        let mut changed = false;
         for target in completed {
             if let Some(entry) = self.windows.get_mut(&target.scope.key()) {
-                if matches!(entry.phase, Phase::Assigned | Phase::Requested)
-                    && entry.transition_id == target.transition_id
+                if matches!(
+                    entry.phase,
+                    Phase::Assigned | Phase::Requested | Phase::TargetReady
+                ) && entry.transition_id == target.transition_id
                     && entry.view_id == target.view_id
                     && entry.label == target.label
                 {
-                    entry.phase = Phase::TargetReady;
+                    entry.phase = Phase::InlineReady;
                     changed = true;
                 }
             }
@@ -383,8 +435,10 @@ impl Profile {
             .filter_map(|intent| intent.target.as_ref().map(|target| target.scope.key()))
             .collect();
         self.windows.retain(|key, entry| {
-            !matches!(entry.phase, Phase::TargetReady | Phase::Assigned)
-                || live.contains(&entry.label)
+            !matches!(
+                entry.phase,
+                Phase::TargetReady | Phase::InlineReady | Phase::Assigned
+            ) || live.contains(&entry.label)
                 || pending.contains(key)
         });
         Ok(())
@@ -505,14 +559,81 @@ impl Profile {
         self.windows.insert(key, reservation.clone());
         Ok(reservation)
     }
+    pub fn guard_intent_placement(
+        &self,
+        reference: &IntentRef,
+        scope: &Scope,
+    ) -> Result<(), &'static str> {
+        reference.source_scope.validate()?;
+        identifier(&reference.request_id, 200)?;
+        if reference.source_scope.host_id != scope.host_id {
+            return Err("foreign-intent-source");
+        }
+        let intent = self
+            .intents
+            .get(&Self::intent_key(
+                &reference.source_scope,
+                &reference.request_id,
+            ))
+            .ok_or("unknown-intent")?;
+        let target = intent.target.as_ref().ok_or("unassigned-intent")?;
+        if target.scope != *scope {
+            return Err("intent-target-conflict");
+        }
+        if target.phase == Phase::TargetReady {
+            return Err("intent-already-ready");
+        }
+        if intent.result.is_some() {
+            return Err("intent-already-completed");
+        }
+        Ok(())
+    }
+    pub fn preserve_child_ready(&mut self, ready: &Reservation) {
+        if ready.phase != Phase::TargetReady {
+            return;
+        }
+        for intent in self
+            .intents
+            .values_mut()
+            .filter(|intent| intent.result.is_none())
+        {
+            if intent.target.as_ref().is_some_and(|target| {
+                target.scope == ready.scope
+                    && target.view_id == ready.view_id
+                    && target.label == ready.label
+                    && target.transition_id == ready.transition_id
+            }) {
+                intent.target = Some(ready.clone());
+            }
+        }
+    }
+    pub fn attach_launched_intents(&mut self, reservation: &Reservation) {
+        for intent in self
+            .intents
+            .values_mut()
+            .filter(|intent| intent.result.is_none())
+        {
+            if intent.target.as_ref().is_some_and(|target| {
+                target.phase != Phase::TargetReady
+                    && target.scope == reservation.scope
+                    && target.view_id == reservation.view_id
+                    && target.label == reservation.label
+            }) {
+                intent.target = Some(reservation.clone());
+            }
+        }
+    }
     pub fn assign_intent(
         &mut self,
         source: &Scope,
         request_id: &str,
         mut reservation: Reservation,
+        target_closed: bool,
+        current_binding: Option<(&Scope, &str, u64, u64)>,
     ) -> Result<Intent, &'static str> {
         let key = Self::intent_key(source, request_id);
         let previous = self.intents.get(&key).ok_or("unknown-intent")?;
+        let passive = matches!(&previous.action, Action::Open { passive: true, .. });
         if let Some(target) = &previous.target {
             return if target.scope == reservation.scope && target.view_id == reservation.view_id {
                 Ok(previous.clone())
@@ -537,8 +658,28 @@ impl Profile {
         if reservation.scope.host_id != source.host_id {
             return Err("foreign-host");
         }
+        let fresh_transition = reservation.transition_id.clone();
         reservation.phase = Phase::Assigned;
-        let target = self.reserve(reservation)?;
+        let mut target = self.reserve(reservation)?;
+        let reclaimed = current_binding.is_some_and(|(scope, view_id, revision, writer)| {
+            scope == &target.scope
+                && view_id == target.view_id
+                && target
+                    .binding_revision
+                    .zip(target.writer_generation)
+                    .is_some_and(|(saved_revision, saved_writer)| {
+                        revision >= saved_revision
+                            && writer >= saved_writer
+                            && (revision > saved_revision || writer > saved_writer)
+                    })
+        });
+        if target_closed
+            && matches!(target.phase, Phase::TargetReady | Phase::InlineReady)
+            && !(passive && target.phase == Phase::TargetReady && !reclaimed)
+        {
+            target.transition_id = fresh_transition;
+            target.phase = Phase::Assigned;
+        }
         let intent = self.intents.get_mut(&key).ok_or("unknown-intent")?;
         intent.target = Some(target);
         Ok(intent.clone())
@@ -616,7 +757,7 @@ mod tests {
         .unwrap();
         assert!(p.retry_intent(&source, "1:retry").unwrap().result.is_none());
         let target = p
-            .assign_intent(&source, "1:retry", reservation())
+            .assign_intent(&source, "1:retry", reservation(), false, None)
             .unwrap()
             .target
             .unwrap();
@@ -651,7 +792,9 @@ mod tests {
         )
         .unwrap();
         let before = serde_json::to_value(&p).unwrap();
-        assert!(p.assign_intent(&source, "1:terminal", target).is_err());
+        assert!(p
+            .assign_intent(&source, "1:terminal", target, false, None)
+            .is_err());
         assert_eq!(serde_json::to_value(&p).unwrap(), before);
     }
     #[test]
@@ -734,7 +877,7 @@ mod tests {
         )
         .unwrap();
         let assigned = p
-            .assign_intent(&source, "1:allocation", reservation())
+            .assign_intent(&source, "1:allocation", reservation(), false, None)
             .unwrap()
             .target
             .unwrap();
@@ -770,7 +913,7 @@ mod tests {
         };
         p.intent(source.clone(), "1:request".into(), action.clone())
             .unwrap();
-        p.assign_intent(&source, "1:request", reservation())
+        p.assign_intent(&source, "1:request", reservation(), false, None)
             .unwrap();
         let data = serde_json::to_vec(&p).unwrap();
         let mut restored: Profile = serde_json::from_slice(&data).unwrap();
@@ -802,6 +945,7 @@ mod tests {
                 format!("1:{index}"),
                 Action::Open {
                     scope: scope("target"),
+                    passive: false,
                     carry: false,
                 },
             )
@@ -813,6 +957,7 @@ mod tests {
                 "1:extra".into(),
                 Action::Open {
                     scope: scope("target"),
+                    passive: false,
                     carry: false
                 }
             )
@@ -837,10 +982,11 @@ mod tests {
         let mut target = reservation();
         target.scope.host_id = "foreign".into();
         assert_eq!(
-            p.assign_intent(&source, "1:request", target).unwrap_err(),
+            p.assign_intent(&source, "1:request", target, false, None)
+                .unwrap_err(),
             "foreign-host"
         );
-        p.assign_intent(&source, "1:request", reservation())
+        p.assign_intent(&source, "1:request", reservation(), false, None)
             .unwrap();
         p.windows.clear();
         assert_eq!(p.validate().unwrap_err(), "missing-intent-reservation");
@@ -851,6 +997,7 @@ mod tests {
         let source = scope("source");
         let action = Action::Open {
             scope: scope("target"),
+            passive: false,
             carry: false,
         };
         p.intent(source.clone(), "1:pending".into(), action.clone())
@@ -921,12 +1068,13 @@ mod tests {
             "1:pending".into(),
             Action::Open {
                 scope: scope("window-1"),
+                passive: false,
                 carry: false,
             },
         )
         .unwrap();
         let target = p.windows[&scope("window-1").key()].clone();
-        p.assign_intent(&scope("source"), "1:pending", target)
+        p.assign_intent(&scope("source"), "1:pending", target, false, None)
             .unwrap();
         let completed_source = scope("completed-source");
         p.intent(
@@ -934,12 +1082,13 @@ mod tests {
             "1:done".into(),
             Action::Open {
                 scope: scope("window-2"),
+                passive: false,
                 carry: false,
             },
         )
         .unwrap();
         let completed_target = p.windows[&scope("window-2").key()].clone();
-        p.assign_intent(&completed_source, "1:done", completed_target)
+        p.assign_intent(&completed_source, "1:done", completed_target, false, None)
             .unwrap();
         p.intents
             .get_mut(&Profile::intent_key(&completed_source, "1:done"))
@@ -956,6 +1105,7 @@ mod tests {
                 "1:done".into(),
                 Action::Open {
                     scope: scope("window-2"),
+                    passive: false,
                     carry: false
                 }
             )
@@ -979,7 +1129,8 @@ mod tests {
             },
         )
         .unwrap();
-        p.assign_intent(&source, "1:inline", reservation()).unwrap();
+        p.assign_intent(&source, "1:inline", reservation(), false, None)
+            .unwrap();
         let wrong = serde_json::json!({"kind":"inline","scope":scope("wrong")});
         assert_eq!(
             p.complete_intent(&source, "1:inline", wrong).unwrap_err(),
@@ -988,7 +1139,7 @@ mod tests {
         let result = serde_json::json!({"kind":"inline","scope":scope("target")});
         p.complete_intent(&source, "1:inline", result.clone())
             .unwrap();
-        assert_eq!(p.windows[&scope("target").key()].phase, Phase::TargetReady);
+        assert_eq!(p.windows[&scope("target").key()].phase, Phase::InlineReady);
         let entry = p.windows.get_mut(&scope("target").key()).unwrap();
         entry.phase = Phase::SourceSaved;
         entry.transition_id = "later-transition".into();
@@ -1005,6 +1156,7 @@ mod tests {
                 format!("1:old-{n}"),
                 Action::Open {
                     scope: scope("old-target"),
+                    passive: false,
                     carry: false,
                 },
             )
@@ -1023,6 +1175,7 @@ mod tests {
             "1:current".into(),
             Action::Open {
                 scope: target,
+                passive: false,
                 carry: false,
             },
         )
@@ -1054,5 +1207,621 @@ mod completed_placement_tests {
             serde_json::from_str::<Option<serde_json::Value>>(&saved).unwrap(),
             Some(result)
         );
+    }
+}
+
+#[cfg(test)]
+mod readiness_regressions {
+    use super::*;
+    fn scope(name: &str) -> Scope {
+        Scope {
+            host_id: "host".into(),
+            conversation_id: name.into(),
+        }
+    }
+    fn profile() -> Profile {
+        Profile {
+            origin: "http://localhost".into(),
+            intent_epoch: 1,
+            catalog_view_id: "catalog".into(),
+            windows: BTreeMap::new(),
+            intents: BTreeMap::new(),
+        }
+    }
+    fn ready() -> Reservation {
+        Reservation {
+            scope: scope("target"),
+            view_id: "target-view".into(),
+            label: "target-child".into(),
+            transition_id: "old-transition".into(),
+            creation_agent_id: None,
+            phase: Phase::TargetReady,
+            binding_revision: Some(2),
+            writer_generation: Some(3),
+        }
+    }
+    fn request(p: &mut Profile, id: &str) {
+        p.intent(
+            scope("source"),
+            id.into(),
+            Action::Open {
+                scope: scope("target"),
+                passive: false,
+                carry: true,
+            },
+        )
+        .unwrap();
+    }
+    #[test]
+    fn assignment_retains_live_ready_attempt_after_normal_close_and_lost_reply() {
+        let mut p = profile();
+        let old = ready();
+        p.windows.insert(old.scope.key(), old.clone());
+        request(&mut p, "1:observed");
+        let mut proposed = old.clone();
+        proposed.transition_id = "unused-transition".into();
+        let first = p
+            .assign_intent(
+                &scope("source"),
+                "1:observed",
+                proposed.clone(),
+                false,
+                None,
+            )
+            .unwrap();
+        let replay = p
+            .assign_intent(&scope("source"), "1:observed", proposed, true, None)
+            .unwrap();
+        for intent in [first, replay] {
+            let target = intent.target.unwrap();
+            assert_eq!(target.transition_id, old.transition_id);
+            assert_eq!(target.phase, Phase::TargetReady);
+        }
+        p.validate().unwrap();
+    }
+    #[test]
+    fn new_explicit_open_after_prior_close_gets_fresh_attempt_and_preserves_old_success() {
+        let mut p = profile();
+        let old = ready();
+        p.windows.insert(old.scope.key(), old.clone());
+        request(&mut p, "1:prior");
+        p.assign_intent(&scope("source"), "1:prior", old.clone(), true, None)
+            .unwrap();
+        request(&mut p, "1:new-open");
+        let mut next = old.clone();
+        next.transition_id = "new-transition".into();
+        let target = p
+            .assign_intent(&scope("source"), "1:new-open", next, true, None)
+            .unwrap()
+            .target
+            .unwrap();
+        assert_eq!(target.phase, Phase::Assigned);
+        assert_eq!(target.transition_id, "new-transition");
+        assert_eq!(target.view_id, old.view_id);
+        assert_eq!(target.label, old.label);
+        assert!(p.intents[&Profile::intent_key(&scope("source"), "1:prior")]
+            .result
+            .is_none());
+        assert_eq!(p.windows[&old.scope.key()].transition_id, old.transition_id);
+        assert_eq!(p.windows[&old.scope.key()].phase, Phase::TargetReady);
+        p.validate().unwrap();
+    }
+    #[test]
+    fn passive_closed_assignment_preserves_historical_ready_and_explicit_wire_shape() {
+        let mut p = profile();
+        let old = ready();
+        p.windows.insert(old.scope.key(), old.clone());
+        let source = scope("passive-source");
+        let action: Action = serde_json::from_value(
+            serde_json::json!({"kind":"open","scope":old.scope,"carry":false,"passive":true}),
+        )
+        .unwrap();
+        p.intent(source.clone(), "1:passive".into(), action)
+            .unwrap();
+        let mut proposed = old.clone();
+        proposed.transition_id = "unused-fresh-attempt".into();
+        let target = p
+            .assign_intent(&source, "1:passive", proposed, true, None)
+            .unwrap()
+            .target
+            .unwrap();
+        assert_eq!(target.phase, Phase::TargetReady);
+        assert_eq!(target.transition_id, old.transition_id);
+        assert_eq!(p.windows[&old.scope.key()].transition_id, old.transition_id);
+        let serialized = serde_json::to_value(&p).unwrap();
+        let key = Profile::intent_key(&source, "1:passive");
+        assert_eq!(
+            serialized["intents"].get(key.as_str()).unwrap()["action"]["passive"],
+            true
+        );
+        let restored: Profile = serde_json::from_value(serialized).unwrap();
+        restored.validate().unwrap();
+        let explicit: Action = serde_json::from_value(
+            serde_json::json!({"kind":"open","scope":old.scope,"carry":false}),
+        )
+        .unwrap();
+        assert!(serde_json::to_value(explicit)
+            .unwrap()
+            .get("passive")
+            .is_none());
+        assert!(serde_json::from_value::<Action>(
+            serde_json::json!({"kind":"create","agentId":"agent","carry":false,"passive":true})
+        )
+        .is_err());
+    }
+    #[test]
+    fn new_closed_assignment_never_inherits_historical_ready() {
+        let mut p = profile();
+        let old = ready();
+        p.windows.insert(old.scope.key(), old.clone());
+        request(&mut p, "1:new-closed");
+        let mut proposed = old.clone();
+        proposed.transition_id = "new-closed-transition".into();
+        let target = p
+            .assign_intent(&scope("source"), "1:new-closed", proposed, true, None)
+            .unwrap()
+            .target
+            .unwrap();
+        assert_eq!(target.phase, Phase::Assigned);
+        assert_eq!(target.transition_id, "new-closed-transition");
+        p.validate().unwrap();
+    }
+    #[test]
+    fn expired_child_carry_wake_preserves_host_and_source_fences_without_allocating() {
+        let mut p = profile();
+        let old = ready();
+        p.windows.insert(old.scope.key(), old.clone());
+        request(&mut p, "1:child-carry");
+        p.assign_intent(&scope("source"), "1:child-carry", old.clone(), true, None)
+            .unwrap();
+        p.complete_intent(
+            &scope("source"),
+            "1:child-carry",
+            serde_json::json!({"kind":"detached","scope":old.scope,"label":old.label}),
+        )
+        .unwrap();
+        p.compact_terminal_intents(Some(1)).unwrap();
+        assert_eq!(p.intent_epoch, 2);
+        assert!(p.intents.is_empty());
+        let before = serde_json::to_value(&p).unwrap();
+        assert!(p
+            .validate_carry_notification(&scope("source"), "1:child-carry", Some(&scope("target")))
+            .is_ok());
+        assert!(p
+            .validate_carry_notification(&scope("source"), "1:child-carry", None)
+            .is_ok());
+        assert!(p
+            .validate_carry_notification(&scope("source"), "1:child-carry", Some(&scope("source")))
+            .is_err());
+        assert!(p
+            .validate_carry_notification(
+                &scope("source"),
+                "1:child-carry",
+                Some(&Scope {
+                    host_id: "foreign".into(),
+                    conversation_id: "target".into()
+                })
+            )
+            .is_err());
+        for id in ["2:missing", "3:future", "0:invalid", "1:", "bad:request"] {
+            assert!(
+                p.validate_carry_notification(&scope("source"), id, Some(&scope("target")))
+                    .is_err(),
+                "{id}"
+            );
+        }
+        assert_eq!(serde_json::to_value(&p).unwrap(), before);
+    }
+    #[test]
+    fn a_closed_failed_handoff_keeps_its_original_recovery_transition() {
+        let mut p = profile();
+        let mut prior = ready();
+        prior.phase = Phase::Failed;
+        p.windows.insert(prior.scope.key(), prior.clone());
+        request(&mut p, "1:retry-failed");
+        let mut proposed = prior.clone();
+        proposed.transition_id = "unused-new-transition".into();
+        let target = p
+            .assign_intent(&scope("source"), "1:retry-failed", proposed, true, None)
+            .unwrap()
+            .target
+            .unwrap();
+        assert_eq!(target.transition_id, prior.transition_id);
+        assert_eq!(target.phase, Phase::Failed);
+        p.validate().unwrap();
+    }
+    #[test]
+    fn rollover_preserves_unbound_carry_as_pending_ready_evidence_until_main_binds() {
+        let mut p = profile();
+        let old = ready();
+        p.windows.insert(old.scope.key(), old.clone());
+        request(&mut p, "1:carry");
+        let mut allocated = old.clone();
+        allocated.phase = Phase::Assigned;
+        p.intents
+            .get_mut(&Profile::intent_key(&scope("source"), "1:carry"))
+            .unwrap()
+            .target = Some(allocated);
+        p.preserve_child_ready(&old);
+        let mut rolled = old.clone();
+        rolled.transition_id = "later".into();
+        rolled.phase = Phase::Requested;
+        p.windows.insert(rolled.scope.key(), rolled.clone());
+        let saved = &p.intents[&Profile::intent_key(&scope("source"), "1:carry")];
+        assert!(saved.result.is_none());
+        assert_eq!(saved.target.as_ref().unwrap().phase, Phase::TargetReady);
+        assert_eq!(
+            saved.target.as_ref().unwrap().transition_id,
+            old.transition_id
+        );
+        p.validate().unwrap();
+        // The next committed launch must not overwrite the old successful attempt.
+        p.attach_launched_intents(&rolled);
+        assert_eq!(
+            p.intents[&Profile::intent_key(&scope("source"), "1:carry")]
+                .target
+                .as_ref()
+                .unwrap()
+                .transition_id,
+            old.transition_id
+        );
+    }
+    #[test]
+    fn inline_completion_with_inherited_counters_never_confirms_another_child_opening() {
+        let mut p = profile();
+        let old = ready();
+        p.windows.insert(old.scope.key(), old.clone());
+        request(&mut p, "1:first");
+        request(&mut p, "1:second");
+        let mut proposal = old.clone();
+        proposal.transition_id = "placeholder".into();
+        p.assign_intent(&scope("source"), "1:first", proposal.clone(), true, None)
+            .unwrap();
+        p.assign_intent(&scope("source"), "1:second", proposal, true, None)
+            .unwrap();
+        let mut launched = old.clone();
+        launched.transition_id = "actual-new-attempt".into();
+        launched.phase = Phase::Requested;
+        p.windows.insert(launched.scope.key(), launched.clone());
+        p.attach_launched_intents(&launched);
+        p.complete_intent(
+            &scope("source"),
+            "1:first",
+            serde_json::json!({"kind":"inline","scope":old.scope}),
+        )
+        .unwrap();
+        let inline = p.windows[&old.scope.key()].clone();
+        assert_eq!(inline.phase, Phase::InlineReady);
+        assert_eq!(inline.binding_revision, old.binding_revision);
+        assert_eq!(inline.writer_generation, old.writer_generation);
+        p.preserve_child_ready(&inline);
+        let second = &p.intents[&Profile::intent_key(&scope("source"), "1:second")];
+        assert!(second.result.is_none());
+        assert_ne!(second.target.as_ref().unwrap().phase, Phase::TargetReady);
+        p.windows
+            .get_mut(&old.scope.key())
+            .unwrap()
+            .confirm_binding(4, 5)
+            .unwrap();
+        let ready = p.windows[&old.scope.key()].clone();
+        p.preserve_child_ready(&ready);
+        assert_eq!(
+            p.intents[&Profile::intent_key(&scope("source"), "1:second")]
+                .target
+                .as_ref()
+                .unwrap()
+                .phase,
+            Phase::TargetReady
+        );
+        p.validate().unwrap();
+    }
+    #[test]
+    fn legacy_inline_bootstrap_completion_repairs_phase_without_inventing_child_readiness() {
+        let mut p = profile();
+        let mut allocated = ready();
+        allocated.phase = Phase::Assigned;
+        p.windows.insert(allocated.scope.key(), allocated.clone());
+        for id in ["1:inline-old", "1:pending-old"] {
+            request(&mut p, id);
+            p.assign_intent(&scope("source"), id, allocated.clone(), false, None)
+                .unwrap();
+        }
+        p.intents
+            .get_mut(&Profile::intent_key(&scope("source"), "1:inline-old"))
+            .unwrap()
+            .result = Some(serde_json::json!({"kind":"inline","scope":allocated.scope}));
+        p.windows.get_mut(&allocated.scope.key()).unwrap().phase = Phase::TargetReady;
+        assert!(p.reconcile_inline_completions().unwrap());
+        assert_eq!(p.windows[&allocated.scope.key()].phase, Phase::InlineReady);
+        assert_eq!(
+            p.intents[&Profile::intent_key(&scope("source"), "1:pending-old")]
+                .target
+                .as_ref()
+                .unwrap()
+                .phase,
+            Phase::Assigned
+        );
+        let entry = p.windows.get_mut(&allocated.scope.key()).unwrap();
+        entry.transition_id = "new-real-child".into();
+        entry.confirm_binding(5, 6).unwrap();
+        assert!(!p.reconcile_inline_completions().unwrap());
+        assert_eq!(p.windows[&allocated.scope.key()].phase, Phase::TargetReady);
+        assert_eq!(
+            p.windows[&allocated.scope.key()].transition_id,
+            "new-real-child"
+        );
+    }
+    #[test]
+    fn inline_recovery_of_one_request_never_erases_another_actual_ready_snapshot() {
+        let mut p = profile();
+        let old = ready();
+        p.windows.insert(old.scope.key(), old.clone());
+        for id in ["1:recover-inline", "1:still-pending"] {
+            request(&mut p, id);
+            p.assign_intent(&scope("source"), id, old.clone(), false, None)
+                .unwrap();
+        }
+        p.windows
+            .get_mut(&old.scope.key())
+            .unwrap()
+            .recover_inline("old-transition")
+            .unwrap();
+        p.windows.get_mut(&old.scope.key()).unwrap().phase = Phase::InlineReady;
+        p.complete_intent(
+            &scope("source"),
+            "1:recover-inline",
+            serde_json::json!({"kind":"inline","scope":old.scope}),
+        )
+        .unwrap();
+        let mut restarted: Profile =
+            serde_json::from_slice(&serde_json::to_vec(&p).unwrap()).unwrap();
+        restarted.reconcile_inline_completions().unwrap();
+        let pending = &restarted.intents[&Profile::intent_key(&scope("source"), "1:still-pending")];
+        assert!(pending.result.is_none());
+        assert_eq!(pending.target.as_ref().unwrap().phase, Phase::TargetReady);
+        assert_eq!(
+            pending.target.as_ref().unwrap().transition_id,
+            old.transition_id
+        );
+        assert_eq!(
+            restarted.windows[&old.scope.key()].phase,
+            Phase::InlineReady
+        );
+        restarted.validate().unwrap();
+    }
+    #[test]
+    fn confirmed_child_opening_cannot_be_revoked_by_late_local_or_metadata_failure() {
+        for carry in [false, true] {
+            for retry_legacy_refusal in [false, true] {
+                let mut p = profile();
+                let old = ready();
+                p.windows.insert(old.scope.key(), old.clone());
+                p.intent(
+                    scope("source"),
+                    "1:known-opening".into(),
+                    Action::Open {
+                        scope: old.scope.clone(),
+                        passive: false,
+                        carry,
+                    },
+                )
+                .unwrap();
+                p.assign_intent(
+                    &scope("source"),
+                    "1:known-opening",
+                    old.clone(),
+                    false,
+                    None,
+                )
+                .unwrap();
+                let refusal = serde_json::json!({"kind":"refused","reason":"Metadata disconnected after the child was ready"});
+                if retry_legacy_refusal {
+                    p.intents
+                        .get_mut(&Profile::intent_key(&scope("source"), "1:known-opening"))
+                        .unwrap()
+                        .result = Some(refusal.clone());
+                    p.retry_intent(&scope("source"), "1:known-opening").unwrap();
+                }
+                let before = serde_json::to_value(&p).unwrap();
+                assert_eq!(
+                    p.complete_intent(&scope("source"), "1:known-opening", refusal),
+                    Err("confirmed-opening-cannot-be-refused")
+                );
+                assert_eq!(serde_json::to_value(&p).unwrap(), before);
+                assert!(
+                    p.intents[&Profile::intent_key(&scope("source"), "1:known-opening")]
+                        .result
+                        .is_none()
+                );
+                p.complete_intent(
+                    &scope("source"),
+                    "1:known-opening",
+                    serde_json::json!({"kind":"detached","scope":old.scope,"label":old.label}),
+                )
+                .unwrap();
+                p.validate().unwrap();
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod passive_reclaim_tests {
+    use super::*;
+    fn scope(id: &str) -> Scope {
+        Scope {
+            host_id: "host".into(),
+            conversation_id: id.into(),
+        }
+    }
+    fn ready() -> Reservation {
+        Reservation {
+            scope: scope("target"),
+            view_id: "target-view".into(),
+            label: "target-child".into(),
+            transition_id: "historical-ready".into(),
+            creation_agent_id: None,
+            phase: Phase::TargetReady,
+            binding_revision: Some(2),
+            writer_generation: Some(3),
+        }
+    }
+    fn profile() -> Profile {
+        Profile {
+            origin: "http://localhost".into(),
+            intent_epoch: 1,
+            catalog_view_id: "catalog".into(),
+            windows: BTreeMap::new(),
+            intents: BTreeMap::new(),
+        }
+    }
+    fn request(p: &mut Profile, id: &str, passive: bool) {
+        p.intent(
+            scope("source"),
+            id.into(),
+            Action::Open {
+                scope: scope("target"),
+                passive,
+                carry: false,
+            },
+        )
+        .unwrap();
+    }
+    #[test]
+    fn fresh_passive_assignment_requires_a_strictly_newer_matching_inline_writer() {
+        for (revision, writer, binding_scope, view, fresh) in [
+            (0, 0, "target", "target-view", false),
+            (2, 3, "target", "target-view", false),
+            (1, 2, "target", "target-view", false),
+            (3, 3, "target", "target-view", true),
+            (2, 4, "target", "target-view", true),
+            (3, 4, "target", "target-view", true),
+            (3, 2, "target", "target-view", false),
+            (1, 4, "target", "target-view", false),
+            (3, 4, "other", "target-view", false),
+            (3, 4, "target", "other-view", false),
+        ] {
+            let mut p = profile();
+            let old = ready();
+            p.windows.insert(old.scope.key(), old.clone());
+            request(&mut p, "1:fresh", true);
+            let mut proposed = old.clone();
+            proposed.transition_id = "fresh-passive".into();
+            let observed_scope = scope(binding_scope);
+            let hint = (revision != 0).then_some((&observed_scope, view, revision, writer));
+            let target = p
+                .assign_intent(&scope("source"), "1:fresh", proposed, true, hint)
+                .unwrap()
+                .target
+                .unwrap();
+            assert_eq!(
+                target.phase,
+                if fresh {
+                    Phase::Assigned
+                } else {
+                    Phase::TargetReady
+                },
+                "{revision}/{writer}/{binding_scope}/{view}"
+            );
+            assert_eq!(
+                target.transition_id,
+                if fresh {
+                    "fresh-passive"
+                } else {
+                    "historical-ready"
+                }
+            );
+            assert_eq!(
+                serde_json::to_value(&p.windows[&old.scope.key()]).unwrap(),
+                serde_json::to_value(&old).unwrap()
+            );
+            p.validate().unwrap();
+        }
+    }
+    #[test]
+    fn ready_after_binding_preflight_and_attached_ready_never_get_reassigned() {
+        let mut p = profile();
+        let mut current = ready();
+        current.confirm_binding(3, 4).unwrap();
+        p.windows.insert(current.scope.key(), current.clone());
+        request(&mut p, "1:raced", true);
+        let mut proposed = current.clone();
+        proposed.transition_id = "must-not-replace-raced-ready".into();
+        let target_scope = scope("target");
+        let first = p
+            .assign_intent(
+                &scope("source"),
+                "1:raced",
+                proposed.clone(),
+                true,
+                Some((&target_scope, "target-view", 2, 3)),
+            )
+            .unwrap();
+        let replay = p
+            .assign_intent(
+                &scope("source"),
+                "1:raced",
+                proposed,
+                true,
+                Some((&target_scope, "target-view", 99, 99)),
+            )
+            .unwrap();
+        for intent in [first, replay] {
+            let target = intent.target.unwrap();
+            assert_eq!(target.phase, Phase::TargetReady);
+            assert_eq!(target.transition_id, "historical-ready");
+            assert_eq!(target.binding_revision, Some(3));
+            assert_eq!(target.writer_generation, Some(4));
+        }
+        p.validate().unwrap();
+    }
+    #[test]
+    fn live_passive_and_closed_inline_ready_preserve_their_existing_assignment_rules() {
+        for (closed, inline) in [(false, false), (true, true)] {
+            let mut p = profile();
+            let mut old = ready();
+            if inline {
+                old.phase = Phase::InlineReady;
+            }
+            p.windows.insert(old.scope.key(), old.clone());
+            request(&mut p, "1:control", true);
+            let mut proposed = old.clone();
+            proposed.transition_id = "fresh-inline-control".into();
+            let target_scope = scope("target");
+            let target = p
+                .assign_intent(
+                    &scope("source"),
+                    "1:control",
+                    proposed,
+                    closed,
+                    Some((&target_scope, "target-view", 3, 4)),
+                )
+                .unwrap()
+                .target
+                .unwrap();
+            assert_eq!(
+                target.phase,
+                if inline {
+                    Phase::Assigned
+                } else {
+                    Phase::TargetReady
+                }
+            );
+            p.validate().unwrap();
+        }
+        let mut p = profile();
+        let old = ready();
+        p.windows.insert(old.scope.key(), old.clone());
+        request(&mut p, "1:explicit", false);
+        let mut proposed = old;
+        proposed.transition_id = "fresh-explicit-control".into();
+        let target = p
+            .assign_intent(&scope("source"), "1:explicit", proposed, true, None)
+            .unwrap()
+            .target
+            .unwrap();
+        assert_eq!(target.phase, Phase::Assigned);
+        assert_eq!(target.transition_id, "fresh-explicit-control");
+        p.validate().unwrap();
     }
 }

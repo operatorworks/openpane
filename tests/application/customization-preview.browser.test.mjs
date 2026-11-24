@@ -253,8 +253,8 @@ test('a truncated upstream response terminates promptly and the proxy serves the
     const abort = new AbortController();
     const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' };
     let deadline;
-    const response = await fetch('/api/v1', { ...options, signal: abort.signal });
-    const outcome = await Promise.race([response.text().then(() => 'completed', () => 'rejected'),
+    const response = fetch('/api/v1', { ...options, signal: abort.signal }).then(value => value.text());
+    const outcome = await Promise.race([response.then(() => 'completed', () => 'rejected'),
       new Promise(resolve => { deadline = setTimeout(() => resolve('hung'), 1000); })]);
     clearTimeout(deadline); abort.abort();
     const next = await (await fetch('/api/v1', options)).json();
@@ -265,13 +265,13 @@ test('a truncated upstream response terminates promptly and the proxy serves the
 
 test('an unopened lazy module stays with its document snapshot until explicit reload', { timeout: 90_000 }, async t => {
   const host = await fixture(t), directory = await source(t);
-  const helper = join(directory, 'desktop/lazy.tsx'), css = join(directory, 'desktop/review.css');
+  const helper = join(directory, 'desktop/lazy@2x.tsx'), css = join(directory, 'desktop/review.css');
   await writeFile(css, '#root .preview-lazy-button { border-top: 1px solid red; }');
   await writeFile(helper, "export default function Lazy() { return <p data-preview-lazy>Committed lazy label</p>; }");
   await writeFile(join(directory, 'desktop/index.tsx'), `import { lazy, Suspense, useState } from 'react';
     import { createFrontendToolGeneration, pinFrontendTools } from '@openpane/sdk/tools';
     import './review.css';
-    const Lazy = lazy(() => import('./lazy.tsx'));
+    const Lazy = lazy(() => import('./lazy@2x.tsx'));
     function Module() { const [open, setOpen] = useState(false); return <><button className="preview-lazy-button" onClick={() => setOpen(true)}>Open lazy content</button>
       {open && <Suspense fallback={<p>Loading lazy module</p>}><Lazy /></Suspense>}</>; }
     export default { kind: 'desktop', sdkVersion: '0.14.0', async activate() {
@@ -511,4 +511,21 @@ test('contained HTML data assets load without exposing another document bootstra
   assert.deepEqual(observed, { status: 200, type: 'application/octet-stream', text: '<p>Contained HTML help marker</p>' });
   await page.getByText('<p>Contained HTML help marker</p>', { exact: true }).waitFor();
   for (const path of ['/', '/index.html', '/browser.html', '/provider-setup.html']) assert.equal((await fetch(running.origin + path)).status, 404);
+});
+
+
+test('snapshot documents omit the dev client and retained assets require the printed host', { timeout: 30000 }, async t => {
+  const directory = await source(t), running = await preview(t, directory, { origin: 'http://127.0.0.1:12345' });
+  const document = await (await fetch(running.url)).text();
+  assert.doesNotMatch(document, /@vite\/client/);
+  const asset = /src="([^"]+)"/.exec(document)[1];
+  const { request } = await import('node:http');
+  const status = await new Promise((resolve, reject) => {
+    const call = request(running.origin + asset, { headers: { Host: 'elsewhere.test' } }, response => { response.resume(); resolve(response.statusCode); });
+    call.on('error', reject); call.end();
+  });
+  assert.equal(status, 403);
+  await writeFile(join(directory, 'desktop/index.tsx'), 'not valid javascript');
+  const head = await fetch(running.url, { method: 'HEAD' });
+  assert.equal(head.status, 200, 'a header probe does not compile or retain another document');
 });

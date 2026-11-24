@@ -3,7 +3,9 @@ mod types;
 mod ui;
 pub use types::Command;
 
-use crate::chat_window_records::{identifier, Action, Intent, Phase, Reservation, Scope};
+use crate::chat_window_records::{
+    identifier, Action, Intent, IntentRef, Phase, Reservation, Scope,
+};
 use crate::chat_window_storage::{random_id, Storage};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -35,7 +37,9 @@ struct Broker {
     recovery_sequence: u64,
     main_closing: bool,
     main_close_requested: bool,
-    pending_closes: std::collections::BTreeSet<String>,
+    close_sequence: u64,
+    pending_closes: BTreeMap<String, String>,
+    independent_closes: std::collections::BTreeSet<String>,
 }
 #[derive(Debug, PartialEq, Eq)]
 enum CloseProgress {
@@ -77,13 +81,25 @@ impl Broker {
                 );
             }
             self.snapshot = None;
+            self.local_builtin = false;
             self.child_snapshots.clear();
             self.reports.clear();
         }
         self.host = Some((host_id, profile_id));
         Ok(())
     }
-    fn request_restore(&mut self) -> Result<(), &'static str> {
+    fn request_restore(
+        &mut self,
+        expected_context: Option<(&str, &str)>,
+    ) -> Result<(), &'static str> {
+        if expected_context.is_some_and(|expected| {
+            self.host
+                .as_ref()
+                .map(|host| (host.0.as_str(), host.1.as_str()))
+                != Some(expected)
+        }) {
+            return Err("wrong-host");
+        }
         self.recovery_sequence = self
             .recovery_sequence
             .checked_add(1)
@@ -123,24 +139,44 @@ impl Broker {
     fn children_open(&self) -> bool {
         !self.opening.is_empty() || self.documents.keys().any(|label| label != "main")
     }
-    fn close_progress(&mut self) -> CloseProgress {
+    fn is_chat(&self, label: &str) -> bool {
+        label != "main"
+            && (self.opening.contains_key(label)
+                || self
+                    .documents
+                    .get(label)
+                    .is_some_and(|document| document.scope.is_some()))
+    }
+    fn request_close(&mut self, label: &str) -> Result<(), &'static str> {
+        if !self.pending_closes.contains_key(label) {
+            self.close_sequence = self
+                .close_sequence
+                .checked_add(1)
+                .ok_or("close-sequence-exhausted")?;
+            self.pending_closes
+                .insert(label.into(), self.close_sequence.to_string());
+        }
+        Ok(())
+    }
+    fn close_progress(&mut self) -> Result<CloseProgress, &'static str> {
         if !self.main_closing || self.children_open() {
-            return CloseProgress::Idle;
+            return Ok(CloseProgress::Idle);
         }
         if self.documents.is_empty() {
-            return CloseProgress::Quit;
+            return Ok(CloseProgress::Quit);
         }
         if self.main_close_requested {
-            return CloseProgress::Idle;
+            return Ok(CloseProgress::Idle);
         }
         self.main_close_requested = true;
-        self.pending_closes.insert("main".into());
-        CloseProgress::RequestMain
+        self.request_close("main")?;
+        Ok(CloseProgress::RequestMain)
     }
-    fn begin_close(&mut self, label: &str) -> Vec<String> {
+    fn begin_close(&mut self, label: &str) -> Result<Vec<String>, &'static str> {
         if label != "main" {
-            self.pending_closes.insert(label.into());
-            return vec![label.into()];
+            self.independent_closes.insert(label.into());
+            self.request_close(label)?;
+            return Ok(vec![label.into()]);
         }
         self.main_closing = true;
         let labels: std::collections::BTreeSet<_> = self
@@ -151,20 +187,40 @@ impl Broker {
             .cloned()
             .collect();
         if labels.is_empty() {
-            if self.main_close_requested {
-                return Vec::new();
-            }
             self.main_close_requested = true;
-            self.pending_closes.insert("main".into());
-            return vec!["main".into()];
+            self.request_close("main")?;
+            return Ok(vec!["main".into()]);
         }
-        self.pending_closes.extend(labels.iter().cloned());
-        labels.into_iter().collect()
+        for target in &labels {
+            self.request_close(target)?;
+        }
+        Ok(labels.into_iter().collect())
     }
     fn cancel_close(&mut self) {
         self.main_closing = false;
         self.main_close_requested = false;
-        self.pending_closes.clear();
+        self.pending_closes
+            .retain(|label, _| self.independent_closes.contains(label));
+    }
+    fn cancel_close_for(&mut self, label: &str, attempt_id: &str) -> Result<(), &'static str> {
+        self.authorize_close(label, attempt_id)?;
+        if self.main_closing {
+            self.cancel_close();
+        }
+        self.independent_closes.remove(label);
+        self.pending_closes.remove(label);
+        Ok(())
+    }
+    fn authorize_close(&self, label: &str, attempt_id: &str) -> Result<(), &'static str> {
+        if self
+            .pending_closes
+            .get(label)
+            .is_some_and(|current| current == attempt_id)
+        {
+            Ok(())
+        } else {
+            Err("close-request-cancelled")
+        }
     }
     fn finish_close(&mut self, label: &str) -> Result<CloseProgress, &'static str> {
         if label == "main" && self.children_open() {
@@ -172,11 +228,12 @@ impl Broker {
         }
         self.documents.remove(label);
         self.opening.remove(label);
+        self.independent_closes.remove(label);
         self.pending_closes.remove(label);
         if label == "main" {
             self.main_closing = true;
         }
-        Ok(self.close_progress())
+        self.close_progress()
     }
     fn advance_presence(&mut self, label: &str) -> Result<u64, &'static str> {
         if self.presence_clock >= 9_007_199_254_740_991 {
@@ -221,7 +278,9 @@ impl ChatWindows {
                     recovery_sequence: 0,
                     main_closing: false,
                     main_close_requested: false,
-                    pending_closes: std::collections::BTreeSet::new(),
+                    close_sequence: 0,
+                    pending_closes: BTreeMap::new(),
+                    independent_closes: std::collections::BTreeSet::new(),
                 })
             })
         };
@@ -275,7 +334,20 @@ impl ChatWindows {
         }
         Ok(())
     }
-    fn admit_child(&self, broker: &Broker, scope: &Scope) -> Result<(), &'static str> {
+    fn admit_child(
+        &self,
+        broker: &Broker,
+        scope: &Scope,
+        intent_ref: Option<&IntentRef>,
+    ) -> Result<(), &'static str> {
+        if let Some(reference) = intent_ref {
+            self.require_host(broker, &reference.source_scope)?;
+            broker
+                .storage
+                .profile(&self.origin)?
+                .guard_intent_placement(reference, scope)?;
+        }
+
         if broker.main_closing {
             return Err("main-unavailable");
         }
@@ -298,7 +370,10 @@ impl ChatWindows {
                     entry.scope.host_id == scope.host_id
                         && !matches!(
                             entry.phase,
-                            Phase::Assigned | Phase::TargetReady | Phase::Failed
+                            Phase::Assigned
+                                | Phase::TargetReady
+                                | Phase::InlineReady
+                                | Phase::Failed
                         )
                 })
                 .map(|entry| entry.scope.key()),
@@ -329,6 +404,58 @@ impl ChatWindows {
             .storage
             .mutate(&self.origin, |profile| profile.retire_closed_windows(&live))
     }
+    fn cancel_reservation(
+        &self,
+        broker: &mut Broker,
+        scope: &Scope,
+        transition_id: &str,
+        previous: Option<&Reservation>,
+    ) -> Result<bool, &'static str> {
+        if broker.opening.values().any(|live| live == scope)
+            || broker
+                .documents
+                .values()
+                .any(|document| document.scope.as_ref() == Some(scope))
+        {
+            return Ok(false);
+        }
+        broker.storage.mutate(&self.origin, |profile| {
+            let eligible = profile.windows.get(&scope.key()).is_some_and(|entry| {
+                entry.scope == *scope
+                    && entry.transition_id == transition_id
+                    && entry.phase == Phase::Requested
+                    && match previous {
+                        None => {
+                            entry.binding_revision.is_none() && entry.writer_generation.is_none()
+                        }
+                        Some(prior) => {
+                            matches!(
+                                prior.phase,
+                                Phase::TargetReady | Phase::InlineReady | Phase::Failed
+                            ) && prior.transition_id != entry.transition_id
+                                && prior.scope == entry.scope
+                                && prior.view_id == entry.view_id
+                                && prior.label == entry.label
+                                && prior.creation_agent_id == entry.creation_agent_id
+                                && prior.binding_revision == entry.binding_revision
+                                && prior.writer_generation == entry.writer_generation
+                        }
+                    }
+            }) && !profile.intents.values().any(|intent| {
+                intent.target.as_ref().is_some_and(|target| {
+                    target.scope == *scope && target.transition_id == transition_id
+                })
+            });
+            if eligible {
+                if let Some(prior) = previous {
+                    profile.windows.insert(scope.key(), prior.clone());
+                } else {
+                    profile.windows.remove(&scope.key());
+                }
+            }
+            Ok(eligible)
+        })
+    }
     fn reserve(
         &self,
         broker: &mut Broker,
@@ -336,8 +463,9 @@ impl ChatWindows {
         view_id: String,
         creation_agent_id: Option<String>,
         new_transition: bool,
+        intent_ref: Option<&IntentRef>,
     ) -> Result<Reservation, &'static str> {
-        self.admit_child(broker, &scope)?;
+        self.admit_child(broker, &scope, intent_ref)?;
         self.retire_window_history(broker, &scope)?;
         let reservation = Reservation {
             scope,
@@ -352,14 +480,24 @@ impl ChatWindows {
         let live = broker
             .opening
             .values()
-            .any(|scope| scope == &reservation.scope);
+            .any(|scope| scope == &reservation.scope)
+            || broker
+                .documents
+                .values()
+                .any(|document| document.scope.as_ref() == Some(&reservation.scope));
         broker.storage.mutate(&self.origin, |profile| {
             let key = reservation.scope.key();
             let mut reserved = profile.reserve(reservation)?;
-            if new_transition && matches!(reserved.phase, Phase::TargetReady | Phase::Failed) {
+            if new_transition
+                && matches!(
+                    reserved.phase,
+                    Phase::TargetReady | Phase::InlineReady | Phase::Failed
+                )
+            {
                 if live {
                     return Err("target-still-open");
                 }
+                profile.preserve_child_ready(&reserved);
                 reserved.transition_id = random_id()?;
                 reserved.phase = Phase::Requested;
                 profile.windows.insert(key, reserved.clone());
@@ -373,7 +511,7 @@ impl ChatWindows {
             .lock()
             .map_err(|_| "native-broker-unavailable")?;
         let broker = guard.as_mut().map_err(|error| *error)?;
-        broker.request_restore()?;
+        broker.request_restore(None)?;
         for label in broker.documents.keys() {
             let _ = app.emit_to(label, "openpane-ui-wakeup", ());
         }
@@ -387,7 +525,9 @@ impl ChatWindows {
                 } else {
                     Vec::new()
                 };
-                let labels = broker.begin_close(label);
+                let Ok(labels) = broker.begin_close(label) else {
+                    return true;
+                };
                 let quit =
                     broker.main_closing && broker.documents.is_empty() && broker.opening.is_empty();
                 let unregistered = label != "main" && !broker.documents.contains_key(label);
@@ -416,24 +556,17 @@ impl ChatWindows {
         false
     }
     pub fn close_chat_without_saving(&self, app: &tauri::AppHandle, label: &str) {
-        if label == "main" {
+        let eligible = self
+            .broker
+            .lock()
+            .ok()
+            .is_some_and(|guard| guard.as_ref().is_ok_and(|broker| broker.is_chat(label)));
+        if !eligible {
             return;
         }
-        let progress = if let Ok(mut guard) = self.broker.lock() {
-            if let Ok(broker) = guard.as_mut() {
-                broker.documents.remove(label);
-                broker.opening.remove(label);
-                broker.close_progress()
-            } else {
-                CloseProgress::Idle
-            }
-        } else {
-            CloseProgress::Idle
-        };
         if let Some(window) = app.get_webview_window(label) {
             let _ = window.destroy();
         }
-        apply_close_progress(app, progress);
     }
     pub fn navigating(&self, app: &tauri::AppHandle, label: &str) {
         if let Ok(mut guard) = self.broker.lock() {
@@ -459,11 +592,14 @@ impl ChatWindows {
             if let Ok(broker) = guard.as_mut() {
                 broker.documents.remove(label);
                 broker.opening.remove(label);
+                broker.independent_closes.remove(label);
                 broker.pending_closes.remove(label);
                 let _ = app.emit_to("main", "openpane-ui-wakeup", ());
                 let progress = broker.close_progress();
                 drop(guard);
-                apply_close_progress(app, progress);
+                if let Ok(progress) = progress {
+                    apply_close_progress(app, progress);
+                }
             }
         }
     }
@@ -484,6 +620,7 @@ impl ChatWindows {
         }
         match &command {
             Command::Reserve { scope, .. }
+            | Command::CancelReservation { scope, .. }
             | Command::Phase { scope, .. }
             | Command::RecoverInline { scope, .. }
             | Command::Launch { scope, .. } => self.require_host(broker, scope)?,
@@ -565,14 +702,40 @@ impl ChatWindows {
                 view_id,
                 creation_agent_id,
                 new_transition,
+                intent_ref,
             } => {
                 self.require_main(broker, label, &incarnation)?;
                 if !self.live_relay {
                     return Err("unsupported-live-relay");
                 }
-                let reservation =
-                    self.reserve(broker, scope, view_id, creation_agent_id, new_transition)?;
+                let reservation = self.reserve(
+                    broker,
+                    scope,
+                    view_id,
+                    creation_agent_id,
+                    new_transition,
+                    intent_ref.as_ref(),
+                )?;
                 Ok(serde_json::to_value(reservation).map_err(|_| "native-serialization-failed")?)
+            }
+            Command::CancelReservation {
+                incarnation,
+                scope,
+                transition_id,
+                previous,
+            } => {
+                self.require_main(broker, label, &incarnation)?;
+                scope.validate()?;
+                identifier(&transition_id, 200)?;
+                if let Some(prior) = &previous {
+                    identifier(&prior.transition_id, 200)?;
+                }
+                Ok(json!(self.cancel_reservation(
+                    broker,
+                    &scope,
+                    &transition_id,
+                    previous.as_ref()
+                )?))
             }
             Command::Phase {
                 incarnation,
@@ -583,6 +746,9 @@ impl ChatWindows {
                 self.require_main(broker, label, &incarnation)?;
                 let may_restart = !broker.opening.values().any(|live| live == &scope);
                 broker.storage.mutate(&self.origin, |profile| {
+                    if let Some(previous) = profile.windows.get(&scope.key()).cloned() {
+                        profile.preserve_child_ready(&previous);
+                    }
                     let entry = profile
                         .windows
                         .get_mut(&scope.key())
@@ -592,7 +758,7 @@ impl ChatWindows {
                     }
                     let allowed = (entry.transition_id.starts_with("inline:")
                         && entry.phase == Phase::Failed
-                        && phase == Phase::TargetReady)
+                        && phase == Phase::InlineReady)
                         || (phase == Phase::SourceSaved && may_restart)
                         || entry.phase == phase
                         || phase == Phase::Failed
@@ -603,6 +769,7 @@ impl ChatWindows {
                                 | (Phase::TransferCommitted, Phase::SourceReleased)
                                 | (Phase::Failed, Phase::SourceSaved)
                                 | (Phase::TargetReady, Phase::SourceSaved)
+                                | (Phase::InlineReady, Phase::SourceSaved)
                         );
                     if !allowed {
                         return Err("invalid-transition-phase");
@@ -632,6 +799,7 @@ impl ChatWindows {
                     return Err("target-still-open");
                 }
                 let recovery = broker.storage.mutate(&self.origin, |profile| {
+                    profile.preserve_child_ready(&reservation);
                     let entry = profile
                         .windows
                         .get_mut(&scope.key())
@@ -655,6 +823,8 @@ impl ChatWindows {
                 incarnation,
                 scope,
                 geometry,
+                existing_only,
+                intent_ref,
             } => {
                 self.require_main(broker, label, &incarnation)?;
                 geometry.validate()?;
@@ -675,7 +845,15 @@ impl ChatWindows {
                 if reservation.phase == Phase::Assigned {
                     return Err("native-window-not-reserved");
                 }
-                self.admit_child(broker, &scope)?;
+                if !existing_only {
+                    self.admit_child(broker, &scope, intent_ref.as_ref())?;
+                }
+                if !existing_only {
+                    broker.storage.mutate(&self.origin, |profile| {
+                        profile.attach_launched_intents(&reservation);
+                        Ok(())
+                    })?;
+                }
                 if let Some(child) = app.get_webview_window(&reservation.label) {
                     drop(guard);
                     child.show().map_err(|_| "window-focus-failed")?;
@@ -706,11 +884,15 @@ impl ChatWindows {
                         json!({"kind":"pending","scope":scope,"reason":"Window is opening"}),
                     );
                 }
-                if reservation.creation_agent_id.is_none()
-                    && !matches!(
-                        reservation.phase,
-                        Phase::SourceReleased | Phase::TargetReady | Phase::Failed
-                    )
+                if existing_only {
+                    return Ok(Value::Null);
+                }
+                if reservation.phase == Phase::InlineReady
+                    || reservation.creation_agent_id.is_none()
+                        && !matches!(
+                            reservation.phase,
+                            Phase::SourceReleased | Phase::TargetReady | Phase::Failed
+                        )
                 {
                     return Err("source-not-released");
                 }
@@ -819,7 +1001,10 @@ impl ChatWindows {
                     if entry.view_id != binding.view_id || entry.label != label {
                         return Err("binding-mismatch");
                     }
-                    entry.confirm_binding(binding.revision, binding.writer_generation)
+                    entry.confirm_binding(binding.revision, binding.writer_generation)?;
+                    let ready = entry.clone();
+                    profile.preserve_child_ready(&ready);
+                    Ok(())
                 })?;
                 let document = broker.documents.get_mut(label).ok_or("stale-document")?;
                 document.ready = true;
@@ -827,7 +1012,7 @@ impl ChatWindows {
                 broker.advance_presence(label)?;
                 let _ = app.emit_to("main", "openpane-ui-wakeup", ());
                 if broker.main_closing {
-                    broker.pending_closes.insert(label.into());
+                    broker.request_close(label)?;
                     let _ = app.emit_to(label, "openpane-close-requested", ());
                 }
                 let _ = app.emit_to(label, "openpane-ui-wakeup", ());
@@ -850,17 +1035,28 @@ impl ChatWindows {
             | Command::Reservations { .. }
             | Command::AssignIntent { .. }
             | Command::CompleteIntent { .. }) => self.run_intent(app, broker, label, command),
-            Command::RestoreBuiltin { incarnation } => {
+            Command::RestoreBuiltin {
+                incarnation,
+                expected_context,
+            } => {
                 self.document(broker, label, &incarnation)?;
-                broker.request_restore()?;
+                broker.request_restore(
+                    expected_context
+                        .as_ref()
+                        .map(|context| (context.host_id.as_str(), context.profile_id.as_str())),
+                )?;
                 for target in broker.documents.keys() {
                     let _ = app.emit_to(target, "openpane-ui-wakeup", ());
                 }
-                Ok(json!({"sequence":broker.recovery_sequence}))
+                Ok(
+                    json!({"sequence":broker.recovery_sequence,"hostId":broker.host.as_ref().map(|host| &host.0),"profileId":broker.host.as_ref().map(|host| &host.1)}),
+                )
             }
             Command::ReadRecovery { incarnation } => {
                 self.require_main(broker, label, &incarnation)?;
-                Ok(json!({"pending":broker.local_builtin,"sequence":broker.recovery_sequence}))
+                Ok(
+                    json!({"pending":broker.local_builtin,"sequence":broker.recovery_sequence,"hostId":broker.host.as_ref().map(|host| &host.0),"profileId":broker.host.as_ref().map(|host| &host.1)}),
+                )
             }
             Command::ConfirmRecovery {
                 incarnation,
@@ -870,17 +1066,26 @@ impl ChatWindows {
                 broker.confirm_restore(sequence);
                 Ok(json!({"ok":true}))
             }
-            Command::CloseCancelled { incarnation } => {
+            Command::CloseCancelled {
+                incarnation,
+                attempt_id,
+            } => {
                 self.document(broker, label, &incarnation)?;
-                broker.cancel_close();
+                broker.cancel_close_for(label, &attempt_id)?;
                 Ok(json!({"ok":true}))
             }
             Command::ReadClose { incarnation } => {
                 self.document(broker, label, &incarnation)?;
-                Ok(json!({"pending":broker.pending_closes.contains(label)}))
+                Ok(
+                    json!({"pending":broker.pending_closes.contains_key(label),"attemptId":broker.pending_closes.get(label)}),
+                )
             }
-            Command::CloseReady { incarnation } => {
+            Command::CloseReady {
+                incarnation,
+                attempt_id,
+            } => {
                 self.document(broker, label, &incarnation)?;
+                broker.authorize_close(label, &attempt_id)?;
                 if label != "main" {
                     drop(guard);
                     window.destroy().map_err(|_| "window-close-failed")?;
@@ -1058,6 +1263,665 @@ pub async fn desktop_window(
 #[cfg(test)]
 mod admission_tests {
     use super::*;
+
+    #[test]
+    fn cancellation_accepts_both_fresh_and_prior_terminal_command_shapes() {
+        let mut command = json!({"kind":"cancel-reservation","incarnation":"main","scope":{"hostId":"host","conversationId":"chat"},"transitionId":"replacement"});
+        assert!(matches!(
+            serde_json::from_value::<Command>(command.clone()).unwrap(),
+            Command::CancelReservation { previous: None, .. }
+        ));
+        command["previous"] = json!({"scope":{"hostId":"host","conversationId":"chat"},"viewId":"view","label":"chat-label","transitionId":"prior","creationAgentId":null,"phase":"target-ready","bindingRevision":3,"writerGeneration":4});
+        let Command::CancelReservation {
+            previous: Some(prior),
+            ..
+        } = serde_json::from_value::<Command>(command).unwrap()
+        else {
+            panic!("Missing prior terminal record");
+        };
+        assert_eq!(prior.transition_id, "prior");
+        assert_eq!(prior.phase, Phase::TargetReady);
+    }
+
+    #[test]
+    fn cancelling_a_superseded_rollover_restores_the_exact_terminal_record_and_slot() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-rollover-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.host = Some(("host".into(), "profile".into()));
+            for n in 0..31 {
+                windows
+                    .reserve(
+                        broker,
+                        Scope {
+                            host_id: "host".into(),
+                            conversation_id: format!("occupied-{n}"),
+                        },
+                        format!("view-{n}"),
+                        None,
+                        false,
+                        None,
+                    )
+                    .unwrap();
+            }
+            let scope = Scope {
+                host_id: "host".into(),
+                conversation_id: "old-closed".into(),
+            };
+            windows
+                .reserve(broker, scope.clone(), "old-view".into(), None, false, None)
+                .unwrap();
+            let prior = broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    let entry = profile.windows.get_mut(&scope.key()).unwrap();
+                    entry.confirm_binding(3, 4)?;
+                    Ok(entry.clone())
+                })
+                .unwrap();
+            let source = Scope {
+                host_id: "host".into(),
+                conversation_id: "historical-source".into(),
+            };
+            broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    profile.intent(
+                        source.clone(),
+                        "1:historical".into(),
+                        Action::Open {
+                            scope: scope.clone(),
+                            passive: false,
+                            carry: false,
+                        },
+                    )?;
+                    profile.assign_intent(&source, "1:historical", prior.clone(), false, None)?;
+                    profile.complete_intent(
+                        &source,
+                        "1:historical",
+                        json!({"kind":"detached","scope":scope,"label":prior.label}),
+                    )?;
+                    Ok(())
+                })
+                .unwrap();
+            let carry_source = Scope {
+                host_id: "host".into(),
+                conversation_id: "unbound-carry-source".into(),
+            };
+            broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    profile.intent(
+                        carry_source.clone(),
+                        "1:unbound-carry".into(),
+                        Action::Open {
+                            scope: scope.clone(),
+                            passive: false,
+                            carry: true,
+                        },
+                    )?;
+                    profile.assign_intent(
+                        &carry_source,
+                        "1:unbound-carry",
+                        prior.clone(),
+                        false,
+                        None,
+                    )?;
+                    profile
+                        .intents
+                        .get_mut(&crate::chat_window_records::Profile::intent_key(
+                            &carry_source,
+                            "1:unbound-carry",
+                        ))
+                        .unwrap()
+                        .target
+                        .as_mut()
+                        .unwrap()
+                        .phase = Phase::Assigned;
+                    let newer = Scope {
+                        host_id: "host".into(),
+                        conversation_id: "new-explicit-source".into(),
+                    };
+                    profile.intent(
+                        newer.clone(),
+                        "1:new-explicit".into(),
+                        Action::Open {
+                            scope: scope.clone(),
+                            passive: false,
+                            carry: false,
+                        },
+                    )?;
+                    let mut proposed = prior.clone();
+                    proposed.transition_id = "fresh-placeholder".into();
+                    profile.assign_intent(&newer, "1:new-explicit", proposed, true, None)?;
+                    assert_eq!(
+                        profile.windows[&scope.key()].transition_id,
+                        prior.transition_id
+                    );
+                    Ok(())
+                })
+                .unwrap();
+            let history = serde_json::to_value(
+                broker
+                    .storage
+                    .profile(&windows.origin)
+                    .unwrap()
+                    .intents
+                    .values()
+                    .filter(|intent| intent.result.is_some())
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+            let rolled = windows
+                .reserve(broker, scope.clone(), "old-view".into(), None, true, None)
+                .unwrap();
+            assert_ne!(rolled.transition_id, prior.transition_id);
+            assert_eq!(rolled.phase, Phase::Requested);
+            assert_eq!(rolled.binding_revision, Some(3));
+            assert_eq!(rolled.writer_generation, Some(4));
+            let next = Scope {
+                host_id: "host".into(),
+                conversation_id: "next".into(),
+            };
+            assert_eq!(
+                windows.admit_child(broker, &next, None),
+                Err("native-window-limit")
+            );
+
+            assert!(!windows
+                .cancel_reservation(broker, &scope, &rolled.transition_id, None)
+                .unwrap());
+            let mut wrong = prior.clone();
+            wrong.view_id = "different-view".into();
+            assert!(!windows
+                .cancel_reservation(broker, &scope, &rolled.transition_id, Some(&wrong))
+                .unwrap());
+            wrong = prior.clone();
+            wrong.binding_revision = Some(2);
+            assert!(!windows
+                .cancel_reservation(broker, &scope, &rolled.transition_id, Some(&wrong))
+                .unwrap());
+            wrong = prior.clone();
+            wrong.phase = Phase::SourceReleased;
+            assert!(!windows
+                .cancel_reservation(broker, &scope, &rolled.transition_id, Some(&wrong))
+                .unwrap());
+            assert!(!windows
+                .cancel_reservation(broker, &scope, "stale-replacement", Some(&prior))
+                .unwrap());
+            broker.opening.insert(rolled.label.clone(), scope.clone());
+            assert!(!windows
+                .cancel_reservation(broker, &scope, &rolled.transition_id, Some(&prior))
+                .unwrap());
+            broker.opening.clear();
+            broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    profile.windows.get_mut(&scope.key()).unwrap().phase = Phase::SourceSaved;
+                    Ok(())
+                })
+                .unwrap();
+            assert!(!windows
+                .cancel_reservation(broker, &scope, &rolled.transition_id, Some(&prior))
+                .unwrap());
+            broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    profile.windows.get_mut(&scope.key()).unwrap().phase = Phase::Requested;
+                    Ok(())
+                })
+                .unwrap();
+            assert!(windows
+                .cancel_reservation(broker, &scope, &rolled.transition_id, Some(&prior))
+                .unwrap());
+            let restored = broker
+                .storage
+                .profile(&windows.origin)
+                .unwrap()
+                .windows
+                .get(&scope.key())
+                .unwrap()
+                .clone();
+            assert_eq!(
+                serde_json::to_value(&restored).unwrap(),
+                serde_json::to_value(&prior).unwrap()
+            );
+            assert_eq!(
+                serde_json::to_value(
+                    broker
+                        .storage
+                        .profile(&windows.origin)
+                        .unwrap()
+                        .intents
+                        .values()
+                        .filter(|intent| intent.result.is_some())
+                        .collect::<Vec<_>>()
+                )
+                .unwrap(),
+                history
+            );
+            let queued = &broker.storage.profile(&windows.origin).unwrap().intents
+                [&crate::chat_window_records::Profile::intent_key(
+                    &carry_source,
+                    "1:unbound-carry",
+                )];
+            assert!(queued.result.is_none());
+            assert_eq!(queued.target.as_ref().unwrap().phase, Phase::TargetReady);
+            assert_eq!(
+                queued.target.as_ref().unwrap().transition_id,
+                prior.transition_id
+            );
+            assert!(windows.admit_child(broker, &next, None).is_ok());
+            assert!(!windows
+                .cancel_reservation(broker, &scope, &rolled.transition_id, Some(&prior))
+                .unwrap());
+            println!(
+                "ROLLOVER_TRACE {}",
+                json!({"prior":prior,"rolled":rolled,"restored":restored,"lookup":broker.lookup_window(&windows.origin, &scope).unwrap()["kind"]})
+            );
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn cancelling_a_failed_record_rollover_restores_it_instead_of_deleting_it() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-failed-rollover-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.host = Some(("host".into(), "profile".into()));
+            let scope = Scope {
+                host_id: "host".into(),
+                conversation_id: "failed-closed".into(),
+            };
+            windows
+                .reserve(
+                    broker,
+                    scope.clone(),
+                    "failed-view".into(),
+                    None,
+                    false,
+                    None,
+                )
+                .unwrap();
+            let prior = broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    let entry = profile.windows.get_mut(&scope.key()).unwrap();
+                    entry.phase = Phase::Failed;
+                    Ok(entry.clone())
+                })
+                .unwrap();
+            let rolled = windows
+                .reserve(
+                    broker,
+                    scope.clone(),
+                    "failed-view".into(),
+                    None,
+                    true,
+                    None,
+                )
+                .unwrap();
+            assert!(windows
+                .cancel_reservation(broker, &scope, &rolled.transition_id, Some(&prior))
+                .unwrap());
+            let restored = broker
+                .storage
+                .profile(&windows.origin)
+                .unwrap()
+                .windows
+                .get(&scope.key())
+                .unwrap()
+                .clone();
+            assert_eq!(
+                serde_json::to_value(&restored).unwrap(),
+                serde_json::to_value(prior).unwrap()
+            );
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn persisted_phases_without_a_live_document_or_opening_lookup_as_closed() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-lookup-phase-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.host = Some(("host".into(), "profile".into()));
+            let scope = Scope {
+                host_id: "host".into(),
+                conversation_id: "lookup-phases".into(),
+            };
+            let reservation = windows
+                .reserve(
+                    broker,
+                    scope.clone(),
+                    "lookup-view".into(),
+                    None,
+                    false,
+                    None,
+                )
+                .unwrap();
+            for phase in [
+                Phase::Requested,
+                Phase::SourceSaved,
+                Phase::TransferCommitted,
+                Phase::SourceReleased,
+                Phase::TargetReady,
+                Phase::Failed,
+            ] {
+                broker
+                    .storage
+                    .mutate(&windows.origin, |profile| {
+                        let entry = profile.windows.get_mut(&scope.key()).unwrap();
+                        entry.phase = phase.clone();
+                        if phase == Phase::TargetReady {
+                            entry.binding_revision = Some(1);
+                            entry.writer_generation = Some(1);
+                        }
+                        Ok(())
+                    })
+                    .unwrap();
+                assert_eq!(
+                    broker.lookup_window(&windows.origin, &scope).unwrap()["kind"],
+                    "closed"
+                );
+            }
+            broker.opening.insert(reservation.label, scope.clone());
+            assert_eq!(
+                broker.lookup_window(&windows.origin, &scope).unwrap()["kind"],
+                "opening"
+            );
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn cancelling_an_untouched_reservation_releases_its_admission_slot() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-cancel-slot-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.host = Some(("host".into(), "profile".into()));
+            for n in 0..31 {
+                windows
+                    .reserve(
+                        broker,
+                        Scope {
+                            host_id: "host".into(),
+                            conversation_id: format!("admitted-{n}"),
+                        },
+                        format!("view-{n}"),
+                        None,
+                        false,
+                        None,
+                    )
+                    .unwrap();
+            }
+            let scope = Scope {
+                host_id: "host".into(),
+                conversation_id: "cancelled".into(),
+            };
+            let reservation = windows
+                .reserve(
+                    broker,
+                    scope.clone(),
+                    "cancelled-view".into(),
+                    None,
+                    false,
+                    None,
+                )
+                .unwrap();
+            let next = Scope {
+                host_id: "host".into(),
+                conversation_id: "next".into(),
+            };
+            assert_eq!(
+                windows.admit_child(broker, &next, None),
+                Err("native-window-limit")
+            );
+            assert!(!windows
+                .cancel_reservation(broker, &scope, "wrong-transition", None)
+                .unwrap());
+            assert!(windows
+                .cancel_reservation(broker, &scope, &reservation.transition_id, None)
+                .unwrap());
+            assert!(!windows
+                .cancel_reservation(broker, &scope, &reservation.transition_id, None)
+                .unwrap());
+            assert!(windows.admit_child(broker, &next, None).is_ok());
+            assert_eq!(
+                broker
+                    .storage
+                    .profile(&windows.origin)
+                    .unwrap()
+                    .windows
+                    .len(),
+                31
+            );
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn cancelling_never_removes_staged_live_or_assigned_work() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-cancel-preserve-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.host = Some(("host".into(), "profile".into()));
+            let scope = Scope {
+                host_id: "host".into(),
+                conversation_id: "preserved".into(),
+            };
+            let reservation = windows
+                .reserve(
+                    broker,
+                    scope.clone(),
+                    "preserved-view".into(),
+                    None,
+                    false,
+                    None,
+                )
+                .unwrap();
+            broker
+                .opening
+                .insert(reservation.label.clone(), scope.clone());
+            assert!(!windows
+                .cancel_reservation(broker, &scope, &reservation.transition_id, None)
+                .unwrap());
+            broker.opening.clear();
+            broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    profile.windows.get_mut(&scope.key()).unwrap().phase = Phase::SourceSaved;
+                    Ok(())
+                })
+                .unwrap();
+            assert!(!windows
+                .cancel_reservation(broker, &scope, &reservation.transition_id, None)
+                .unwrap());
+            broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    profile.windows.get_mut(&scope.key()).unwrap().phase = Phase::Requested;
+                    profile
+                        .windows
+                        .get_mut(&scope.key())
+                        .unwrap()
+                        .binding_revision = Some(1);
+                    Ok(())
+                })
+                .unwrap();
+            assert!(!windows
+                .cancel_reservation(broker, &scope, &reservation.transition_id, None)
+                .unwrap());
+            let assigned = Scope {
+                host_id: "host".into(),
+                conversation_id: "assigned".into(),
+            };
+            let source = Scope {
+                host_id: "host".into(),
+                conversation_id: "source".into(),
+            };
+            let target = windows
+                .reserve(
+                    broker,
+                    assigned.clone(),
+                    "assigned-view".into(),
+                    Some("agent".into()),
+                    false,
+                    None,
+                )
+                .unwrap();
+            broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    profile.intent(
+                        source.clone(),
+                        "1:assigned".into(),
+                        Action::Create {
+                            agent_id: "agent".into(),
+                            carry: false,
+                        },
+                    )?;
+                    profile.assign_intent(&source, "1:assigned", target.clone(), false, None)?;
+                    Ok(())
+                })
+                .unwrap();
+            assert!(!windows
+                .cancel_reservation(broker, &assigned, &target.transition_id, None)
+                .unwrap());
+            assert_eq!(
+                broker
+                    .storage
+                    .profile(&windows.origin)
+                    .unwrap()
+                    .windows
+                    .len(),
+                2
+            );
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn focus_only_launch_is_explicit_and_ordinary_launch_defaults_to_creation() {
+        let geometry = json!({"width":640,"height":720,"titlebar":"native","title":"Chat"});
+        let command = json!({"kind":"launch","incarnation":"main","scope":{"hostId":"host","conversationId":"chat"},"geometry":geometry});
+        assert!(matches!(
+            serde_json::from_value::<Command>(command.clone()).unwrap(),
+            Command::Launch {
+                existing_only: false,
+                intent_ref: None,
+                ..
+            }
+        ));
+        let mut focus = command;
+        focus["existingOnly"] = json!(true);
+        assert!(matches!(
+            serde_json::from_value::<Command>(focus).unwrap(),
+            Command::Launch {
+                existing_only: true,
+                intent_ref: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn forced_chat_close_preserves_main_and_unrelated_setup_windows() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-force-chat-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            let scope = Scope {
+                host_id: "host".into(),
+                conversation_id: "chat".into(),
+            };
+            for (label, scope) in [
+                ("main", None),
+                ("provider-setup", None),
+                ("ready-chat", Some(scope.clone())),
+            ] {
+                broker.documents.insert(
+                    label.into(),
+                    Document {
+                        nonce: label.into(),
+                        incarnation: label.into(),
+                        scope,
+                        view_id: label.into(),
+                        visible: true,
+                        presence_sequence: 0,
+                        display: None,
+                        ready: true,
+                    },
+                );
+            }
+            broker.opening.insert("opening-chat".into(), scope);
+            for label in ["main", "provider-setup", "unknown"] {
+                assert_eq!(broker.is_chat(label), false);
+            }
+            assert_eq!(broker.documents.len(), 3);
+            assert!(broker.is_chat("ready-chat"));
+            assert!(broker.is_chat("ready-chat"));
+            assert!(broker.is_chat("opening-chat"));
+            assert!(broker.is_chat("opening-chat"));
+            assert!(broker.documents.contains_key("main"));
+            assert!(broker.documents.contains_key("provider-setup"));
+            assert!(broker.documents.contains_key("ready-chat"));
+            assert!(broker.opening.contains_key("opening-chat"));
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn normal_quit_refuses_new_child_admission_until_cancelled() {
         let directory =
@@ -1076,10 +1940,13 @@ mod admission_tests {
                 host_id: "host".into(),
                 conversation_id: "chat".into(),
             };
-            broker.begin_close("main");
-            assert_eq!(windows.admit_child(broker, &scope), Err("main-unavailable"));
+            broker.begin_close("main").unwrap();
+            assert_eq!(
+                windows.admit_child(broker, &scope, None),
+                Err("main-unavailable")
+            );
             assert!(windows
-                .reserve(broker, scope.clone(), "view".into(), None, false)
+                .reserve(broker, scope.clone(), "view".into(), None, false, None)
                 .is_err());
             assert!(broker.opening.is_empty());
             assert!(broker
@@ -1090,7 +1957,7 @@ mod admission_tests {
                 .is_empty());
             broker.cancel_close();
             assert!(windows
-                .reserve(broker, scope, "view".into(), None, false)
+                .reserve(broker, scope, "view".into(), None, false, None)
                 .is_ok());
         }
         drop(windows);
@@ -1137,7 +2004,7 @@ mod admission_tests {
                 conversation_id: "saved-0".into(),
             };
             let replay = windows
-                .reserve(broker, scope, "view-0".into(), None, false)
+                .reserve(broker, scope, "view-0".into(), None, false, None)
                 .unwrap();
             assert_eq!(replay.label, "chat-0");
             assert_eq!(replay.transition_id, "transition-0");
@@ -1169,7 +2036,7 @@ mod admission_tests {
                 json!({"kind":"absent"})
             );
             let reservation = windows
-                .reserve(broker, scope.clone(), "view".into(), None, false)
+                .reserve(broker, scope.clone(), "view".into(), None, false, None)
                 .unwrap();
             broker
                 .storage
@@ -1231,6 +2098,83 @@ mod admission_tests {
     }
 
     #[test]
+    fn host_rebind_cancels_old_recovery_and_scoped_requests_require_the_bound_host() {
+        let command: Command = serde_json::from_value(json!({"kind":"restore-builtin","incarnation":"document","expectedContext":{"hostId":"host-a","profileId":"profile-a"}})).unwrap();
+        assert!(
+            matches!(command, Command::RestoreBuiltin { expected_context: Some(context), .. } if context.host_id == "host-a" && context.profile_id == "profile-a")
+        );
+        assert!(serde_json::from_value::<Command>(json!({"kind":"restore-builtin","incarnation":"document","expectedContext":{"hostId":"host-a"}})).is_err());
+        assert!(matches!(
+            serde_json::from_value::<Command>(
+                json!({"kind":"restore-builtin","incarnation":"document"})
+            )
+            .unwrap(),
+            Command::RestoreBuiltin {
+                expected_context: None,
+                ..
+            }
+        ));
+        let directory =
+            std::env::temp_dir().join(format!("openpane-recovery-host-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            assert_eq!(
+                broker.request_restore(Some(("host-a", "profile-a"))),
+                Err("wrong-host")
+            );
+            broker.request_restore(None).unwrap();
+            broker
+                .bind_host("host-a".into(), "profile-a".into())
+                .unwrap();
+            assert!(
+                broker.local_builtin,
+                "an initially unbound explicit restore belongs to the first binding"
+            );
+            let queued_host = broker.host.clone();
+            let old_sequence = broker.recovery_sequence;
+            broker
+                .bind_host("host-b".into(), "profile-b".into())
+                .unwrap();
+            assert!(
+                !broker.local_builtin,
+                "a previous host's pending restore cannot replay after rebind"
+            );
+            assert_eq!(queued_host, Some(("host-a".into(), "profile-a".into())));
+            assert_eq!(broker.recovery_sequence, old_sequence);
+            assert_eq!(
+                broker.request_restore(Some(("host-a", "profile-a"))),
+                Err("wrong-host")
+            );
+            assert_eq!(
+                broker.request_restore(Some(("host-b", "old-profile-b"))),
+                Err("wrong-host")
+            );
+            broker
+                .request_restore(Some(("host-b", "profile-b")))
+                .unwrap();
+            assert!(broker.recovery_sequence > old_sequence);
+            broker.confirm_restore(old_sequence);
+            assert!(broker.local_builtin);
+            broker
+                .bind_host("host-b".into(), "new-profile-b".into())
+                .unwrap();
+            assert!(
+                !broker.local_builtin,
+                "profile changes also cancel pending recovery"
+            );
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn each_explicit_restore_survives_until_its_matching_confirmation() {
         let directory =
             std::env::temp_dir().join(format!("openpane-restore-{}", uuid::Uuid::new_v4()));
@@ -1266,22 +2210,170 @@ mod admission_tests {
             broker
                 .bind_host("other-host".into(), "profile".into())
                 .unwrap();
-            broker.request_restore().unwrap();
+            broker.request_restore(None).unwrap();
             let first = broker.recovery_sequence;
-            broker.request_restore().unwrap();
+            broker.request_restore(None).unwrap();
             let retry = broker.recovery_sequence;
             assert!(retry > first);
             broker.confirm_restore(first);
             assert!(broker.local_builtin);
             broker.confirm_restore(retry);
             assert!(!broker.local_builtin);
-            broker.request_restore().unwrap();
+            broker.request_restore(None).unwrap();
             assert!(broker.local_builtin);
         }
         drop(windows);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
+    #[test]
+    fn cancelling_one_independent_close_preserves_another_pending_close() {
+        let directory = std::env::temp_dir().join(format!(
+            "openpane-independent-close-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            assert_eq!(broker.begin_close("first").unwrap(), vec!["first"]);
+            assert_eq!(broker.begin_close("second").unwrap(), vec!["second"]);
+            let attempt = broker.pending_closes.get("first").unwrap().clone();
+            broker.cancel_close_for("first", &attempt).unwrap();
+            assert!(!broker.pending_closes.contains_key("first"));
+            assert!(broker.pending_closes.contains_key("second"));
+            assert!(!broker.main_closing);
+            broker.begin_close("main").unwrap();
+            let attempt = broker.pending_closes.get("second").unwrap().clone();
+            broker.cancel_close_for("second", &attempt).unwrap();
+            assert!(broker.pending_closes.is_empty());
+            assert!(!broker.main_closing);
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn cancelling_quit_or_main_navigation_preserves_an_independent_chat_close() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-close-origins-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            for label in ["main", "first", "second"] {
+                broker.documents.insert(
+                    label.into(),
+                    Document {
+                        nonce: label.into(),
+                        incarnation: label.into(),
+                        scope: None,
+                        view_id: label.into(),
+                        visible: true,
+                        presence_sequence: 0,
+                        display: None,
+                        ready: true,
+                    },
+                );
+            }
+            broker.begin_close("second").unwrap();
+            let independent_attempt = broker.pending_closes.get("second").unwrap().clone();
+            broker.begin_close("second").unwrap();
+            assert_eq!(
+                broker.pending_closes.get("second"),
+                Some(&independent_attempt)
+            );
+            broker.begin_close("main").unwrap();
+            let attempt = broker.pending_closes.get("first").unwrap().clone();
+            broker.cancel_close_for("first", &attempt).unwrap();
+            assert_eq!(
+                broker.pending_closes.get("second"),
+                Some(&independent_attempt)
+            );
+            assert!(!broker.main_closing);
+            assert!(!broker.pending_closes.contains_key("first"));
+            assert!(broker.pending_closes.contains_key("second"));
+            broker.begin_close("main").unwrap();
+            broker.cancel_close();
+            assert_eq!(
+                broker.pending_closes.get("second"),
+                Some(&independent_attempt)
+            );
+            assert!(!broker.main_closing);
+            assert!(!broker.pending_closes.contains_key("first"));
+            assert!(broker.pending_closes.contains_key("second"));
+            broker.finish_close("second").unwrap();
+            assert!(!broker.pending_closes.contains_key("second"));
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn cancelled_quit_rejects_a_late_close_completion_but_preserves_independent_close() {
+        let directory = std::env::temp_dir().join(format!(
+            "openpane-close-completion-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            for label in ["main", "first", "second"] {
+                broker.documents.insert(
+                    label.into(),
+                    Document {
+                        nonce: label.into(),
+                        incarnation: label.into(),
+                        scope: None,
+                        view_id: label.into(),
+                        visible: true,
+                        presence_sequence: 0,
+                        display: None,
+                        ready: true,
+                    },
+                );
+            }
+            broker.begin_close("main").unwrap();
+            let second_attempt = broker.pending_closes.get("second").unwrap().clone();
+            assert!(broker.authorize_close("second", &second_attempt).is_ok());
+            let attempt = broker.pending_closes.get("first").unwrap().clone();
+            broker.cancel_close_for("first", &attempt).unwrap();
+            assert!(
+                windows.document(broker, "second", "second").is_ok(),
+                "document identity remains valid after quit cancellation"
+            );
+            assert_eq!(
+                broker.authorize_close("second", &second_attempt),
+                Err("close-request-cancelled")
+            );
+            assert!(broker.documents.contains_key("second"));
+            broker.begin_close("second").unwrap();
+            broker.begin_close("main").unwrap();
+            let attempt = broker.pending_closes.get("first").unwrap().clone();
+            broker.cancel_close_for("first", &attempt).unwrap();
+            let second_attempt = broker.pending_closes.get("second").unwrap().clone();
+            assert!(broker.authorize_close("second", &second_attempt).is_ok());
+            assert!(broker.documents.contains_key("second"));
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
     #[test]
     fn quit_keeps_main_registered_until_children_finish_and_can_be_cancelled() {
         let directory =
@@ -1310,9 +2402,9 @@ mod admission_tests {
                     },
                 );
             }
-            assert_eq!(broker.begin_close("main"), vec!["first", "second"]);
-            assert!(broker.pending_closes.contains("first"));
-            assert!(broker.pending_closes.contains("second"));
+            assert_eq!(broker.begin_close("main").unwrap(), vec!["first", "second"]);
+            assert!(broker.pending_closes.contains_key("first"));
+            assert!(broker.pending_closes.contains_key("second"));
             assert!(broker.documents.contains_key("main"));
             assert_eq!(
                 broker.finish_close("main").unwrap_err(),
@@ -1335,9 +2427,9 @@ mod admission_tests {
                 broker.abandon_unregistered_openings(),
                 vec!["still-opening"]
             );
-            assert_eq!(broker.begin_close("main"), vec!["main"]);
-            assert_eq!(broker.close_progress(), CloseProgress::Idle);
-            assert_eq!(broker.close_progress(), CloseProgress::Idle);
+            assert_eq!(broker.begin_close("main").unwrap(), vec!["main"]);
+            assert_eq!(broker.close_progress().unwrap(), CloseProgress::Idle);
+            assert_eq!(broker.close_progress().unwrap(), CloseProgress::Idle);
             assert!(broker.documents.contains_key("main"));
             assert_eq!(broker.finish_close("main").unwrap(), CloseProgress::Quit);
         }
@@ -1370,6 +2462,7 @@ mod admission_tests {
                             format!("view-{n}"),
                             None,
                             false,
+                            None,
                         )
                         .unwrap();
                 }
@@ -1406,6 +2499,8 @@ mod admission_tests {
                                     binding_revision: None,
                                     writer_generation: None,
                                 },
+                                false,
+                                None,
                             )?
                             .target
                             .unwrap())
@@ -1418,6 +2513,7 @@ mod admission_tests {
                     target.view_id.clone(),
                     Some("agent".into()),
                     false,
+                    None,
                 );
                 if admitted == 32 {
                     assert!(matches!(reserved, Err("native-window-limit")));
@@ -1434,7 +2530,7 @@ mod admission_tests {
                     assert_eq!(
                         broker.storage.profile(&windows.origin).unwrap().windows[&scope.key()]
                             .phase,
-                        Phase::TargetReady
+                        Phase::InlineReady
                     );
                 } else {
                     assert_eq!(reserved.unwrap().phase, Phase::Requested);
@@ -1448,7 +2544,8 @@ mod admission_tests {
                         },
                         "overflow-view".into(),
                         None,
-                        false
+                        false,
+                        None
                     ),
                     Err("native-window-limit")
                 ));
@@ -1499,7 +2596,7 @@ mod admission_tests {
                 conversation_id: "one".into(),
             };
             let first = windows
-                .reserve(broker, scope.clone(), "view".into(), None, true)
+                .reserve(broker, scope.clone(), "view".into(), None, true, None)
                 .unwrap();
             broker
                 .storage
@@ -1509,7 +2606,7 @@ mod admission_tests {
                 })
                 .unwrap();
             let second = windows
-                .reserve(broker, scope.clone(), "view".into(), None, true)
+                .reserve(broker, scope.clone(), "view".into(), None, true, None)
                 .unwrap();
             assert_eq!(first.transition_id, second.transition_id);
             assert_eq!(second.phase, Phase::TransferCommitted);
@@ -1524,6 +2621,7 @@ mod admission_tests {
                         format!("view-{n}"),
                         None,
                         false,
+                        None,
                     )
                     .unwrap();
             }
@@ -1536,7 +2634,8 @@ mod admission_tests {
                     },
                     "extra".into(),
                     None,
-                    false
+                    false,
+                    None
                 ),
                 Err("native-window-limit")
             ));
@@ -1580,6 +2679,603 @@ mod admission_tests {
             );
             assert!(broker.advance_presence("main").unwrap() > old);
             assert!(windows.document(broker, "main", "old").is_err());
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn a_registered_ready_child_cannot_be_retagged_as_a_fresh_reservation() {
+        let directory = std::env::temp_dir().join(format!(
+            "openpane-live-reservation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.host = Some(("host".into(), "profile".into()));
+            let scope = Scope {
+                host_id: "host".into(),
+                conversation_id: "still-live".into(),
+            };
+            let reservation = windows
+                .reserve(broker, scope.clone(), "live-view".into(), None, false, None)
+                .unwrap();
+            broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    profile
+                        .windows
+                        .get_mut(&scope.key())
+                        .unwrap()
+                        .confirm_binding(2, 3)
+                })
+                .unwrap();
+            let before = serde_json::to_value(
+                &broker.storage.profile(&windows.origin).unwrap().windows[&scope.key()],
+            )
+            .unwrap();
+            broker.documents.insert(
+                reservation.label.clone(),
+                Document {
+                    nonce: "live-nonce".into(),
+                    incarnation: "live-incarnation".into(),
+                    scope: Some(scope.clone()),
+                    view_id: reservation.view_id.clone(),
+                    visible: true,
+                    presence_sequence: 0,
+                    display: None,
+                    ready: true,
+                },
+            );
+            assert_eq!(
+                windows
+                    .reserve(broker, scope.clone(), reservation.view_id, None, true, None)
+                    .unwrap_err(),
+                "target-still-open"
+            );
+            assert_eq!(
+                serde_json::to_value(
+                    &broker.storage.profile(&windows.origin).unwrap().windows[&scope.key()]
+                )
+                .unwrap(),
+                before
+            );
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn assignment_accepts_optional_view_and_rejects_split_observation_hints() {
+        let mut command = json!({"kind":"assign-intent","incarnation":"main","sourceScope":{"hostId":"host","conversationId":"source"},"requestId":"1:atomic","scope":{"hostId":"host","conversationId":"target"},"viewId":null,"creationAgentId":null});
+        assert!(matches!(
+            serde_json::from_value::<Command>(command.clone()).unwrap(),
+            Command::AssignIntent { view_id: None, .. }
+        ));
+        command["viewId"] = json!("indexeddb-view");
+        assert!(
+            matches!(serde_json::from_value::<Command>(command.clone()).unwrap(), Command::AssignIntent { view_id: Some(view_id), .. } if view_id == "indexeddb-view")
+        );
+        command["observedReadyTransitionId"] = json!("obsolete-split-observation");
+        assert!(serde_json::from_value::<Command>(command).is_err());
+    }
+    #[test]
+    fn assigning_current_opening_is_atomic_with_ready_and_close() {
+        for at_assignment in ["opening", "ready", "closed", "reopened"] {
+            let directory = std::env::temp_dir().join(format!(
+                "openpane-atomic-assignment-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir(&directory).unwrap();
+            let windows = ChatWindows::new(
+                Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+                &directory,
+                true,
+            );
+            {
+                let mut guard = windows.broker.lock().unwrap();
+                let broker = guard.as_mut().unwrap();
+                broker.host = Some(("host".into(), "profile".into()));
+                let scope = Scope {
+                    host_id: "host".into(),
+                    conversation_id: "target".into(),
+                };
+                let source = Scope {
+                    host_id: "host".into(),
+                    conversation_id: "source".into(),
+                };
+                let original = windows
+                    .reserve(
+                        broker,
+                        scope.clone(),
+                        "atomic-view".into(),
+                        None,
+                        false,
+                        None,
+                    )
+                    .unwrap();
+                broker.opening.insert(original.label.clone(), scope.clone());
+                if at_assignment != "opening" {
+                    broker
+                        .storage
+                        .mutate(&windows.origin, |profile| {
+                            let entry = profile.windows.get_mut(&scope.key()).unwrap();
+                            entry.confirm_binding(2, 3)?;
+                            let ready = entry.clone();
+                            profile.preserve_child_ready(&ready);
+                            Ok(())
+                        })
+                        .unwrap();
+                }
+                if matches!(at_assignment, "closed" | "reopened") {
+                    broker.opening.remove(&original.label);
+                }
+                let expected = if at_assignment == "reopened" {
+                    let next = windows
+                        .reserve(
+                            broker,
+                            scope.clone(),
+                            original.view_id.clone(),
+                            None,
+                            true,
+                            None,
+                        )
+                        .unwrap();
+                    broker.opening.insert(next.label.clone(), scope.clone());
+                    next
+                } else {
+                    original.clone()
+                };
+                let closed = !broker.opening.values().any(|live| live == &scope)
+                    && !broker
+                        .documents
+                        .values()
+                        .any(|document| document.scope.as_ref() == Some(&scope));
+                let assigned = broker
+                    .storage
+                    .mutate(&windows.origin, |profile| {
+                        profile.intent(
+                            source.clone(),
+                            "1:atomic".into(),
+                            Action::Open {
+                                scope: scope.clone(),
+                                passive: false,
+                                carry: false,
+                            },
+                        )?;
+                        let mut proposed = expected.clone();
+                        proposed.transition_id = "fresh-closed-attempt".into();
+                        profile.assign_intent(&source, "1:atomic", proposed, closed, None)
+                    })
+                    .unwrap()
+                    .target
+                    .unwrap();
+                if at_assignment == "closed" {
+                    assert_eq!(assigned.transition_id, "fresh-closed-attempt");
+                    assert_eq!(assigned.phase, Phase::Assigned);
+                } else {
+                    assert_eq!(assigned.transition_id, expected.transition_id);
+                    assert_eq!(
+                        assigned.phase,
+                        if at_assignment == "ready" {
+                            Phase::TargetReady
+                        } else {
+                            Phase::Requested
+                        }
+                    );
+                }
+                if at_assignment == "opening" {
+                    broker
+                        .storage
+                        .mutate(&windows.origin, |profile| {
+                            let entry = profile.windows.get_mut(&scope.key()).unwrap();
+                            entry.confirm_binding(2, 3)?;
+                            let ready = entry.clone();
+                            profile.preserve_child_ready(&ready);
+                            Ok(())
+                        })
+                        .unwrap();
+                    broker.opening.remove(&original.label);
+                    assert_eq!(
+                        broker.lookup_window(&windows.origin, &scope).unwrap()["kind"],
+                        "closed"
+                    );
+                    let intent = broker
+                        .storage
+                        .profile(&windows.origin)
+                        .unwrap()
+                        .intents
+                        .get(&crate::chat_window_records::Profile::intent_key(
+                            &source, "1:atomic",
+                        ))
+                        .unwrap();
+                    assert_eq!(intent.target.as_ref().unwrap().phase, Phase::TargetReady);
+                }
+                broker
+                    .storage
+                    .profile(&windows.origin)
+                    .unwrap()
+                    .validate()
+                    .unwrap();
+            }
+            drop(windows);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+    #[test]
+    fn delegated_intent_fences_reserve_and_launch_admission_after_child_ready() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-intent-fence-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut lock = windows.broker.lock().unwrap();
+            let broker = lock.as_mut().unwrap();
+            broker.host = Some(("host".into(), "profile".into()));
+            let scope = Scope {
+                host_id: "host".into(),
+                conversation_id: "target".into(),
+            };
+            let source = Scope {
+                host_id: "host".into(),
+                conversation_id: "source".into(),
+            };
+            let first = windows
+                .reserve(
+                    broker,
+                    scope.clone(),
+                    "fenced-view".into(),
+                    None,
+                    false,
+                    None,
+                )
+                .unwrap();
+            broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    profile.intent(
+                        source.clone(),
+                        "1:fenced".into(),
+                        Action::Open {
+                            scope: scope.clone(),
+                            passive: false,
+                            carry: true,
+                        },
+                    )?;
+                    profile.assign_intent(&source, "1:fenced", first.clone(), false, None)?;
+                    Ok(())
+                })
+                .unwrap();
+            let reference = IntentRef {
+                source_scope: source.clone(),
+                request_id: "1:fenced".into(),
+            };
+            windows
+                .reserve(
+                    broker,
+                    scope.clone(),
+                    first.view_id.clone(),
+                    None,
+                    false,
+                    Some(&reference),
+                )
+                .unwrap();
+            broker
+                .storage
+                .mutate(&windows.origin, |profile| {
+                    let entry = profile.windows.get_mut(&scope.key()).unwrap();
+                    entry.confirm_binding(2, 3)?;
+                    let ready = entry.clone();
+                    profile.preserve_child_ready(&ready);
+                    Ok(())
+                })
+                .unwrap();
+            let before =
+                serde_json::to_value(broker.storage.profile(&windows.origin).unwrap()).unwrap();
+            assert_eq!(
+                windows
+                    .reserve(
+                        broker,
+                        scope.clone(),
+                        first.view_id.clone(),
+                        None,
+                        true,
+                        Some(&reference)
+                    )
+                    .unwrap_err(),
+                "intent-already-ready"
+            );
+            assert_eq!(
+                windows.admit_child(broker, &scope, Some(&reference)),
+                Err("intent-already-ready")
+            );
+            let wrong = IntentRef {
+                source_scope: Scope {
+                    host_id: "foreign".into(),
+                    conversation_id: "source".into(),
+                },
+                request_id: reference.request_id.clone(),
+            };
+            assert!(windows.admit_child(broker, &scope, Some(&wrong)).is_err());
+            assert_eq!(
+                serde_json::to_value(broker.storage.profile(&windows.origin).unwrap()).unwrap(),
+                before
+            );
+            // An ordinary new catalog open still has explicit permission to reopen the closed chat.
+            let explicit = windows
+                .reserve(broker, scope.clone(), first.view_id, None, true, None)
+                .unwrap();
+            assert_ne!(explicit.transition_id, first.transition_id);
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn creating_launch_reattaches_unready_handoff_after_inline_recovery_but_preserves_old_ready() {
+        for already_ready in [false, true] {
+            let directory = std::env::temp_dir()
+                .join(format!("openpane-intent-recovery-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&directory).unwrap();
+            let windows = ChatWindows::new(
+                Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+                &directory,
+                true,
+            );
+            {
+                let mut lock = windows.broker.lock().unwrap();
+                let broker = lock.as_mut().unwrap();
+                broker.host = Some(("host".into(), "profile".into()));
+                let scope = Scope {
+                    host_id: "host".into(),
+                    conversation_id: "target".into(),
+                };
+                let source = Scope {
+                    host_id: "host".into(),
+                    conversation_id: "source".into(),
+                };
+                let first = windows
+                    .reserve(
+                        broker,
+                        scope.clone(),
+                        "recovered-view".into(),
+                        None,
+                        false,
+                        None,
+                    )
+                    .unwrap();
+                broker
+                    .storage
+                    .mutate(&windows.origin, |profile| {
+                        profile.intent(
+                            source.clone(),
+                            "1:recover".into(),
+                            Action::Open {
+                                scope: scope.clone(),
+                                passive: false,
+                                carry: true,
+                            },
+                        )?;
+                        profile.assign_intent(&source, "1:recover", first.clone(), false, None)?;
+                        let entry = profile.windows.get_mut(&scope.key()).unwrap();
+                        entry.phase = Phase::SourceReleased;
+                        let launched = entry.clone();
+                        profile.attach_launched_intents(&launched);
+                        if already_ready {
+                            let entry = profile.windows.get_mut(&scope.key()).unwrap();
+                            entry.confirm_binding(2, 3)?;
+                            let ready = entry.clone();
+                            profile.preserve_child_ready(&ready);
+                        }
+                        let entry = profile.windows.get_mut(&scope.key()).unwrap();
+                        entry.phase = Phase::Failed;
+                        entry.recover_inline(&first.transition_id)?;
+                        entry.phase = Phase::InlineReady;
+                        Ok(())
+                    })
+                    .unwrap();
+                let canonical = directory.join("chat-windows-v1.json");
+                let backup = directory.join("before-completion.json");
+                std::fs::rename(&canonical, &backup).unwrap();
+                std::fs::create_dir(&canonical).unwrap();
+                let completion = if already_ready {
+                    json!({"kind":"detached","scope":scope,"label":first.label})
+                } else {
+                    json!({"kind":"inline","scope":scope})
+                };
+                assert!(broker
+                    .storage
+                    .mutate(&windows.origin, |profile| profile.complete_intent(
+                        &source,
+                        "1:recover",
+                        completion
+                    ))
+                    .is_err());
+                std::fs::remove_dir(&canonical).unwrap();
+                std::fs::rename(&backup, &canonical).unwrap();
+                assert!(broker.storage.profile(&windows.origin).unwrap().intents
+                    [&crate::chat_window_records::Profile::intent_key(&source, "1:recover")]
+                    .result
+                    .is_none());
+                let second = windows
+                    .reserve(
+                        broker,
+                        scope.clone(),
+                        first.view_id.clone(),
+                        None,
+                        true,
+                        None,
+                    )
+                    .unwrap();
+                assert_ne!(second.transition_id, first.transition_id);
+                windows.admit_child(broker, &scope, None).unwrap();
+                broker
+                    .storage
+                    .mutate(&windows.origin, |profile| {
+                        let entry = profile.windows.get_mut(&scope.key()).unwrap();
+                        entry.phase = Phase::SourceReleased;
+                        let committed = entry.clone();
+                        profile.attach_launched_intents(&committed);
+                        let entry = profile.windows.get_mut(&scope.key()).unwrap();
+                        entry.confirm_binding(5, 6)?;
+                        let ready = entry.clone();
+                        profile.preserve_child_ready(&ready);
+                        Ok(())
+                    })
+                    .unwrap();
+                let saved = &broker.storage.profile(&windows.origin).unwrap().intents
+                    [&crate::chat_window_records::Profile::intent_key(&source, "1:recover")];
+                assert!(saved.result.is_none());
+                assert_eq!(saved.target.as_ref().unwrap().phase, Phase::TargetReady);
+                assert_eq!(
+                    &saved.target.as_ref().unwrap().transition_id,
+                    if already_ready {
+                        &first.transition_id
+                    } else {
+                        &second.transition_id
+                    }
+                );
+            }
+            drop(windows);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+    #[test]
+    fn delayed_cancel_from_previous_quit_does_not_cancel_new_quit() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-close-attempt-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            for label in ["main", "first", "second"] {
+                broker.documents.insert(
+                    label.into(),
+                    Document {
+                        nonce: label.into(),
+                        incarnation: label.into(),
+                        scope: None,
+                        view_id: label.into(),
+                        visible: true,
+                        presence_sequence: 0,
+                        display: None,
+                        ready: true,
+                    },
+                );
+            }
+            broker.begin_close("main").unwrap();
+            let first_quit = broker.pending_closes.clone();
+            broker.begin_close("main").unwrap();
+            assert_eq!(
+                broker.pending_closes, first_quit,
+                "repeated Quit keeps the active attempts"
+            );
+            let second_attempt = broker.pending_closes.get("second").unwrap().clone();
+            let attempt = broker.pending_closes.get("first").unwrap().clone();
+            broker.cancel_close_for("first", &attempt).unwrap();
+            assert_eq!(
+                broker.authorize_close("second", &second_attempt),
+                Err("close-request-cancelled")
+            );
+            // Hold delivery of that rejection while the user starts Quit again.
+            broker.begin_close("main").unwrap();
+            let current = broker.pending_closes.get("second").unwrap().clone();
+            assert_ne!(second_attempt, current);
+            assert_eq!(
+                broker.authorize_close("second", &second_attempt),
+                Err("close-request-cancelled")
+            );
+            assert_eq!(
+                broker.cancel_close_for("second", &second_attempt),
+                Err("close-request-cancelled")
+            );
+            assert!(broker.authorize_close("second", &current).is_ok());
+            assert!(
+                broker.main_closing,
+                "the previous close-ready rejection must not cancel the new Quit"
+            );
+            assert!(broker.pending_closes.contains_key("first"));
+            assert!(broker.pending_closes.contains_key("second"));
+            broker.documents.get_mut("second").unwrap().incarnation = "reloaded-second".into();
+            assert_eq!(
+                windows.document(broker, "second", "second").err(),
+                Some("stale-document")
+            );
+            assert!(windows
+                .document(broker, "second", "reloaded-second")
+                .is_ok());
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn close_wire_requires_an_attempt_id_alongside_the_document_incarnation() {
+        for kind in ["close-ready", "close-cancelled"] {
+            assert!(serde_json::from_value::<Command>(
+                json!({"kind":kind,"incarnation":"document","attemptId":"42"})
+            )
+            .is_ok());
+            assert!(serde_json::from_value::<Command>(
+                json!({"kind":kind,"incarnation":"document"})
+            )
+            .is_err());
+            assert!(
+                serde_json::from_value::<Command>(json!({"kind":kind,"attemptId":"42"})).is_err()
+            );
+        }
+    }
+    #[test]
+    fn repeated_main_only_quit_replays_the_same_pending_attempt_after_undelivered_cancel() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-repeat-main-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.documents.insert(
+                "main".into(),
+                Document {
+                    nonce: "main".into(),
+                    incarnation: "main".into(),
+                    scope: None,
+                    view_id: "main".into(),
+                    visible: true,
+                    presence_sequence: 0,
+                    display: None,
+                    ready: true,
+                },
+            );
+            assert_eq!(broker.begin_close("main").unwrap(), vec!["main"]);
+            let attempt = broker.pending_closes.get("main").unwrap().clone();
+            // prepare failed, but cancellation never reached the broker.
+            assert_eq!(
+                broker.begin_close("main").unwrap(),
+                vec!["main"],
+                "explicit Quit again must wake cancellation retry"
+            );
+            assert_eq!(broker.pending_closes.get("main"), Some(&attempt));
+            broker.cancel_close_for("main", &attempt).unwrap();
+            assert!(!broker.main_closing);
+            assert!(!broker.pending_closes.contains_key("main"));
         }
         drop(windows);
         std::fs::remove_dir_all(directory).unwrap();

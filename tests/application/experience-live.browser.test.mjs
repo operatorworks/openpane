@@ -6,8 +6,8 @@ import { rename } from 'node:fs/promises';
 import { fixture, connected, draft, wait } from './browser-support.mjs';
 import { requestUi } from '../../apps/host/build/tsc/ui-control.js';
 import { createExperienceBundle, sha256 } from '../../apps/host/build/tsc/experience-bundle.js';
-function experience(color) {
-  const css = `[data-openpane-part="composer"] { border: 2px solid ${color}; }`;
+function experience(color, textCss = '') {
+  const css = `[data-openpane-part="composer"] { border: 2px solid ${color}; }${textCss}`;
   return createExperienceBundle({ schemaVersion: 2, id: 'live-test', label: 'Live test', theme: { density: 'comfortable', mode: 'light', light: { typography: { body: { size: 13 } }, fonts: { body: 'Tahoma, Verdana, sans-serif' }, spacing: { sm: 6 } }, dark: {} },
     presentation: { home: { kind: 'stack', panes: ['conversations', 'conversation'] }, transcript: 'bubbles', navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } },
     stylesheet: 'style.css', assets: [{ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) }] }, css, []);
@@ -212,4 +212,19 @@ test('same-origin UI profile replacement stages the new digest before reporting 
   assert.ok(paints.some(paint => paint.request.digest === second.digest));
   assert.ok(paints.filter(paint => paint.request.digest === second.digest).every(paint => paint.shown === second.digest));
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Profile replacement keeps editor text');
+});
+
+
+test('local and remote message-text states style their actual sent transcript text', { timeout: 45000 }, async t => {
+  const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
+  await page.getByRole('button', { name: 'New recorded conversation', exact: true }).click(); await connected(page);
+  await draft(page, 'Semantic local message'); await page.getByRole('button', { name: 'Send', exact: true }).click();
+  const local = page.locator('p[data-openpane-part="message-text"]').filter({ hasText: 'Semantic local message' });
+  await local.waitFor(); const remote = page.locator('.assistant-reply').first(); await remote.waitFor();
+  const context = await requestUi(socket, { op: 'context' }), requestId = `${context.requestEpoch}:${randomUUID()}`;
+  await requestUi(socket, { op: 'apply', requestId, expectedRevision: context.revision, bundle: experience('#3355aa',
+    '[data-openpane-part="message-text"][data-openpane-state="local"] { color: #133357; } [data-openpane-part="message-text"][data-openpane-state="remote"] { color: #462244; }') });
+  assert.equal((await completed(socket, requestId)).outcome, 'all-rendered');
+  assert.equal(await local.evaluate(node => getComputedStyle(node).color), 'rgb(19, 51, 87)');
+  assert.equal(await remote.evaluate(node => getComputedStyle(node).color), 'rgb(70, 34, 68)');
 });

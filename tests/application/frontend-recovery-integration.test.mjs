@@ -227,3 +227,78 @@ test('inactive physical capture release cannot wake the selected view and reopen
   assert.deepEqual(f.failures, []);
   active.release(); other.release();
 });
+
+test('a temporarily busy saved editor stays queued and resumes after its lock becomes available', async t => {
+  const f = await fixture(t), selected = { ...scope, conversationId: 'closed' };
+  f.records.set('closed-view/closed', record(selected, 'unavailable-pending'));
+  f.storage.savedViews = async () => ({ ids: ['closed-view'], after: null });
+  let busy = true, attempts = 0;
+  f.behavior.binding = confirmed;
+  const target = { ...f.target, openOtherView: viewId => f.pool.open(viewId, async () => { attempts++; return busy ? null : f.physical(viewId); }, { interested: false }) };
+  f.worker.retarget(target); await settle(t);
+  assert.equal(attempts, 1); assert.equal(f.records.get('closed-view/closed').frontendSends[0].state, 'unavailable-pending');
+  busy = false; await intervals(t, 1);
+  assert.equal(f.records.get('closed-view/closed').frontendSends[0].state, 'unavailable-confirmed');
+  assert.ok(attempts > 1); assert.equal(f.requests.length, 1); assert.deepEqual(f.failures, []);
+  const idle = attempts; await intervals(t); assert.equal(attempts, idle);
+});
+
+test('an editor joining a recovery acquisition does not stall other saved journals', async t => {
+  const f = await fixture(t), entered = f.gate(), release = f.gate();
+  for (const id of ['first', 'second']) f.records.set(`${id}-view/${id}`, record({ ...scope, conversationId: id }, 'unavailable-pending'));
+  f.storage.savedViews = async () => ({ ids: ['first-view', 'second-view'], after: null });
+  f.behavior.binding = confirmed;
+  let first = true;
+  const load = async viewId => { if (viewId === 'first-view' && first) { first = false; entered.resolve(); await release.promise; } return f.physical(viewId); };
+  f.worker.retarget({ ...f.target, openOtherView: viewId => f.pool.open(viewId, () => load(viewId), { interested: false }) });
+  await entered.promise;
+  const joining = f.pool.open('first-view', () => load('first-view'), { required: true });
+  release.resolve(); const active = await joining; t.after(() => active.release()); await settle(t);
+  assert.equal(f.records.get('second-view/second').frontendSends[0].state, 'unavailable-confirmed');
+  assert.equal(f.records.get('first-view/first').frontendSends[0].state, 'unavailable-confirmed');
+  assert.equal(f.pool.holds('first-view'), true); assert.deepEqual(f.failures, []);
+});
+
+for (const state of ['unavailable-pending', 'retained']) test(`closed-journal recovery waits for ${state} storage close completion before contacting the host`, async t => {
+  const f = await fixture(t), selected = { ...scope, conversationId: 'closed' }, entered = f.gate(), completed = f.gate(), owners = [];
+  f.records.set('closed-view/closed', record(selected, state));
+  f.storage.savedViews = async () => ({ ids: ['closed-view'], after: null });
+  f.behavior.binding = request => { assert.ok(owners.every(owner => owner.closed)); return confirmed(request); };
+  let closes = 0;
+  f.worker.retarget({ ...f.target, openOtherView: viewId => f.pool.open(viewId, async () => {
+    const owner = f.physical(viewId); owners.push(owner);
+    owner.close = async () => { if (++closes === (state === 'retained' ? 2 : 1)) { entered.resolve(); await completed.promise; } owner.closed = true; };
+    return owner;
+  }, { interested: false }) });
+  await entered.promise; await settle(t);
+  assert.equal(f.requests.length, 0); assert.equal(owners.at(-1).closed, false);
+  if (state === 'retained') assert.equal(f.records.get('closed-view/closed').frontendSends[0].state, 'unavailable-pending');
+  completed.resolve(); await settle(t);
+  assert.equal(f.records.get('closed-view/closed').frontendSends[0].state, 'unavailable-confirmed');
+  assert.equal(f.requests.length, 1); assert.ok(owners.every(owner => owner.closed)); assert.deepEqual(f.failures, []);
+});
+
+test('a view borrowed during recovery store disposal cannot stall later saved journals', async t => {
+  const f = await fixture(t), began = f.gate(), disposal = f.gate();
+  for (const id of ['first', 'second']) f.records.set(`${id}-view/${id}`, record({ ...scope, conversationId: id }, 'unavailable-pending'));
+  f.storage.savedViews = async () => ({ ids: ['first-view', 'second-view'], after: null });
+  f.behavior.binding = confirmed;
+  const recover = f.pool.recovery.bind(f.pool); let gateFirst = true;
+  f.pool.recovery = async (view, selected) => {
+    const borrow = await recover(view, selected);
+    if (view.storage.viewId === 'first-view' && gateFirst) {
+      gateFirst = false; const close = borrow.store.dispose.bind(borrow.store);
+      borrow.store.dispose = async () => { began.resolve(); await disposal.promise; await close(); };
+    }
+    return borrow;
+  };
+  const openOtherView = viewId => f.pool.open(viewId, async () => f.physical(viewId), { interested: false });
+  f.worker.retarget({ ...f.target, openOtherView }); await began.promise;
+  const joining = await f.pool.open('first-view', async () => f.physical('first-view'), { required: true });
+  t.after(() => joining.release());
+  disposal.resolve(); await settle(t);
+  assert.equal(f.pool.holds('first-view'), true, 'the new borrower keeps its view');
+  assert.equal(f.records.get('first-view/first').frontendSends[0].state, 'unavailable-confirmed');
+  assert.equal(f.records.get('second-view/second').frontendSends[0].state, 'unavailable-confirmed', 'the serialized pass continues to later saved views');
+  assert.deepEqual(f.failures, []);
+});

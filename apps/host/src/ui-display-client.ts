@@ -41,7 +41,7 @@ async function executable(hint: string): Promise<string> {
     if (!isAbsolute(path)) continue;
     try { await access(path, constants.X_OK); if ((await stat(path)).isFile()) return await realpath(path); } catch {}
   }
-  throw new Error('Pup executable not found. Configure an absolute --pup path or PATH.');
+  throw new UiRefusal('unavailable', 'Pup executable not found. Configure an absolute --pup path or PATH.');
 }
 export interface DatadogCommand {
   readonly socket: string; readonly scope: ConversationScope; readonly publicationId: string;
@@ -67,7 +67,7 @@ export async function publishDatadog(command: DatadogCommand): Promise<{ readonl
       }
       else {
         const configured = action.pup ?? (process.env.OPENPANE_PUP || null), executableHint = configured ?? 'PATH:pup';
-        if (configured !== null && !isAbsolute(configured)) throw new Error('Configure an absolute --pup executable path');
+        if (configured !== null && !isAbsolute(configured)) throw new UiRefusal('invalid-input', 'Configure an absolute --pup executable path');
         const context = parseUiContext(await requestUi(socket, { op: 'context' }));
         if (!new RegExp(`^${context.requestEpoch}:[\\da-f]{8}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{4}-[\\da-f]{12}$`, 'i').test(publicationId)) throw new UiRefusal('expired', 'Use an EPOCH:UUID publication ID from the current ui context');
         const path = await executable(executableHint), version = await pupVersion(path, controller.signal), site = await pupSite(path, controller.signal);
@@ -87,7 +87,7 @@ export async function publishDatadog(command: DatadogCommand): Promise<{ readonl
       if (!session?.alive()) return;
       try { await session.request({ op: 'display-query-fail', scope, publicationId, attempt: granted.reservation.attempt, reason }); } catch {}
     };
-    if (action.kind === 'retry') {
+    {
       try { if (await pupVersion(granted.input.executable, controller.signal) !== granted.input.version) throw new Error('Pup version changed'); }
       catch {
         if (controller.signal.aborted) { await fail('cancelled'); throw new UiRefusal('unavailable', 'Pup query cancelled. Inspect display status before an explicit retry.'); }
@@ -104,7 +104,7 @@ export async function publishDatadog(command: DatadogCommand): Promise<{ readonl
     }
     let event: ReturnType<typeof validateDisplayEvent>;
     try { event = validateDisplayEvent({ type: 'CUSTOM', name: METRICS_EVENT_NAME, value: normalizePup(JSON.parse(result.stdout), granted.input.query, granted.input.title, granted.reservation, Date.now()) }); }
-    catch { await fail('invalid-response'); throw new Error('Pup returned an unsupported or invalid metrics response. Inspect display status before retrying.'); }
+    catch { await fail('invalid-response'); throw new UiRefusal('unavailable', 'Pup returned an unsupported or invalid metrics response. Inspect display status before retrying.'); }
     try {
       const value = record(await session.request({ op: 'display-query-finalize', scope, publicationId, attempt: granted.reservation.attempt, event }), ['input', 'reservation']);
       return { reservation: queryData(value, scope, publicationId).reservation, replayed: false };

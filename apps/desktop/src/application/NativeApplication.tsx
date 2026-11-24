@@ -28,7 +28,7 @@ export function NativeApplication() {
       await current.current?.controller.dispose();
       if (!alive.current) return;
       const controller = createApplicationController({ createConnection: options => createMacConnection(access, nativeInvoke, options), createId: () => crypto.randomUUID(),
-        ownedViewStorage: { open: failure => BrowserViewStorage.reopen('native-mac-default', failure, true), reopen: BrowserViewStorage.reopen } });
+        ownedViewStorage: { open: failure => BrowserViewStorage.reopen('native-mac-default', failure, { waitForPreviousDocument: true }), reopen: BrowserViewStorage.reopen } });
       current.current = { id: crypto.randomUUID(), controller };
       setSession(current.current);
     } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : 'Native connection unavailable. Reconnect, or restart OpenPane if the problem continues. Local work is retained.'); }

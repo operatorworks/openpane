@@ -50,6 +50,7 @@ export interface ContinuationNoticeState {
 }
 /** What a closed chat's notice shows; `null` until the first read answers. Nothing starts until a choice is clicked. */
 export function continuationNotice({ view, action, error, stalled }: ConversationContinuation): ContinuationNoticeState | null {
+  if (!stalled && action === null && view?.successor?.kind === 'confirmed' && error) return { status: error, disclosure: false, choices: [] };
   // A lookup that failed before any read answered leaves the same give-up state, so a control always remains.
   if (stalled || (!view && (action === 'check' || error))) return { status: STALLED, disclosure: false, choices: ['Check again', 'Start a new chat'] };
   if (!view) return null;

@@ -325,7 +325,10 @@ test('production browser switches recovery views and releases the old lock befor
   if (originalState === 'unavailable-confirmed') {
     assert.ok(ownership.owners >= 1); assert.ok(ownership.writes.length >= 1);
     assert.ok(ownership.writes.some(write => write.held > 0 && write.value.frontendSends?.some(row => row.command.clientCommandId === original.command.clientCommandId && row.state === 'unavailable-confirmed')));
-  } else { assert.equal(originalState, 'unavailable-pending'); assert.equal(ownership.writes.length, 0); }
+  } else {
+    assert.equal(originalState, 'unavailable-pending');
+    assert.ok(ownership.writes.every(write => write.value.frontendSends?.some(row => row.command.clientCommandId === original.command.clientCommandId && row.state === 'unavailable-confirmed')), 'a later owner may only confirm the earlier pending journal snapshot');
+  }
   assert.deepEqual(after.map(({ command, ownerId }) => ({ command, ownerId })), before.map(({ command, ownerId }) => ({ command, ownerId })));
   const ids = [original.command.clientCommandId, successor.command.clientCommandId];
   assert.ok(requests.every(request => ids.includes(request.id)));

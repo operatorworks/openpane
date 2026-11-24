@@ -95,7 +95,7 @@ test('a rendered transition receipt names the exact child document that painted'
 
 
 test('local font stacks reject empty families and unbalanced quotes in schema and runtime', () => {
-  for (const body of ['Tahoma,,sans-serif', ',Tahoma', 'Tahoma,', '"Tahoma', "'Tahoma", "Tahoma's font", '""', '123', '-', 'Tahoma, -']) {
+  for (const body of ['Tahoma,,sans-serif', ',Tahoma', 'Tahoma,', '"Tahoma', "'Tahoma", "Tahoma's font", '""', '123', '-', 'Tahoma, -', 'Tahoma, inherit', 'initial, Arial', 'UNSET, serif', 'revert-layer', 'default, Tahoma']) {
     const value = experience(); value.theme.light = { fonts: { body } };
     assert.equal(validateExperience(value), false, body); assert.throws(() => parseExperience(value), undefined, body);
   }

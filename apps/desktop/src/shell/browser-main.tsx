@@ -10,6 +10,6 @@ void loadWindowContext().then(context => {
   const runtime = new WindowRuntime(context);
   root.render(<WindowApplication runtime={runtime} />);
 }).catch(error => {
-  root.render(<main><h1>Editor unavailable</h1><p role="alert">{error instanceof Error ? error.message : String(error)}</p>
-    <p>This window has not acquired a conversation. Saved work is preserved.</p><button type="button" onClick={() => window.location.reload()}>Retry window registration</button></main>);
+  root.render(<main><h1>Window unavailable</h1><p role="alert">{error instanceof Error ? error.message : String(error)}</p>
+    <p>This window could not register with the host. Saved work is preserved.</p><button type="button" onClick={() => window.location.reload()}>Retry window registration</button></main>);
 });

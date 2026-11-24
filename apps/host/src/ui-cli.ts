@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { count, record } from '@openpane/contracts/decode';
 import { readExperienceDirectory } from './experience-bundle.js';
 import { requestUi, uiInput } from './ui-control.js';
-import { UI_FRAME_BYTES, UiRefusal } from './ui-protocol.js';
+import { UI_FRAME_BYTES, UiRefusal, UiTimeout } from './ui-protocol.js';
 import { runDisplayCli } from './ui-display-cli.js';
 
 async function stdin(): Promise<unknown> {
@@ -73,10 +73,14 @@ export async function runUiCli(args: readonly string[]): Promise<void> {
       const deadline = performance.now() + limit;
       let last: Record<string, unknown> | null = null;
       for (;;) {
-        const remaining = Math.max(1, deadline - performance.now());
+        const remaining = limit === 0 ? 10000 : deadline - performance.now();
+        if (last && remaining <= 0) { process.stdout.write(JSON.stringify({ ...last, waitEnded: true }) + '\n'); return; }
         let result: Record<string, unknown>;
-        try { result = record(await requestUi(socket, { op: 'status', requestId: requestId() }, remaining)); }
-        catch (error) { if (!last || performance.now() < deadline) throw error; result = last; }
+        try { result = record(await requestUi(socket, { op: 'status', requestId: requestId() }, Math.max(1, remaining))); }
+        catch (error) {
+          if (!last || !(error instanceof UiTimeout)) throw error;
+          process.stdout.write(JSON.stringify({ ...last, waitEnded: true }) + '\n'); return;
+        }
         last = result;
         if (result.outcome !== 'pending' || performance.now() >= deadline) { process.stdout.write(JSON.stringify({ ...result, waitEnded: result.outcome === 'pending' }) + '\n'); return; }
         await new Promise(resolve => setTimeout(resolve, Math.min(300, Math.max(0, deadline - performance.now()))));

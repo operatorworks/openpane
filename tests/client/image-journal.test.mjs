@@ -165,3 +165,59 @@ test('typed unsupported upload preserves selected bytes and identity for later r
   assert.deepEqual(f.drafts.images.get(selected.selectionId), bytes);
   assert.equal(f.store.getSnapshot().image.status, 'ready');
 });
+
+test('closing drains an accepted file read and preserves its image bytes for reopen', async t => {
+  let uploads = 0;
+  const read = deferred(), commit = deferred(), entered = deferred(), drafts = storage();
+  const save = drafts.save.bind(drafts);
+  drafts.save = async (record, image) => { if (image?.put) { entered.resolve(); await commit.promise; } return save(record, image); };
+  t.after(() => commit.resolve());
+  const f = fixture(t, { drafts, images: { async upload() { uploads++; return attachment; } } });
+  await f.store.ready;
+  const selecting = f.store.selectImage({ name: attachment.name, bytes: read.promise });
+  let drained = false;
+  const closing = f.store.dispose().then(() => { drained = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(drained, false);
+  read.resolve(bytes); await entered.promise;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(drained, false, 'disposal waits for the accepted image journal commit');
+  commit.resolve(); await closing;
+  assert.deepEqual(f.drafts.images.get(f.drafts.value.image.selectionId), bytes);
+  assert.equal(f.drafts.value.image.attachment, null);
+  assert.equal(uploads, 0);
+  const successor = createConversationStore({ scope, projection, drafts: f.drafts, port: fakePort(), images: { upload: async () => attachment }, createCommandId: () => 'reopened' });
+  await successor.ready;
+  try {
+    assert.equal(successor.getSnapshot().image.status, 'interrupted');
+    await successor.retryImage();
+    assert.equal(successor.getSnapshot().image.status, 'ready');
+  } finally { await successor.dispose(); }
+  await selecting;
+});
+
+test('an invalid pending image selection leaves a text send available', async t => {
+  const f = fixture(t), read = deferred();
+  await f.store.setDraft('Send this text');
+  const selecting = f.store.selectImage({ name: 'invalid.txt', bytes: read.promise });
+  const rejected = assert.rejects(selecting, /PNG or JPEG/);
+  const sending = f.store.send();
+  read.resolve(new Uint8Array([1, 2, 3]));
+  await rejected;
+  await sending;
+  assert.equal(f.port.submitted.length, 1);
+  assert.equal(f.port.submitted[0].body.text, 'Send this text');
+});
+
+for (const failure of ['read', 'validation']) test(`a failed replacement image ${failure} blocks an overlapping send of the prior image`, async t => {
+  const drafts = storage(), port = fakePort(), read = deferred(); let id = 0;
+  const store = createConversationStore({ scope, projection, drafts, port, images: { upload: async () => attachment },
+    createCommandId: () => `replacement-command-${++id}`, createImageId: () => `00000000-0000-4000-8000-${String(++id).padStart(12, '0')}` });
+  t.after(() => store.dispose()); await store.ready; await store.setDraft('Replacement caption'); await store.selectImage({ name: attachment.name, bytes });
+  const original = structuredClone(drafts.value), selecting = store.selectImage({ name: 'replacement.png', bytes: read.promise });
+  const rejected = assert.rejects(selecting, failure === 'read' ? /replacement read failed/ : /PNG or JPEG/);
+  const sending = store.send(), sent = sending.then(() => 'submitted', () => 'refused');
+  if (failure === 'read') read.reject(new Error('replacement read failed')); else read.resolve(new Uint8Array([1,2,3]));
+  await rejected; assert.equal(await sent, 'refused'); assert.equal(port.submitted.length, 0); assert.deepEqual(drafts.value, original);
+  await store.send(); assert.equal(port.submitted.length, 1); assert.equal(port.submitted[0].body.imageId, attachment.imageId);
+});

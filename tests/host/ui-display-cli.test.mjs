@@ -12,6 +12,11 @@ import { requestUi } from '../../apps/host/build/tsc/ui-control.js';
 const root = fileURLToPath(new URL('../../', import.meta.url)), entry = join(root, 'apps/host/dist/main.js');
 const source = JSON.parse(await readFile(new URL('./fixtures/metrics/pup-v1.json', import.meta.url), 'utf8'));
 async function wait(check) { const until = Date.now() + 10000; while (!await check()) { if (Date.now() > until) throw new Error('CLI query did not reach its fixture'); await new Promise(resolve => setTimeout(resolve, 20)); } }
+async function processId(path) {
+  const pid = Number(await readFile(path, 'utf8'));
+  assert.ok(Number.isSafeInteger(pid) && pid > 0, 'fixture readiness contains a positive process ID');
+  return pid;
+}
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'openpane-display-cli-')), profile = join(directory, 'profile'), pup = join(directory, 'pup'), log = join(directory, 'argv.jsonl'), mode = join(directory, 'mode.json'), ready = join(directory, 'query-ready');
   await writeFile(mode, JSON.stringify({ kind: 'success' }));
@@ -21,7 +26,7 @@ fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({args,site:process.env.
 if (args.includes('--version')) { console.log('pup 2.0.1'); process.exit(0); }
 if (args.includes('auth')) { console.log(JSON.stringify({site:'us3.datadoghq.com'})); process.exit(0); }
 const mode = JSON.parse(fs.readFileSync(${JSON.stringify(mode)}, 'utf8'));
-if (mode.kind==='hang') { fs.writeFileSync(${JSON.stringify(ready)}, String(process.pid)); setInterval(()=>{},1000); }
+if (mode.kind==='hang') { fs.writeFileSync(${JSON.stringify(ready)}+'.tmp', String(process.pid)); fs.renameSync(${JSON.stringify(ready)}+'.tmp', ${JSON.stringify(ready)}); setInterval(()=>{},1000); }
 else if (mode.kind==='invalid') process.stdout.write('{invalid');
 else { process.stdout.write(${JSON.stringify(JSON.stringify(source))}); if(mode.kind==='fail') {process.stderr.write('PRIVATE_AUTHENTICATION_MARKER');setTimeout(()=>process.exit(7),20);} }
 `, { mode: 0o700 });
@@ -102,11 +107,11 @@ test('foreign or absent scopes and expired unknown IDs refuse before starting an
 test('CLI shutdown and host owner loss drain the running child without publishing a partial card', { timeout: 30000 }, async t => {
   const f = await fixture(t); await writeFile(f.mode, JSON.stringify({ kind: 'hang' }));
   const publicationId = await f.id(), query = f.cli(f.query(publicationId));
-  await wait(() => access(f.ready).then(() => true, () => false)); const pid = Number(await readFile(f.ready, 'utf8'));
+  await wait(() => access(f.ready).then(() => true, () => false)); const pid = await processId(f.ready);
   query.child.kill('SIGTERM'); assert.equal((await query.done).code, 1); assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
   assert.equal((await f.status(publicationId)).reservation.kind, 'failed'); assert.deepEqual((await f.page()).body.value.publications, []);
   await rm(f.ready); const lostId = await f.id(), lost = f.cli(f.query(lostId));
-  await wait(() => access(f.ready).then(() => true, () => false)); const lostPid = Number(await readFile(f.ready, 'utf8'));
+  await wait(() => access(f.ready).then(() => true, () => false)); const lostPid = await processId(f.ready);
   await f.restart(); assert.equal((await lost.done).code, 1); assert.throws(() => process.kill(lostPid, 0), { code: 'ESRCH' });
   assert.equal((await f.status(lostId)).reservation.kind, 'interrupted'); assert.deepEqual((await f.page()).body.value.publications, []);
 });
@@ -116,17 +121,18 @@ test('the packaged CLI enforces the real 30-second child deadline before publica
   const result = await f.cli(f.query(publicationId)).done;
   assert.equal(result.code, 1); assert.equal((await f.status(publicationId)).reservation.reason, 'pup-timeout');
   assert.deepEqual((await f.page()).body.value.publications, []);
-  const pid = Number(await readFile(f.ready, 'utf8')); assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+  const pid = await processId(f.ready); assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
 });
 
 for (const group of [false, true]) test(`killing the packaged CLI ${group ? 'job group' : 'process'} leaves no live pup and prevents overlapping retry`, { timeout: 15000, skip: group && process.platform === 'win32' }, async t => {
   const f = await fixture(t), publicationId = await f.id(); await writeFile(f.mode, JSON.stringify({ kind: 'hang' }));
   const query = f.cli(f.query(publicationId), '', {}, group);
-  await wait(() => access(f.ready).then(() => true, () => false)); const pid = Number(await readFile(f.ready, 'utf8'));
-  t.after(() => { try { process.kill(-pid, 'SIGKILL'); } catch {} });
+  await wait(() => access(f.ready).then(() => true, () => false)); const pid = await processId(f.ready);
+  let cleanup = true;
+  t.after(() => { if (cleanup) try { process.kill(pid, 'SIGKILL'); } catch {} });
   if (group) process.kill(-query.child.pid, 'SIGKILL'); else query.child.kill('SIGKILL');
   assert.equal((await query.done).code, null);
-  await wait(() => { try { process.kill(pid, 0); return false; } catch (error) { if (error.code === 'ESRCH') return true; throw error; } });
+  await wait(() => { try { process.kill(pid, 0); return false; } catch (error) { if (error.code === 'ESRCH') { cleanup = false; return true; } throw error; } });
   assert.equal((await f.status(publicationId)).reservation.kind, 'interrupted');
   const retry = await f.cli(['display','retry','--scope-json',JSON.stringify(f.scope),'--publication-id',publicationId,'--expected-attempt','1']).done;
   assert.equal(retry.code, 1); assert.match(retry.stderr, /draining/);

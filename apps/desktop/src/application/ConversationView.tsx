@@ -75,9 +75,8 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
   const [approving, setApproving] = useState<ReadonlySet<string>>(new Set());
   const [stopPending, setStopPending] = useState<typeof stopGuard.current>(null);
   const imageInput = useRef<HTMLInputElement>(null);
-  const intaking = useRef<{ readonly store: OpenConversation['store'] } | null>(null);
+  const intaking = useRef<{ readonly store: OpenConversation['store']; readonly cancel: AbortController } | null>(null);
   const hoverExpiry = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const removals = useRef(0);
   const dragDepth = useRef(0);
   const [drop, setDrop] = useState<DropVerdict | null>(null);
   useEffect(() => {
@@ -168,19 +167,16 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
     if (intaking.current?.store === store) return refuse('Wait for the current image to finish.');
     const result = intakeFile(files);
     if (result.kind === 'reject') return refuse(result.reason);
-    const generation = removals.current;
-    // The guard covers only the local file read; once the store has the bytes, its own upload state takes over.
-    const token = { store };
+    // The store drains intake before close; this guard prevents another file choice while bytes are read.
+    const token = { store, cancel: new AbortController() };
     intaking.current = token;
     const release = () => { if (intaking.current === token) intaking.current = null; };
     void (async () => {
       try {
-        const bytes = new Uint8Array(await result.file.arrayBuffer());
-        release();
-        // Remove while reading wins: a late read must not bring the image back.
-        if (generation === removals.current) await store.selectImage({ name: result.file.name, bytes });
+        const bytes = result.file.arrayBuffer().then(value => { release(); return new Uint8Array(value); });
+        await store.selectImage({ name: result.file.name, bytes }, token.cancel.signal);
       } catch (error) {
-        refuse(error instanceof Error ? error.message : 'The image could not be changed.');
+        if (!token.cancel.signal.aborted) refuse(error instanceof Error ? error.message : 'The image could not be changed.');
       } finally {
         release();
       }
@@ -241,7 +237,7 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
       {view.document.domain.messages.length === 0 && !view.document.domain.activities?.length && !continuation?.boundary && <p className="conversation-greeting">A conversation that stays with you.</p>}
       {view.document.domain.messages.map(message => <article data-openpane-part="transcript-row" data-openpane-state={message.role === 'user' ? 'local' : 'remote'} className={`message message-${message.role}`} key={message.messageId}>
         <strong data-openpane-part="message-author" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.role === 'user' ? 'You' : presentation.assistant}{experience?.manifest.presentation.transcript === 'lines' ? ': ' : ''}</strong>
-        <div data-openpane-part="message-body" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.role === 'assistant' ? <AssistantReply text={message.text} /> : message.text && <p data-openpane-part="message-text">{message.text}</p>}</div>
+        <div data-openpane-part="message-body" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.role === 'assistant' ? <AssistantReply text={message.text} /> : message.text && <p data-openpane-part="message-text" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.text}</p>}</div>
         {message.image && <ImageAttachmentCard attachment={message.image} read={actions.readImage} />}
         {!message.complete && <span className="progress-label">{concluded ? 'Did not finish' : paused ? 'Updates paused' : agent === 'recorded' ? 'Recorded response in progress…' : 'Responding…'}</span>}
       </article>)}
@@ -300,7 +296,7 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
           {(image.status === 'failed' || image.status === 'interrupted') && <button data-openpane-part="button" type="button" disabled={!enabled}
             onClick={() => imageAction(() => active.store.retryImage())}>Retry</button>}
           <button data-openpane-part="button" type="button" className="composer-image-remove" aria-label="Remove" title="Remove image" disabled={Boolean(storageFailure)}
-            onClick={() => { removals.current++; intaking.current = null; imageAction(() => active.store.removeImage()); }}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" /></svg></button>
+            onClick={() => { if (intaking.current?.store === active.store) { intaking.current.cancel.abort(); intaking.current = null; } imageAction(() => active.store.removeImage()); }}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" /></svg></button>
         </div>}
         {image && !acceptsImages && <p className="composer-note">{active.agent.imageInput.kind === 'unsupported' ? active.agent.imageInput.reason : 'This agent cannot receive images.'} Remove the image to send.</p>}
         {imageError?.store === active.store && <p className="composer-note" role="alert">{imageError.message}</p>}

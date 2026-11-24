@@ -276,9 +276,13 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
     }),
     transferDraft: (expected, text, transfer) => enqueue(async () => {
       const matches = local.draft === expected.text && local.draftRevision === expected.revision;
-      if (!matches && (transfer.kind === 'receive' || transfer.kind === 'release-copy')) return 'changed';
+      if (!matches && (transfer.kind !== 'release')) return 'changed';
       if (!drafts.commitTransfer) throw new Error('This storage cannot atomically transfer a draft');
       const next = matches && text !== local.draft ? revised({ draft: text }) : local;
+      if (transfer.kind === 'receive-copy') {
+        if (!await drafts.commitTransfer(next, { outcome: 'copy-received', source: transfer.source })) return 'cancelled';
+        local = next; publish(); return 'committed';
+      }
       if (transfer.kind === 'release-copy') {
         if (!await drafts.commitTransfer(next, { outcome: 'copy-cleared', target: transfer.target, targetViewId: transfer.targetViewId, text: expected.text })) return 'cancelled';
         local = next; publish(); return 'committed';
@@ -287,18 +291,26 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
       if (!await drafts.commitTransfer(next, { source: transfer.source, requestId: transfer.requestId, outcome })) return 'cancelled';
       local = next; publish(); return matches ? 'committed' : 'changed';
     }),
-    async selectImage(file) {
+    async selectImage(file, signal) {
       if (closed) await ready;
-      const bytes = file.bytes.slice();
-      if (!bytes.byteLength) throw new Error('This image file is empty.');
-      if (bytes.byteLength > IMAGE_MAX_BYTES) throw new Error('Choose an image of at most 4 MB.');
-      if (!imageType(bytes)) throw new Error('Choose a PNG or JPEG image.');
-      const name = imageName(file.name);
+      const incoming = file.bytes instanceof Uint8Array ? file.bytes.slice() : file.bytes.then(bytes => bytes.slice());
+      void Promise.resolve(incoming).catch(() => {});
+      // The queued edit owns the file read, so close and placement drain it before releasing storage.
       const started = await editComposer(async () => {
+        let bytes: Uint8Array, name: string;
+        try {
+          bytes = await incoming;
+          if (signal?.aborted) return { done: Promise.resolve() };
+          if (!bytes.byteLength) throw new Error('This image file is empty.');
+          if (bytes.byteLength > IMAGE_MAX_BYTES) throw new Error('Choose an image of at most 4 MB.');
+          if (!imageType(bytes)) throw new Error('Choose a PNG or JPEG image.');
+          name = imageName(file.name);
+        } catch (error) { if (local.image) throw error; return { error }; }
         const image: ComposerImageRecord = immutable({ selectionId: createImageId(), uploadId: parseUploadId(createImageId()), name, byteLength: bytes.byteLength, attachment: null });
         await persist(revised({ image }), { selectionId: image.selectionId, bytes });
-        return { done: upload(image, bytes) };
+        return { done: closed ? Promise.resolve() : upload(image, bytes) };
       });
+      if ('error' in started) throw started.error;
       await started.done;
     },
     async retryImage() {

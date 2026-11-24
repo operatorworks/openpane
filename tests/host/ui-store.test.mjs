@@ -443,10 +443,15 @@ test('unsupported selected and healthy bundles recover once and allow a fresh v2
     assert.equal(context.selection.previousHealthy.kind, 'builtin'); assert.match(context.fault, /unsupported|unavailable/);
     assert.throws(() => f.store.bundle(old.digest), error => error.code === 'unavailable');
     assert.equal(f.store.context().revision, context.revision); f.restart(); assert.equal(f.store.context().revision, context.revision);
+    assert.equal(f.store.context().fault, context.fault, 'recovery remains visible until an explicit valid selection');
+    await f.store.execute({ op: 'refresh', requestId: f.id(), expectedRevision: context.revision });
+    assert.equal(f.store.context().fault, context.fault);
+    f.restart(); assert.equal(f.store.context().fault, context.fault, 'refresh does not acknowledge an unsupported saved bundle');
     const next = bundle(`next-${mode}`), requestId = f.id();
     await f.store.execute({ op: 'apply', requestId, expectedRevision: context.revision, bundle: next });
     assert.equal((await f.store.execute({ op: 'status', requestId })).receipt.digest, next.digest);
     f.restart(); assert.equal(f.store.context().selection.selected.digest, next.digest);
+    assert.equal(f.store.context().fault, null);
     const inspect = new DatabaseSync(f.path); assert.equal(inspect.prepare('SELECT value FROM retained_ui_data').get().value, 'kept');
     assert.equal(inspect.prepare('SELECT count(*) AS count FROM ui_bundles WHERE digest=?').get(old.digest).count, 1); inspect.close();
   }
@@ -466,4 +471,20 @@ test('a superseded reservation is an authoritative no-op so an already transferr
   const current = await f.store.execute({ op: 'status', requestId: b.receipt.requestId });
   assert.equal(current.receipt.participants.find(row => row.slot.kind === 'transition').slot.target, null);
   assert.equal(current.outcome, 'pending');
+});
+
+test('restore context guards host and profile before replay without changing legacy operation identity', async t => {
+  const f = await fixture(t), context = f.store.context(), request = { op: 'restore', requestId: `recovery:${context.recoveryGeneration}:${randomUUID()}`, expectedRevision: context.revision, expectedRecoveryGeneration: context.recoveryGeneration };
+  const { parseUiRequest } = await import('../../apps/host/build/tsc/ui-protocol.js');
+  const expectedContext = { hostId: 'host', profileId: context.profileId };
+  const original = await f.store.execute(request);
+  assert.deepEqual(await f.store.execute(parseUiRequest({ ...request, expectedContext })), original, 'adding transport correlation must replay the original durable operation');
+  for (const foreign of [{ ...expectedContext, hostId: 'other-host' }, { ...expectedContext, profileId: 'other-profile' }]) {
+    await assert.rejects(f.store.execute(parseUiRequest({ ...request, expectedContext: foreign })), error => error.code === 'conflict');
+  }
+  assert.equal(f.store.context().revision, original.receipt.selectionRevision);
+  for (const invalid of [null, {}, { hostId: 'host' }, { profileId: context.profileId }, { ...expectedContext, extra: true }]) assert.throws(() => parseUiRequest({ ...request, expectedContext: invalid }));
+  const next = f.store.context(), guarded = { op: 'restore', requestId: `recovery:${next.recoveryGeneration}:${randomUUID()}`, expectedRevision: next.revision, expectedRecoveryGeneration: next.recoveryGeneration };
+  const receipt = await f.store.execute({ ...guarded, expectedContext });
+  assert.deepEqual(await f.store.execute(guarded), receipt, 'the current-host CLI may replay a scoped operation without changing its input identity');
 });

@@ -9,7 +9,7 @@ test('builtin paint waits for the application frame after local preferences fini
     import React from 'react'; import { createRoot } from 'react-dom/client';
     import { ExperienceScope } from './apps/desktop/src/application/ExperienceScope.tsx';
     const state = { version:1, change:1, selection:{revision:1,deliveryGeneration:1,selected:{kind:'builtin'},previousHealthy:{kind:'builtin'}},bundle:null,envelope:null,transitions:[],fault:null,display:null };
-    const snapshot = {state,diagnostic:null,localBuiltin:false,confirmedGeneration:null,cards:{kind:'none'}};
+    const snapshot = {deliveryContext:null,state,diagnostic:null,localBuiltin:false,confirmedGeneration:null,cards:{kind:'none'}};
     window.paints=[];window.failures=[];
     const connection = {getSnapshot:()=>snapshot,subscribe:()=>()=>{},start(){},close(){},selectScope(){},refreshCards(){},async restore(){},async rendered(state){window.paints.push(state.selection.deliveryGeneration);},async failed(_state,reason){window.failures.push(reason);}};
     function Probe(){const[ready,setReady]=React.useState(false);React.useEffect(()=>{window.finishPreferences=()=>setReady(true);},[]);return <ExperienceScope connection={connection}>{ready?<button data-openpane-essential="new-chat">New chat</button>:<p role="status">Loading local preferences…</p>}</ExperienceScope>;}

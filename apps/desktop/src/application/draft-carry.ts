@@ -3,7 +3,7 @@ import { canonicalJson, parseEditorBinding, parseScope, sameScope } from '@openp
 import type { ConversationScope } from '@openpane/contracts';
 import { openViewDatabase } from './browser-storage.js';
 import { editorBindingKey } from './editor-bindings.js';
-import { carryKey as key, carryTargetKey as targetKey, carryPrefix as prefix, namedCarry, parseCarry, carryEpochKey, carryRequestEpoch } from './draft-carry-records.js';
+import { carryKey as key, carryTargetKey as targetKey, carryPrefix as prefix, namedCarry, parseCarry, keyedCarry, readKeptDraft, carryEpochKey, carryRequestEpoch } from './draft-carry-records.js';
 import type { DraftCarry } from './draft-carry-records.js';
 export type { DraftCarry } from './draft-carry-records.js';
 
@@ -21,16 +21,17 @@ async function transaction<T>(mode: IDBTransactionMode, operation: (store: IDBOb
 export async function pruneDraftCarryHistory(epoch: number, pendingRequestIds: readonly string[] = []): Promise<number> {
   if (!Number.isSafeInteger(epoch) || epoch < 1) throw new Error('Invalid native request epoch');
   return transaction<number>('readwrite', (store, set, fail) => {
-    const all = store.getAll(prefix(['draft-carry']), 1025), floor = store.get(carryEpochKey); let remaining = 2;
+    const range = prefix(['draft-carry']), all = store.getAll(range, 1025), keys = store.getAllKeys(range, 1025), floor = store.get(carryEpochKey), floorKey = store.getKey(carryEpochKey); let remaining = 4;
     const commit = () => {
       try {
-        if (epoch < count(floor.result ?? 0)) throw new Error('Native request epoch advanced. Retry this request.');
-        if (all.result.length > 1024) throw new Error('Draft carry history exceeds limits');
+        if (epoch < count(floorKey.result === undefined ? 0 : floor.result)) throw new Error('Native request epoch advanced. Retry this request.');
+        if (all.result.length > 1024 || all.result.length !== keys.result.length) throw new Error('Draft carry history exceeds limits');
         let retained = all.result.length;
-        for (const value of all.result) {
-          const carry = parseCarry(value);
+        for (let index = 0; index < all.result.length; index++) {
+          let carry: DraftCarry;
+          try { carry = keyedCarry(all.result[index], keys.result[index]); } catch { continue; }
           if ((carry.kind === 'settled' || carry.kind === 'cancelled') && !carry.retainedText && carryRequestEpoch(carry.requestId) < epoch && !pendingRequestIds.includes(carry.requestId)) {
-            if (carry.kind === 'cancelled' && carry.target && carry.requestId.includes(':main-')) store.put(true, ['draft-carry-kept', carry.source.hostId, carry.source.conversationId, carry.target.conversationId]);
+            if (carry.kind === 'cancelled' && carry.target) store.put(true, ['draft-carry-kept', carry.source.hostId, carry.source.conversationId, carry.target.conversationId]);
             store.delete(key(carry.source, carry.requestId));
             if (carry.target) store.delete(targetKey(carry.source, carry.requestId, carry.target));
             retained--;
@@ -39,51 +40,81 @@ export async function pruneDraftCarryHistory(epoch: number, pendingRequestIds: r
         store.put(epoch, carryEpochKey); set(retained);
       } catch (error) { fail(error); }
     };
-    for (const request of [all, floor]) request.onsuccess = () => { if (--remaining === 0) commit(); };
+    for (const request of [all, keys, floor, floorKey]) request.onsuccess = () => { if (--remaining === 0) commit(); };
   });
 }
 export async function offerDraftCarry(input: { readonly source: ConversationScope; readonly sourceViewId: string; readonly requestId: string; readonly writerGeneration: number; readonly emptyOnly?: true; readonly expected: { readonly text: string; readonly revision: number } }): Promise<void> {
   const offered = parseCarry({ ...(input.emptyOnly ? { emptyOnly: true } : {}), version: 1, kind: 'offered', source: input.source, sourceViewId: input.sourceViewId, requestId: input.requestId, expected: input.expected, target: null });
   await transaction<void>('readwrite', (store, set, fail) => {
     const binding = store.get(editorBindingKey(input.source)), existing = store.get(key(input.source, input.requestId));
-    const prior = store.getAll(prefix(['draft-carry', input.source.hostId, input.source.conversationId]), 1025), total = store.count(prefix(['draft-carry'])), floor = store.get(carryEpochKey);
-    let remaining = 5;
+    const prior = store.getAll(prefix(['draft-carry', input.source.hostId, input.source.conversationId]), 1025), total = store.count(prefix(['draft-carry'])), floor = store.get(carryEpochKey), floorKey = store.getKey(carryEpochKey);
+    let remaining = 6;
     const commit = () => {
       try {
         const owned = parseEditorBinding(binding.result);
         if (!sameScope(owned.scope, input.source) || owned.kind !== 'editing' || owned.viewId !== input.sourceViewId || owned.writerGeneration !== input.writerGeneration) throw new Error('Only the current editor may offer its draft');
-        if (existing.result !== undefined) { if (canonicalJson(namedCarry(existing.result, input.source, input.requestId)) !== canonicalJson(offered)) throw new Error('Draft carry ID has different input'); set(undefined); return; }
+        if (existing.result !== undefined) {
+          const current = namedCarry(existing.result, input.source, input.requestId);
+          if ((current.kind !== 'offered' && current.kind !== 'applied') || canonicalJson({ ...current, kind: 'offered', target: null }) !== canonicalJson(offered)) throw new Error('Draft carry ID has different input');
+          set(undefined); return;
+        }
         const epoch = carryRequestEpoch(input.requestId);
-        if (!epoch || epoch < count(floor.result ?? 0)) throw new Error('Draft carry request epoch expired');
+        if (!epoch || epoch < count(floorKey.result === undefined ? 0 : floor.result)) throw new Error('Draft carry request epoch expired');
         if (total.result >= 1024) throw new Error('Draft carry history is full. Existing drafts are preserved.');
         if (prior.result.map(parseCarry).some(item => item.kind === 'offered' || item.kind === 'applied')) throw new Error('This draft already has an unresolved carry. Wait for its target before starting another.');
         store.put(offered, key(input.source, input.requestId)); set(undefined);
       } catch (error) { fail(error); }
     };
-    for (const request of [binding, existing, prior, total, floor]) request.onsuccess = () => { if (--remaining === 0) commit(); };
+    for (const request of [binding, existing, prior, total, floor, floorKey]) request.onsuccess = () => { if (--remaining === 0) commit(); };
   });
 }
 export async function bindDraftCarry(source: ConversationScope, requestId: string, target: ConversationScope): Promise<void> {
   await transaction<void>('readwrite', (store, set, fail) => {
-    const request = store.get(key(source, requestId)); request.onsuccess = () => {
+    const savedKey = key(source, requestId), request = store.get(savedKey), found = store.getKey(savedKey); let remaining = 2;
+    const bind = () => {
       try {
-        if (request.result === undefined) { set(undefined); return; }
+        if (found.result === undefined) { set(undefined); return; }
         const carry = namedCarry(request.result, source, requestId);
         if (carry.target && !sameScope(carry.target, target)) throw new Error('Draft carry target is already fixed');
-        if (carry.kind === 'cancelled' && carry.target === null) store.put({ ...carry, target }, key(source, requestId));
-        if (carry.kind === 'offered' && carry.target === null) {
-          const bound = parseCarry({ ...carry, target }); store.put(bound, key(source, requestId));
-          store.put({ source, requestId }, targetKey(source, requestId, target));
+        if (carry.kind === 'cancelled') {
+          if (carry.target === null) store.put({ ...carry, target }, key(source, requestId));
+          store.put(true, ['draft-carry-kept', source.hostId, source.conversationId, target.conversationId]);
+        }
+        if (carry.kind === 'offered') {
+          readKeptDraft(store, source, target, kept => {
+            try {
+              if (kept) {
+                store.put(true, ['draft-carry-kept', source.hostId, source.conversationId, target.conversationId]);
+                store.put({ version: 1, kind: 'cancelled', source, sourceViewId: carry.sourceViewId, requestId, target,
+                  retainedText: carry.expected.text, outcome: 'kept-at-source' } satisfies DraftCarry, key(source, requestId));
+                store.delete(targetKey(source, requestId, target));
+              } else if (carry.target === null) {
+                const bound = parseCarry({ ...carry, target }); store.put(bound, key(source, requestId));
+                store.put({ source, requestId }, targetKey(source, requestId, target));
+              }
+              set(undefined);
+            } catch (error) { fail(error); }
+          }, fail);
+          return;
         }
         set(undefined);
       } catch (error) { fail(error); }
     };
+    for (const item of [request, found]) item.onsuccess = () => { if (--remaining === 0) bind(); };
   });
 }
 export async function sourceCarries(scope: ConversationScope): Promise<readonly DraftCarry[]> {
   return transaction('readonly', (store, set, fail) => {
-    const request = store.getAll(prefix(['draft-carry', scope.hostId, scope.conversationId]), 1025);
-    request.onsuccess = () => { try { if (request.result.length > 1024) throw new Error('Draft carry history exceeds limits'); const values = request.result.map(parseCarry); if (values.some(carry => !sameScope(carry.source, scope))) throw new Error('Foreign source in draft carry history'); set(values); } catch (error) { fail(error); } };
+    const range = prefix(['draft-carry', scope.hostId, scope.conversationId]), request = store.getAll(range, 1025), keys = store.getAllKeys(range, 1025); let remaining = 2;
+    const read = () => {
+      try {
+        if (request.result.length > 1024 || request.result.length !== keys.result.length) throw new Error('Draft carry history exceeds limits');
+        const values = request.result.map((value, index) => keyedCarry(value, keys.result[index]));
+        if (values.some(carry => !sameScope(carry.source, scope))) throw new Error('Foreign source in draft carry history');
+        set(values);
+      } catch (error) { fail(error); }
+    };
+    for (const item of [request, keys]) item.onsuccess = () => { if (--remaining === 0) read(); };
   });
 }
 export async function targetCarries(scope: ConversationScope): Promise<readonly DraftCarry[]> {
@@ -104,29 +135,33 @@ export async function targetCarries(scope: ConversationScope): Promise<readonly 
     };
   });
 }
-export async function cancelDraftCarry(carry: DraftCarry): Promise<boolean> {
+export async function cancelDraftCarry(carry: Pick<DraftCarry, 'source' | 'requestId'>): Promise<boolean> {
   return transaction<boolean>('readwrite', (store, set, fail) => {
-    const request = store.get(key(carry.source, carry.requestId)); request.onsuccess = () => {
+    const savedKey = key(carry.source, carry.requestId), request = store.get(savedKey), found = store.getKey(savedKey); let remaining = 2;
+    const cancel = () => {
       try {
+        if (found.result === undefined) { set(false); return; }
         const current = namedCarry(request.result, carry.source, carry.requestId);
         if (current.kind === 'settled') { set(false); return; }
         if (current.kind !== 'cancelled') {
           store.put({ version: 1, kind: 'cancelled', source: current.source, sourceViewId: current.sourceViewId, requestId: current.requestId, target: current.target, retainedText: current.expected.text, outcome: 'kept-at-source' } satisfies DraftCarry, key(carry.source, carry.requestId));
           if (current.target) store.delete(targetKey(current.source, current.requestId, current.target));
         }
+        if (current.target) store.put(true, ['draft-carry-kept', current.source.hostId, current.source.conversationId, current.target.conversationId]);
         set(true);
       } catch (error) { fail(error); }
     };
+    for (const item of [request, found]) item.onsuccess = () => { if (--remaining === 0) cancel(); };
   });
 }
 
-export async function refuseDraftCarry(carry: DraftCarry): Promise<void> {
+export async function refuseDraftCarry(carry: DraftCarry, { unboundOnly = false }: { readonly unboundOnly?: boolean } = {}): Promise<void> {
   await transaction<void>('readwrite', (store, set, fail) => {
     const request = store.get(key(carry.source, carry.requestId));
     request.onsuccess = () => {
       try {
         const current = namedCarry(request.result, carry.source, carry.requestId);
-        if (current.kind === 'offered') {
+        if (current.kind === 'offered' && (!unboundOnly || current.target === null)) {
           store.put({ ...current, kind: 'refused' } satisfies DraftCarry, key(current.source, current.requestId));
           if (current.target) store.delete(targetKey(current.source, current.requestId, current.target));
         }
@@ -138,22 +173,23 @@ export async function refuseDraftCarry(carry: DraftCarry): Promise<void> {
 export async function retryDraftCarry(source: ConversationScope, requestId: string, sourceViewId: string, writerGeneration: number): Promise<void> {
   await transaction<void>('readwrite', (store, set, fail) => {
     const request = store.get(key(source, requestId)), binding = store.get(editorBindingKey(source));
-    const prior = store.getAll(prefix(['draft-carry', source.hostId, source.conversationId]), 1025), floor = store.get(carryEpochKey);
-    let remaining = 4;
+    const prior = store.getAll(prefix(['draft-carry', source.hostId, source.conversationId]), 1025), floor = store.get(carryEpochKey), floorKey = store.getKey(carryEpochKey);
+    let remaining = 5;
     const commit = () => {
       try {
         const current = namedCarry(request.result, source, requestId), owned = parseEditorBinding(binding.result);
         if (current.kind === 'cancelled') throw new Error('This draft was explicitly kept at its source. Copy it manually before retrying the chat.');
         if (current.kind !== 'refused') { set(undefined); return; }
-        if (!sameScope(owned.scope, source) || owned.kind !== 'editing' || owned.viewId !== sourceViewId || current.sourceViewId !== sourceViewId || owned.writerGeneration !== writerGeneration) throw new Error('Only the current source editor may retry its draft carry');
-        if (carryRequestEpoch(requestId) < count(floor.result ?? 0)) throw new Error('Draft carry request epoch expired');
+        if (!sameScope(owned.scope, source) || owned.kind !== 'editing' || owned.viewId !== sourceViewId || owned.writerGeneration !== writerGeneration) throw new Error('Only the current source editor may retry its draft carry');
+        if (carryRequestEpoch(requestId) < count(floorKey.result === undefined ? 0 : floor.result)) throw new Error('Draft carry request epoch expired');
         if (prior.result.length > 1024 || prior.result.map(parseCarry).some(item => item.kind === 'offered' || item.kind === 'applied')) throw new Error('Another draft carry remains unresolved. Finish it before retrying this one.');
-        store.put({ ...current, kind: 'offered' } satisfies DraftCarry, key(source, requestId));
-        if (current.target) store.put({ source, requestId }, targetKey(source, requestId, current.target));
+        // Main binds the target after native retry admission.
+        store.put({ ...current, sourceViewId, kind: 'offered', target: null } satisfies DraftCarry, key(source, requestId));
+        if (current.target) store.delete(targetKey(source, requestId, current.target));
         set(undefined);
       } catch (error) { fail(error); }
     };
-    for (const item of [request, binding, prior, floor]) item.onsuccess = () => { if (--remaining === 0) commit(); };
+    for (const item of [request, binding, prior, floor, floorKey]) item.onsuccess = () => { if (--remaining === 0) commit(); };
   });
 }
 
@@ -165,7 +201,7 @@ export async function hostCarries(hostId: string, after: IDBValidKey | null = nu
       const cursor = request.result;
       if (!cursor) { set({ carries, after: null, unreadable }); return; }
       try {
-        const carry = parseCarry(cursor.value);
+        const carry = keyedCarry(cursor.value, cursor.key);
         if (carry.source.hostId !== hostId) throw new Error('Foreign carry');
         carries.push(carry);
       } catch { unreadable++; }
@@ -181,7 +217,9 @@ export async function removeRetainedCarry(carry: DraftCarry): Promise<void> {
       if (request.result === undefined) { set(undefined); return; }
       const current = namedCarry(request.result, carry.source, carry.requestId);
       if (current.kind === 'offered' || current.kind === 'applied' || canonicalJson(current) !== canonicalJson(carry)) throw new Error('This draft transfer changed. Refresh its saved recovery before removing it.');
-      if (current.kind === 'cancelled' && current.target && current.requestId.includes(':main-')) { store.put(true, ['draft-carry-kept', current.source.hostId, current.source.conversationId, current.target.conversationId]); store.delete(key(carry.source, carry.requestId)); }
+      if (current.kind === 'cancelled' && current.target) { store.put(true, ['draft-carry-kept', current.source.hostId, current.source.conversationId, current.target.conversationId]); store.delete(key(carry.source, carry.requestId)); }
+      else if (current.kind === 'cancelled') store.put({ version: 1, kind: 'cancelled', source: current.source, sourceViewId: current.sourceViewId,
+        requestId: current.requestId, target: null, outcome: 'kept-at-source', ...(current.emptyOnly ? { emptyOnly: true } : {}) } satisfies DraftCarry, key(carry.source, carry.requestId));
       else store.delete(key(carry.source, carry.requestId));
       if (current.target) store.delete(targetKey(carry.source, carry.requestId, current.target));
       set(undefined);
@@ -189,10 +227,6 @@ export async function removeRetainedCarry(carry: DraftCarry): Promise<void> {
   });
 }
 
-export async function keptMainDraft(source: ConversationScope, target: ConversationScope): Promise<boolean> {
-  if (source.hostId !== target.hostId) throw new Error('Foreign draft carry target');
-  return transaction('readonly', (store, set, fail) => {
-    const request = store.get(['draft-carry-kept', source.hostId, source.conversationId, target.conversationId]);
-    request.onsuccess = () => { if (request.result === undefined || request.result === true) set(request.result === true); else fail(new Error('The saved Keep decision is unreadable. Its original record is preserved.')); };
-  });
+export async function keptDraft(source: ConversationScope, target: ConversationScope): Promise<boolean> {
+  return transaction<boolean>('readonly', (store, set, fail) => readKeptDraft(store, source, target, set, fail));
 }

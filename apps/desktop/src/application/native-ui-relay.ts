@@ -5,6 +5,7 @@ import { count, hex, identifier, record } from '@openpane/contracts/decode';
 import type { NativeUiRelayPort, UiConnectionSnapshot, UiTransport } from './ui-connection.js';
 import { DisplayClient, NO_DISPLAY } from './display-client.js';
 import { DesktopWindowPort } from './window-context.js';
+import type { UiRecoveryHost } from './ui-recovery.js';
 
 function nativeChildren(value: unknown, main: WindowContext): readonly { readonly context: WindowContext; readonly visible: boolean; readonly presenceSequence: number; readonly display: DisplaySubscription | null; readonly placement: { readonly nativeTransitionId: string; readonly bindingRevision: number } | null }[] {
   if (!Array.isArray(value) || value.length > 32) throw new Error('Invalid native child presence');
@@ -178,10 +179,14 @@ export class ChildUiConnection implements UiTransport {
     if (!localBuiltin) this.update({ validatedVisual: validatedDelivery(state, this.snapshot.deliveryContext) });
     const key = JSON.stringify([this.snapshot.deliveryContext, state.selection.deliveryGeneration, state.selection.revision, state.bundle?.digest, state.envelope?.requestId]);
     if (this.confirmed === key) return;
-    await this.report(state, null); this.confirmed = key; this.update({ confirmedGeneration: state.selection.deliveryGeneration });
+    await this.report(state, null);
+    if (this.painted !== state || context !== this.snapshot.deliveryContext || !this.snapshot.state || !matchesValidatedDelivery(validatedDelivery(state, context), this.snapshot.state, context)) return;
+    this.confirmed = key; this.update({ confirmedGeneration: state.selection.deliveryGeneration });
   }
   async failed(state: UiClientSnapshot, reason: string, context = this.snapshot.deliveryContext): Promise<void> {
     if (context !== this.snapshot.deliveryContext || !this.snapshot.state || !matchesValidatedDelivery(validatedDelivery(state, context), this.snapshot.state, context)) return;
+    this.confirmed = null;
+    this.update({ validatedVisual: { kind: 'none' }, confirmedGeneration: null });
     this.painted = null; this.failure = { state, reason: reason.slice(0, 500) || 'Appearance failed' };
     await this.reportFailure();
   }
@@ -191,9 +196,11 @@ export class ChildUiConnection implements UiTransport {
     await this.report(failure.state, failure.reason);
     if (this.failure === failure) this.failure = null;
   }
-  async restore(): Promise<void> {
+  async restore(expectedHost?: UiRecoveryHost): Promise<void> {
+    const host = expectedHost === undefined || this.snapshot.deliveryContext === null ? null : parseWindowContext(JSON.parse(this.snapshot.deliveryContext));
+    if (expectedHost && (host?.hostId !== expectedHost.hostId || host.profileId !== expectedHost.profileId)) throw new Error('Appearance recovery belongs to a different host profile');
     this.update({ localBuiltin: true, diagnostic: 'Restoring OpenPane appearance. Main will save builtin selection.' });
-    await this.port.request({ kind: 'restore-builtin' });
+    await this.port.request({ kind: 'restore-builtin', ...(host ? { expectedContext: { hostId: host.hostId, profileId: host.profileId } } : {}) });
   }
   close(): void {
     this.closed = true;

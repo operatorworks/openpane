@@ -110,10 +110,10 @@ export class DisplayDatabase {
   requireReadable(scope: ConversationScope): void {
     const row = this.db.prepare(`SELECT (SELECT count(*) FROM ui_display_keys WHERE scope=? AND state='published') AS expected,
       (SELECT count(*) FROM ui_display_cards WHERE scope=?) AS actual`).get(displayScope(scope), displayScope(scope));
-    if (!row || row.expected !== row.actual) throw new UiRefusal('unavailable', 'Stored display payload is unavailable; remove the affected card or repair UI data');
+    if (!row || row.expected !== row.actual) throw new UiRefusal('unavailable', 'Stored display payload is unavailable. Original records are preserved; inspect UI data before recovery');
     try {
       for (const card of this.db.prepare('SELECT id FROM ui_display_cards WHERE scope=?').all(displayScope(scope))) this.publication(scope, displayText(card.id));
-    } catch { throw new UiRefusal('unavailable', 'Stored display payload is unavailable; remove the affected card or repair UI data'); }
+    } catch { throw new UiRefusal('unavailable', 'Stored display payload is unavailable. Original records are preserved; inspect UI data before recovery'); }
   }
   compact(): void {
     this.db.exec(`DELETE FROM ui_display_keys WHERE state IN ('removed','abandoned'); DELETE FROM ui_display_events; DELETE FROM ui_display_removals;`);

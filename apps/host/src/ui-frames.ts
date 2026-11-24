@@ -1,7 +1,7 @@
 import type { Socket } from 'node:net';
 import { canonicalJson } from '@openpane/contracts';
 import { record } from '@openpane/contracts/decode';
-import { UI_FRAME_BYTES, UiRefusal } from './ui-protocol.js';
+import { UI_FRAME_BYTES, UiRefusal, UiTimeout } from './ui-protocol.js';
 
 export function uiFrame(value: unknown): string {
   const output = canonicalJson(value) + '\n';
@@ -70,7 +70,7 @@ export class UiFrames {
     if (this.failure) return Promise.reject(this.failure);
     if (this.pending) return Promise.reject(new Error('Overlapping UI frame reads'));
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.error(new Error('UI frame timed out')); this.socket.destroy(); }, Math.max(1, timeoutMs));
+      const timer = setTimeout(() => { this.error(new UiTimeout('UI frame timed out')); this.socket.destroy(); }, Math.max(1, timeoutMs));
       this.pending = { resolve, reject, timer };
     });
   }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { fixture, connected, draft, wait } from './browser-support.mjs';
 import { createExperienceBundle, sha256 } from '../../apps/host/build/tsc/experience-bundle.js';
 import { requestUi } from '../../apps/host/build/tsc/ui-control.js';
@@ -50,6 +51,10 @@ test('unreadable text and off-route Settings actions fail before appearance comm
     '[data-openpane-part="textarea"] { color: #111111; background-color: #111111; }',
     '[data-openpane-part="button"][data-openpane-role="navigation"] { color: #000000; background-color: #000000fe; }',
     '[data-openpane-part="button"][data-openpane-role="navigation"] { color: #000000; background-image: linear-gradient(to right, #000000, #000000); }',
+    '[data-openpane-part="button"][data-openpane-role="navigation"] { color: #000000; background-image: linear-gradient(to right, #000000, #000001); }',
+    '[data-openpane-part="button"][data-openpane-role="navigation"] { color: #ffffff; background-image: linear-gradient(to right, #ffffff, #fefefe); }',
+    '[data-openpane-part="button"][data-openpane-role="navigation"] { color: #808080; background-image: linear-gradient(to right, #000000, #ffffff); }',
+    '[data-openpane-part="page-rail"] { background-image: linear-gradient(to right, #000000, #000001); } [data-openpane-part="button"][data-openpane-role="navigation"] { color: #000000; background-color: transparent; }',
     '[data-openpane-part="page-rail"] { background-image: linear-gradient(to right, #000000, #000000); } [data-openpane-part="button"][data-openpane-role="navigation"] { color: #000000; background-color: transparent; }',
     '[data-openpane-part="button"][data-openpane-role="approval"] { color: #111111; background-color: #111111; }',
     '[data-openpane-part="page"] [data-openpane-part="button"] { color: transparent; }',
@@ -64,10 +69,28 @@ test('unreadable text and off-route Settings actions fail before appearance comm
   for (const css of [
     '[data-openpane-part="button"][data-openpane-role="navigation"] { color: #ffffff; background-image: linear-gradient(to right, #000080, #1084d0); }',
     '[data-openpane-part="button"][data-openpane-role="navigation"] { color: #000000; background-color: #ffffff; background-image: linear-gradient(to right, #ffffff44, #eeeeee88); }',
+    '[data-openpane-part="button"][data-openpane-role="navigation"] { color: #000000; background-image: linear-gradient(to right, #ff0000, #0000ff); }',
   ]) {
     const readable = createExperienceBundle({ ...good.manifest, assets: [{ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) }] }, css, []);
     await rendered(host, await apply(host, readable));
     assert.equal(await page.locator('textarea#message').inputValue(), 'Readable protected draft');
+  }
+});
+
+test('unstyled and retro appearances retain readable builtin Settings controls', { timeout: 60000 }, async t => {
+  const { readExperienceDirectory } = await import('../../apps/host/build/tsc/experience-bundle.js');
+  const host = await fixture(t), page = await host.page();
+  const base = bundle(stack(['agents', 'conversations']));
+  const plain = createExperienceBundle({ ...base.manifest, stylesheet: null, assets: [] }, null, []);
+  for (const value of [plain,
+    await readExperienceDirectory(fileURLToPath(new URL('../../examples/experiences/aim-classic/', import.meta.url))),
+    await readExperienceDirectory(fileURLToPath(new URL('../../examples/experiences/messenger-2002/', import.meta.url)))]) {
+    await rendered(host, await apply(host, value));
+    await route(page, 'Settings').click();
+    const select = page.getByRole('combobox', { name: 'Appearance mode', exact: true });
+    assert.equal(await select.isVisible(), true);
+    assert.equal(await select.evaluate(node => getComputedStyle(node).backgroundSize), '5px 5px');
+    await route(page, 'Home').click();
   }
 });
 
@@ -77,12 +100,11 @@ test('superseding a delivery during PNG decode never requests its obsolete style
   const good = bundle(stack(['agents', 'conversations']));
   await rendered(host, await apply(host, good));
   await page.evaluate(() => {
-    const decode = globalThis.createImageBitmap.bind(globalThis);
-    globalThis.createImageBitmap = async (...args) => {
-      const bitmap = await decode(...args);
+    const decode = HTMLImageElement.prototype.decode;
+    HTMLImageElement.prototype.decode = async function () {
+      await decode.call(this);
       globalThis.pngDecodeHeld = true;
       await new Promise(resolve => { globalThis.releasePngDecode = resolve; });
-      return bitmap;
     };
   });
   const bytes = png(), candidate = createExperienceBundle({ ...good.manifest,
@@ -203,7 +225,7 @@ test('AIM example restyles real controls and saved cards, compacts fine-pointer 
   const host = await fixture(t), page = await host.page(), socket = join(host.directory, 'ui.sock');
   const discovery = await requestUi(socket, { op: 'schema' });
   const validate = new Ajv({ strict: true }).compile(discovery.manifest);
-  const value = await readExperienceDirectory(new URL('../../examples/experiences/aim-classic/', import.meta.url).pathname);
+  const value = await readExperienceDirectory(fileURLToPath(new URL('../../examples/experiences/aim-classic/', import.meta.url)));
   assert.ok(validate(value.manifest)); assert.ok(discovery.roles.button.includes('send'));
   const invalid = structuredClone(value.manifest); invalid.presentation.home = { kind: 'columns', primary: ['agents'], secondary: ['agents'], balance: 'even' };
   assert.equal(validate(invalid), false, 'CLI-returned schema enforces cross-region uniqueness');
@@ -323,4 +345,24 @@ test('keyboard builtin restore preserves a non-composing editor and backward sel
   await wait(() => page.locator('.experience-content').getAttribute('data-openpane-experience').then(value => value === null), 'keyboard local builtin restore');
   assert.deepEqual(await editor.evaluate((node, old) => ({ same: node === old, focused: node === document.activeElement, start: node.selectionStart, end: node.selectionEnd, direction: node.selectionDirection }), original), { same: true, focused: true, start: 3, end: 11, direction: 'backward' });
   assert.equal(await editor.inputValue(), 'Restore keeps this selected draft');
+});
+
+test('live text metrics refit a saved multiline composer and Settings restores an active experience', { timeout: 45000 }, async t => {
+  const host = await fixture(t), page = await host.page();
+  await page.getByRole('button', { name: 'New recorded conversation' }).click(); await connected(page);
+  const base = bundle(stack(['conversation']));
+  await rendered(host, await apply(host, base));
+  const text = 'First draft line\nSecond draft line';
+  await draft(page, text);
+  const editor = await page.locator('#message').elementHandle();
+  const css = '[data-openpane-part="textarea"] { font-size: 24px; line-height: 2; }';
+  const value = createExperienceBundle({ ...base.manifest, assets: [{ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) }] }, css, []);
+  await rendered(host, await apply(host, value));
+  assert.equal(await page.locator('#message').evaluate((node, before) => node === before, editor), true);
+  assert.equal(await page.locator('#message').inputValue(), text);
+  assert.equal(await page.locator('#message').evaluate(node => node.scrollHeight <= node.clientHeight + 1), true, 'the new text metrics fit without editing or resizing');
+  await route(page, 'Settings').click();
+  await page.locator('.settings-panel').getByRole('button', { name: 'Restore OpenPane appearance', exact: true }).click();
+  await wait(async () => !(await page.locator('.experience-content').getAttribute('data-openpane-experience')), 'Settings restores the selected experience');
+  await wait(async () => (await requestUi(join(host.directory, 'ui.sock'), { op: 'context' })).selection.selected.kind === 'builtin', 'host commits the appearance restore');
 });

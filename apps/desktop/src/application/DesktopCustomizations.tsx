@@ -57,7 +57,7 @@ export class CustomizationBoundary extends Component<{
   override state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
   override componentDidCatch(error: unknown) { this.props.fail(error); }
-  override render() { return this.state.failed ? <BuiltinColors>{this.props.fallback}</BuiltinColors> : this.props.children; }
+  override render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
 const EMPTY_NAMESPACES: readonly string[] = [];

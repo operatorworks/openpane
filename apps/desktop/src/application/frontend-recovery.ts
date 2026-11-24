@@ -26,11 +26,11 @@ function pause(signal: AbortSignal): Promise<void> {
     if (signal.aborted) finish();
   });
 }
-async function waitForClose(target: RecoveryTarget, viewId: string, signal: AbortSignal): Promise<void> {
+async function waitForClose(closed: Promise<void>, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return;
   let cancel = () => {};
   const cancelled = new Promise<void>(resolve => { cancel = resolve; signal.addEventListener('abort', cancel, { once: true }); });
-  try { await Promise.race([target.pool.closed(viewId), cancelled]); }
+  try { await Promise.race([closed, cancelled]); }
   finally { signal.removeEventListener('abort', cancel); }
 }
 async function scanView(target: RecoveryTarget, signal: AbortSignal, valid: () => boolean): Promise<boolean> {
@@ -64,9 +64,9 @@ async function scanView(target: RecoveryTarget, signal: AbortSignal, valid: () =
 // Snapshot closed journals under their lease, then release all editor locks before a network call.
 async function scanOther(target: RecoveryTarget, viewId: string, signal: AbortSignal, valid: () => boolean): Promise<boolean> {
   const records: { scope: ConversationScope; references: readonly FrontendRecoveryReference[] }[] = [];
-  const alreadyOwned = target.pool.holds(viewId);
   const lease = await target.openOtherView?.(viewId);
-  if (!lease) return false;
+  if (!lease) return true;
+  let closing: Promise<void> | null = null;
   try {
     let after: string | null = null;
     do {
@@ -81,15 +81,15 @@ async function scanOther(target: RecoveryTarget, viewId: string, signal: AbortSi
       }
       after = page.after;
     } while (after !== null && valid());
-  } finally { lease.release(); }
-  if (!alreadyOwned) await waitForClose(target, viewId, signal);
+  } finally { closing = target.pool.releaseRecovery(lease); }
+  if (closing) await waitForClose(closing, signal);
   let pending = false;
   for (const record of records) {
     let references = record.references;
     async function update(id: string, acknowledged: boolean): Promise<void> {
-      const alreadyOwned = target.pool.holds(viewId);
       const lease = await target.openOtherView?.(viewId);
       if (!lease) throw new Error('This saved editor is open in another document.');
+      let closing: Promise<void> | null = null;
       try {
         const borrow = await target.pool.recovery(lease, record.scope);
         try {
@@ -97,8 +97,8 @@ async function scanOther(target: RecoveryTarget, viewId: string, signal: AbortSi
           await (acknowledged ? journal.acknowledged(id) : journal.unavailable(id));
           references = [...journal.read()];
         } finally { borrow.release(); }
-      } finally { lease.release(); }
-      if (!alreadyOwned) await waitForClose(target, viewId, signal);
+      } finally { closing = target.pool.releaseRecovery(lease); }
+      if (closing) await waitForClose(closing, signal);
     }
     const journal: FrontendJournal = { read: () => references, unavailable: id => update(id, false), acknowledged: id => update(id, true) };
     for (const reference of record.references) {

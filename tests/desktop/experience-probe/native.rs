@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Instant;
 use tauri::{Emitter, Manager};
 
 struct Probe {
+    started: Instant,
     url: tauri::Url,
     children: Mutex<HashMap<String, u64>>,
     generation: Mutex<u64>,
@@ -17,6 +19,7 @@ enum Command {
     Publish { generation: u64 },
     Interaction { action: String },
     Minimize,
+    Minimized,
 }
 #[tauri::command]
 async fn desktop_window(
@@ -106,6 +109,15 @@ async fn desktop_window(
                 serde_json::json!({"slot": slot, "action": action, "generation": *probe.generation.lock().unwrap()}),
             )
         }
+        Command::Minimized => {
+            if label != "main" {
+                return Err("forbidden".into());
+            }
+            let minimized = window.is_minimized().map_err(|e| e.to_string())?;
+            Ok(
+                serde_json::json!({"minimized": minimized, "sampleAtMs": probe.started.elapsed().as_secs_f64() * 1000.0}),
+            )
+        }
         Command::Minimize => {
             if label != "main" {
                 return Err("forbidden".into());
@@ -136,6 +148,7 @@ fn main() {
                     .permission("core:event:allow-unlisten"),
             )?;
             app.manage(Probe {
+                started: Instant::now(),
                 url: url.clone(),
                 children: Mutex::new(HashMap::new()),
                 generation: Mutex::new(0),

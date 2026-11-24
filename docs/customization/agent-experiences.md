@@ -32,10 +32,16 @@ UI=( '/absolute/path/to/node' '/absolute/path/to/main.js' ui
 
 Replace the three paths with the supplied values. `context` returns `hostId`,
 `profileId`, `requestEpoch`, `revision`, `recoveryGeneration` and the current
-selection. `targets` returns committed conversation scopes; follow its `after`
-cursor until null. Choose the complete `{hostId, conversationId}` explicitly.
-The active window is never an implicit publication target. Newly created chats
-are valid even before a cached catalog refreshes.
+selection. For a host Codex turn, pass the supplied ConversationScope verbatim
+to every display command that accepts a conversation scope. Discovery with
+`display schema` stays unscoped. Do not replace the supplied scope with a
+different target.
+
+For an operator-directed session without a per-turn scope, `targets` returns
+committed conversation scopes. Follow its `after` cursor until null and choose
+the complete `{hostId, conversationId}` explicitly. The active window is never
+an implicit publication target. Newly created chats are valid even before a
+cached catalog refreshes.
 
 The UI contract is version 1. It is separate from conversation service wire 16
 and extension SDK 0.14.0. A normal host agent keeps the existing read-only
@@ -115,7 +121,6 @@ Structural changes wait for active text composition to finish. A visible documen
 
 Web CSS cannot repaint native OS window controls. The [reference sheet](references/aim-classic.md) explains the visual target and platform differences.
 
-`experience schema` returns the manifest schema and supported semantic parts.
 The theme has system/light/dark mode and separate light/dark token sets: colors,
 spacing, radius, typography, system font stacks, border/shadow treatments and
 chart colors. Presentation selects labeled page navigation or a rail, inline or
@@ -123,14 +128,13 @@ separate native chats, and bounded child geometry/title treatment. A browser
 reports its inline placement fallback.
 
 The stylesheet is restricted to `[data-openpane-part="…"]` selectors and visual
-properties. Supported parts include main, page rail/page, chat directory/window,
-header, transcript/row/text, toolbar, composer, button, card/title/toolbar/summary,
-plot frame/plot/axis/grid/trace/legend, empty card, query details and values table.
-Use the exact hyphenated names from discovery. Styles cannot add executable
+properties. Use the complete part inventory and exact hyphenated names from
+`experience schema`. Styles cannot add executable
 controls, hide recovery, reposition protected approvals or fetch arbitrary URLs.
 Use the [extension guide](../extensions/customization-guide.md) for new behavior.
 
-Every CSS or PNG asset declares its filename, UTF-8 byte count and SHA-256.
+Every asset declares its filename, byte count and SHA-256. Use the UTF-8
+encoded length for CSS and the original binary file length for PNGs.
 After changing the example CSS, run `node update-assets.mjs` in its directory.
 The directory loader computes the complete bundle digest. `--stdin` instead of
 `--directory` accepts a complete bundle containing manifest, stylesheet, base64

@@ -121,3 +121,16 @@ test('repeated withdrawal does not accumulate retirement followers while an orig
   assert.equal(observers, 0, 'unchanged pending retirement needs no new completion observers');
   assert.equal(disposals, 1);
 });
+
+
+test('initial ready generation is admitted while an unrelated activation stays pending', async t => {
+  const owner = new DesktopExtensionLifecycle(), source = createGenerationSource(), loading = deferred();
+  t.after(async () => { loading.resolve({ modules: [], dispose() {} }); await owner.close(); });
+  owner.attach(source);
+  owner.reconcile([fixture('alpha', () => ({ modules: [], dispose() {} })), fixture('beta', () => loading.promise)]);
+  assert.equal(source.snapshot().kind, 'transitioning');
+  await tick();
+  assert.deepEqual(owner.getSnapshot().map(row => [row.namespace, row.kind]), [['alpha', 'ready'], ['beta', 'loading']]);
+  assert.equal(source.snapshot().kind, 'ready');
+  assert.deepEqual(source.snapshot().generations.map(row => row.namespace), ['alpha']);
+});

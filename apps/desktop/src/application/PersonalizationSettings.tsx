@@ -4,6 +4,7 @@ import { ThemeScope } from '@openpane/ui-primitives/desktop';
 import { parseDesktopPreferences, parseNamespace, type GlobalSlot, type SlotPreference } from './personalization.js';
 import { MAX_PALETTE_BYTES, PALETTE_SIZE_DIAGNOSTIC, type PersonalizationOutcome } from './personalization-storage.js';
 import type { usePersonalization } from './use-personalization.js';
+import { useExperience, useUiActions } from './experience-state.js';
 import type { DesktopCustomization, NamespaceActivation } from './DesktopCustomizations.js';
 
 type State = ReturnType<typeof usePersonalization>;
@@ -23,6 +24,7 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
   readonly state: State; readonly customizations: readonly DesktopCustomization[]; readonly namespaces: readonly NamespaceActivation[];
 }) {
   const { session, document, saved } = state;
+  const experience = useExperience(), uiActions = useUiActions();
   const [message, setMessage] = useState('');
   const [paletteText, setPaletteText] = useState('');
   const [preview, setPreview] = useState<PaletteDocumentV1 | null>(null);
@@ -80,7 +82,13 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
       <div className="personalization-controls">
         <button data-openpane-part="button" onClick={() => void perform(session.selectPalette(null))}>Use builtin palette</button>
         <button data-openpane-part="button" onClick={() => setExported(canonicalPaletteText(starterPalette()))}>Export starter palette</button>
-        <button data-openpane-part="button" onClick={() => void perform(session.resetAppearance())}>Restore default appearance</button>
+        <button data-openpane-part="button" onClick={() => {
+          if (experience && uiActions) {
+            const request = ++feedbackRequest.current;
+            void uiActions.restore().then(() => { if (request === feedbackRequest.current) setMessage('Appearance restore requested.'); }, () => { if (request === feedbackRequest.current) setMessage('Could not restore the appearance. Retry with the protected restore control.'); });
+          }
+          else void perform(session.resetAppearance());
+        }}>{experience && uiActions ? 'Restore OpenPane appearance' : 'Restore default appearance'}</button>
       </div>
       <p>Imported namespace/name are declared metadata, not verified publisher identity. Palettes contain colors only and never enable code.</p>
       {document.palette.kind === 'imported' && <p>Selected palette: {document.palette.digest}</p>}

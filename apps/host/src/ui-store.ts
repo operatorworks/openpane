@@ -88,13 +88,16 @@ export class UiStore {
         CREATE TABLE IF NOT EXISTS ui_bundles (digest TEXT PRIMARY KEY, value TEXT NOT NULL, bytes INTEGER NOT NULL, created INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS ui_receipts (id TEXT PRIMARY KEY, request_digest TEXT NOT NULL, result TEXT NOT NULL, generation INTEGER NOT NULL, reserved_bytes INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS ui_operations (id TEXT PRIMARY KEY, request_digest TEXT NOT NULL, result TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS ui_recovery_notice (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS ui_receipts_generation ON ui_receipts(generation);`);
       const row = this.db.prepare('SELECT value FROM ui_state WHERE id=1').get();
       this.state = row ? parseState(JSON.parse(text(row.value))) : initial();
+      const notice = this.db.prepare('SELECT value FROM ui_recovery_notice WHERE id=1').get();
+      this.recoveryReason = notice ? text(notice.value) : null;
       this.display = new UiDisplayStore({ db: this.db, hostId, epoch: () => this.state.epoch, checkScope,
         transaction: run => this.transaction(run), capacity: (bytes, entries) => this.capacity(bytes, entries), notify: () => this.notify() });
       this.transaction(() => {
-        this.recoveryReason = this.validateSelection();
+        this.recoveryReason = this.validateSelection() ?? this.recoveryReason;
         for (const row of this.db.prepare('SELECT id,result FROM ui_receipts').all()) {
           const receipt = parseReceipt(JSON.parse(text(row.result)));
           this.writeReceipt({ ...receipt, participants: receipt.participants.map(participant => participant.visual.kind === 'pending' ? departedParticipant(participant) : participant) });
@@ -127,6 +130,8 @@ export class UiStore {
     try {
       const result = run();
       this.db.prepare('INSERT OR REPLACE INTO ui_state(id,value) VALUES (1,?)').run(canonicalJson(this.state));
+      if (this.recoveryReason === null) this.db.exec('DELETE FROM ui_recovery_notice');
+      else this.db.prepare('INSERT OR REPLACE INTO ui_recovery_notice(id,value) VALUES (1,?)').run(this.recoveryReason);
       this.db.exec('COMMIT'); return result;
     } catch (error) {
       this.state = before; this.recoveryReason = recoveryReason;
@@ -195,7 +200,9 @@ export class UiStore {
     if (!row || count(row.count) + entries > MAX_RECEIPTS || count(row.bytes) + reservedBytes > MAX_METADATA_BYTES) throw new UiRefusal('capacity', 'UI receipt capacity reached; run maintenance compact');
   }
   private select(request: Extract<UiRequest, { op: 'apply' | 'refresh' | 'restore' }>): ApplyReceipt {
-    const requestDigest = sha256(canonicalJson(request));
+    if (request.op === 'restore' && request.expectedContext && (request.expectedContext.hostId !== this.hostId || request.expectedContext.profileId !== this.state.profileId)) throw new UiRefusal('conflict', 'Appearance recovery belongs to a previous host profile');
+    const requestDigest = sha256(canonicalJson(request.op === 'restore' ? { op: request.op, requestId: request.requestId,
+      expectedRevision: request.expectedRevision, expectedRecoveryGeneration: request.expectedRecoveryGeneration } : request));
     const replay = this.readReceipt(request.requestId);
     if (this.db.prepare('SELECT id FROM ui_operations WHERE id=?').get(request.requestId)) throw new UiRefusal('conflict', 'Request ID belongs to another UI operation');
     if (replay) {
@@ -240,7 +247,8 @@ export class UiStore {
     if (participants.length > cohortLimit) throw new UiRefusal('capacity', `Windows and pending native transitions exceed the ${cohortLimit}-slot cohort limit`);
     const receipt: ApplyReceipt = { requestId: request.requestId, requestDigest, deliveryGeneration: selection.deliveryGeneration, selectionRevision: selection.revision, digest: digestOf(selected), participants };
     if (request.op !== 'restore') this.capacity(this.receiptBytes(receipt));
-    this.state = { ...this.state, selection }; this.recoveryReason = null;
+    this.state = { ...this.state, selection };
+    if (request.op !== 'refresh') this.recoveryReason = null;
     if (request.op === 'restore') this.state = { ...this.state, recoveryGeneration: next(this.state.recoveryGeneration), recovery: { requestId: request.requestId, requestDigest, result: receipt } };
     else this.writeReceipt(receipt);
     return receipt;

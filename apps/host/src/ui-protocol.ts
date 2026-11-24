@@ -9,13 +9,17 @@ export const UI_FRAME_BYTES = 4 * 1024 * 1024;
 export class UiRefusal extends Error {
   constructor(readonly code: 'invalid-input' | 'conflict' | 'stale-revision' | 'expired' | 'capacity' | 'unavailable' | 'not-found', message: string) { super(message); }
 }
+export class UiTimeout extends UiRefusal {
+  constructor(message: string) { super('unavailable', message); }
+}
+
 export type UiRequest = DisplayRequest
   | { readonly op: 'context' | 'schema' }
   | { readonly op: 'targets'; readonly after: string | null }
   | { readonly op: 'paint'; readonly session: string; readonly deliveryGeneration: number; readonly selectionRevision: number; readonly digest: string | null }
   | { readonly op: 'apply'; readonly requestId: string; readonly expectedRevision: number; readonly bundle: ExperienceBundle }
   | { readonly op: 'refresh'; readonly requestId: string; readonly expectedRevision: number }
-  | { readonly op: 'restore'; readonly requestId: string; readonly expectedRevision: number; readonly expectedRecoveryGeneration: number }
+  | { readonly op: 'restore'; readonly requestId: string; readonly expectedRevision: number; readonly expectedRecoveryGeneration: number; readonly expectedContext?: { readonly hostId: string; readonly profileId: string } }
   | { readonly op: 'status'; readonly requestId: string }
   | { readonly op: 'prune'; readonly requestId: string; readonly keep: number }
   | { readonly op: 'compact'; readonly expectedEpoch: number; readonly abandonWaits?: boolean }
@@ -36,8 +40,12 @@ export function parseUiRequest(value: unknown): UiRequest {
       return { op: input.op, requestId: identifier(input.requestId, 128), expectedRevision: count(input.expectedRevision), bundle: parseExperienceBundle(input.bundle) };
     case 'refresh': record(input, ['op', 'requestId', 'expectedRevision']);
       return { op: input.op, requestId: identifier(input.requestId, 128), expectedRevision: count(input.expectedRevision) };
-    case 'restore': record(input, ['op', 'requestId', 'expectedRevision', 'expectedRecoveryGeneration']);
-      return { op: input.op, requestId: identifier(input.requestId, 128), expectedRevision: count(input.expectedRevision), expectedRecoveryGeneration: count(input.expectedRecoveryGeneration) };
+    case 'restore': {
+      record(input, ['op', 'requestId', 'expectedRevision', 'expectedRecoveryGeneration', ...(Object.hasOwn(input, 'expectedContext') ? ['expectedContext'] : [])]);
+      const context = Object.hasOwn(input, 'expectedContext') ? record(input.expectedContext, ['hostId', 'profileId']) : null;
+      return { op: input.op, requestId: identifier(input.requestId, 128), expectedRevision: count(input.expectedRevision), expectedRecoveryGeneration: count(input.expectedRecoveryGeneration),
+        ...(context ? { expectedContext: { hostId: identifier(context.hostId), profileId: identifier(context.profileId, 200) } } : {}) };
+    }
     case 'status': record(input, ['op', 'requestId']); return { op: input.op, requestId: identifier(input.requestId, 128) };
     case 'prune': record(input, ['op', 'requestId', 'keep']);
       if (count(input.keep) > 16) throw new Error('Invalid keep count');

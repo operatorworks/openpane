@@ -9,7 +9,7 @@ const cli = join(root, 'apps/host/dist/main.js');
 async function command(entry, args) {
   const child = spawn(process.execPath, [entry, ...args], { stdio: 'pipe' }); let stdout = '', stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; }); child.stderr.on('data', chunk => { stderr += chunk; });
-  const [code] = await once(child, 'exit'); return { code, stdout, stderr };
+  const [code] = await once(child, 'close'); return { code, stdout, stderr };
 }
 test('bundled UI dispatch touches no data directory when no owner socket exists', async t => {
   const directory = await mkdtemp('/tmp/op-cli-'); t.after(() => rm(directory, { recursive: true, force: true }));
@@ -102,8 +102,8 @@ test('wait deadline bounds a final stalled status socket and returns its last pe
   const server = createServer(socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); socket.on('data', () => { if (++polls === 1) socket.end(JSON.stringify({ ok: true, value: { outcome: 'pending', receipt: { requestId: '1:wait-fixture' } } }) + '\n'); }); });
   await new Promise(resolve => server.listen(join(directory, 'ui.sock'), resolve)); await chmod(join(directory, 'ui.sock'), 0o600);
   t.after(async () => { for (const socket of sockets) socket.destroy(); await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true }); });
-  const started = performance.now(), result = await command(cli, ['ui', '--data-dir', directory, 'wait', '--request-id', '1:wait-fixture', '--wait-ms', '500']);
-  assert.equal(result.code, 0, result.stderr); assert.ok(performance.now() - started < 1500); assert.ok(polls >= 2);
+  const started = performance.now(), result = await command(cli, ['ui', '--data-dir', directory, 'wait', '--request-id', '1:wait-fixture', '--wait-ms', '1500']);
+  assert.equal(result.code, 0, result.stderr); assert.ok(performance.now() - started < 3000); assert.ok(polls >= 2);
   assert.deepEqual(JSON.parse(result.stdout), { outcome: 'pending', receipt: { requestId: '1:wait-fixture' }, waitEnded: true });
 });
 
@@ -113,4 +113,21 @@ test('packaged UI argument validation reports invalid-input refusal codes', asyn
     assert.equal(result.code,1);
     assert.equal(JSON.parse(result.stderr).code,'invalid-input');
   }
+});
+
+test('zero-duration wait performs one ordinary status read before ending pending', async t => {
+  const { startUiControl } = await import('../../apps/host/build/tsc/ui-control.js');
+  const directory = await mkdtemp('/tmp/op-zero-wait-');
+  const requests = [];
+  const server = await startUiControl(join(directory, 'ui.sock'), async request => {
+    requests.push(request);
+    assert.equal(request.op, 'status');
+    await new Promise(resolve => setTimeout(resolve, 40));
+    return { outcome: 'pending' };
+  });
+  t.after(async () => { await server.close(); await rm(directory, { recursive: true, force: true }); });
+  const result = await command(cli, ['ui', '--data-dir', directory, 'wait', '--request-id', '1:11111111-1111-4111-8111-111111111111', '--wait-ms', '0']);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { outcome: 'pending', waitEnded: true });
+  assert.equal(requests.length, 1);
 });

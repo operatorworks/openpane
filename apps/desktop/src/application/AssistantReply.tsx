@@ -45,5 +45,5 @@ const components = {
 } satisfies Components;
 
 export const AssistantReply = memo(function AssistantReply({ text }: { readonly text: string }) {
-  return <div className="assistant-reply" data-openpane-part="message-text"><Markdown components={components}>{text}</Markdown></div>;
+  return <div className="assistant-reply" data-openpane-part="message-text" data-openpane-state="remote"><Markdown components={components}>{text}</Markdown></div>;
 });

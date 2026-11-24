@@ -3,10 +3,11 @@ import { recordedInstallation } from '@openpane/host/recorded';
 const recordedAgentId = describeAgent(recordedInstallation, { kind: 'ready' }, { kind: 'unsupported', reason: 'Recorded text-only fixture.' }).id;
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
 import { createBrowserConnection } from '@openpane/client/service';
@@ -23,8 +24,8 @@ const deferred = () => {
 const command = (scope, id = 'send-once') => ({ version: 1, scope, clientCommandId: id,
   body: { kind: 'send', text: 'Keep this exact command through a lost reply.' } });
 
-function childProcess(args) {
-  const child = spawn(process.execPath, ['apps/host/dist/main.js', ...args], {
+function childProcess(args, preload) {
+  const child = spawn(process.execPath, [...(preload ? ['--import', pathToFileURL(preload).href] : []), 'apps/host/dist/main.js', ...args], {
     cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stderr = '';
@@ -38,18 +39,31 @@ async function stop(process) {
   const timer = setTimeout(() => process.child.kill('SIGKILL'), 1000);
   try { await process.exited; } finally { clearTimeout(timer); }
 }
-async function fixture(t) {
+async function fixture(t, { holdPlayback = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'openpane-http-'));
   const children = [];
   const requests = new Set();
   const f = { directory, origin: '', hostId: '', process: null };
+  const release = join(directory, 'release-playback'), entered = join(directory, 'playback-entered');
+  const preload = holdPlayback ? join(directory, 'hold-playback.mjs') : undefined;
+  if (preload) writeFileSync(preload, `import {existsSync,writeFileSync} from 'node:fs';
+    const schedule=globalThis.setTimeout;
+    globalThis.setTimeout=(callback,ms,...args)=>{
+      if(ms!==180)return schedule(callback,ms,...args);
+      writeFileSync(${JSON.stringify(entered)},'waiting');
+      const check=()=>{if(existsSync(${JSON.stringify(release)}))callback(...args);else schedule(check,10);};
+      return schedule(check,10);
+    };`);
+  f.releasePlayback = () => { if (holdPlayback) writeFileSync(release, 'released'); };
+  f.playbackEntered = () => existsSync(entered);
   t.after(async () => {
+    f.releasePlayback();
     for (const request of requests) request.destroy();
     await Promise.all(children.map(stop));
     rmSync(directory, { recursive: true, force: true });
   });
   f.launch = args => {
-    const process = childProcess(args);
+    const process = childProcess(args, preload);
     children.push(process);
     return process;
   };
@@ -253,15 +267,14 @@ test('fixed-port process restart preserves device identity, catalog and evidence
 });
 
 test('SIGTERM during playback retains exclusive process ownership until the accepted command drains', { timeout: 20_000 }, async t => {
-  const f = await fixture(t), alice = await f.client();
+  const f = await fixture(t, { holdPlayback: true }), alice = await f.client();
   const scope = { hostId: f.hostId, conversationId: 'shutdown-drain' }, intent = command(scope);
   await f.ok({ op: 'create', agentId: recordedAgentId, scope }, alice.cookie);
   const path = join(f.directory, 'recorded.jsonl');
   const submitted = f.begin({ op: 'submit', command: intent }, alice.cookie);
   const deadline = Date.now() + 5000;
-  // Directory notifications on macOS may arrive after the 540ms playback has finished.
-  // Observe the durable acceptance itself before disconnecting during playback.
-  while (!existsSync(path) || !readFileSync(path, 'utf8').trim()) {
+  // Hold real recorded playback after durable acceptance until the contender has checked ownership.
+  while (!existsSync(path) || !readFileSync(path, 'utf8').trim() || !f.playbackEntered()) {
     assert.ok(Date.now() < deadline, 'recorded command was durably accepted');
     await new Promise(resolve => setTimeout(resolve, 10));
   }
@@ -271,10 +284,24 @@ test('SIGTERM during playback retains exclusive process ownership until the acce
   await f.ok({ op: 'metadata' }, alice.cookie);
   const original = f.process, origin = f.origin, hostId = f.hostId;
   original.child.kill('SIGTERM');
+  const shutdownDeadline = Date.now() + 5000;
+  for (;;) {
+    try {
+      const observed = await f.call({ op: 'metadata' }, alice.cookie);
+      if (observed.status === 503) { assert.match(JSON.stringify(observed.body), /Host is shutting down/); break; }
+    } catch (error) {
+      if (error.code === 'ECONNREFUSED') break; // The production shutdown has closed its listener.
+      if (error.code !== 'ECONNRESET') throw error; // A reused idle connection may close first.
+    }
+    assert.ok(Date.now() < shutdownDeadline, 'the original host entered shutdown while playback is held');
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(original.child.exitCode, null, 'the original host is still draining');
   const contender = f.launch(['browser-dev', '--data-dir', f.directory, '--port', '0']);
   const result = await contender.exited;
   assert.equal(result.code, 1);
   assert.match(contender.stderr, /Another host owns this data directory/);
+  f.releasePlayback();
   assert.equal((await original.exited).code, 0, original.stderr);
   await f.start(Number(new URL(origin).port));
   assert.equal(f.hostId, hostId);

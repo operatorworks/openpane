@@ -14,7 +14,7 @@ const sibling = `, { manifest: { ...manifest, namespace: 'sibling' }, ${entry(`r
   actions: [{ id: 'send', label: 'Send sibling', run: ({commands}) => commands.send('Sibling command') }] }], dispose() {} };`)} }`;
 const editor = page => page.getByRole('textbox', { name: 'Message', exact: true });
 
-for (const failure of ['load', 'ready activation']) test(`capture keeps a healthy namespace after sibling ${failure} failure and refuses loading`, async t => {
+for (const failure of ['load', 'ready activation']) test(`capture admits a healthy namespace during sibling loading and after ${failure} failure`, async t => {
   const bundle = await build({ stdin: { resolveDir: root, loader: 'jsx', contents: `
     import React from 'react'; import {createRoot} from 'react-dom/client';
     import {useDesktopCustomizations} from './apps/desktop/src/application/DesktopCustomizations.tsx';
@@ -44,7 +44,7 @@ for (const failure of ['load', 'ready activation']) test(`capture keeps a health
   await wait(() => page.evaluate(() => window.custom?.namespaces.some(owner => owner.kind === 'ready') && typeof window.settle === 'function'), 'healthy namespace alongside loading sibling');
   await page.evaluate(() => window.ready);
   const previous = await page.getByRole('textbox', { name: 'Persistent draft' }).elementHandle();
-  assert.match((await page.evaluate(() => window.capture())).message, /changing/);
+  assert.deepEqual(await page.evaluate(() => window.capture()), { kind: 'captured', names: ['healthy__echo'] });
   await page.evaluate(() => window.settle());
   if (failure === 'ready activation') {
     await wait(() => page.evaluate(() => window.custom.namespaces.every(owner => owner.kind === 'ready')), 'ready sibling before failure');

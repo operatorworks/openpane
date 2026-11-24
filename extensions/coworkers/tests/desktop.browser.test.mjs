@@ -144,8 +144,7 @@ const narrowNavigations = [
     const release = remote.holdConversations();
     await workspace.getByRole('button', { name: 'New chat', exact: true }).click();
     await wait(() => remote.calls.some(call => call.method === 'POST' && call.path === '/v1/conversations'), 'create held');
-    // A second attempt while the app is busy resolves at once without changing the selection.
-    await workspace.getByRole('button', { name: 'New chat', exact: true }).click();
+    assert.equal(await workspace.getByRole('button', { name: 'New chat', exact: true }).isDisabled(), true, 'another chat cannot start until this operation settles');
     return release;
   }, async leave(workspace) {
     const sections = workspace.getByRole('group', { name: 'Coworkers sections' });

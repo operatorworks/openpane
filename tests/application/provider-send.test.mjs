@@ -856,19 +856,97 @@ test('an authorized follow-up retries a shared status read refused before provid
   const command = offered(hostScope);
   await host.conversation(hostScope, actor).submit(command);
   const execute = registry.executeCommand;
-  let held = false;
-  registry.executeCommand = async (capture, fresh, beforeEffect) => {
+  let held = false, nonFresh = 0;
+  registry.executeCommand = async (capture, fresh, beforeEffect, onEnter) => {
+    if (!fresh) nonFresh++;
     if (!fresh && !held) { held = true; entered.resolve(); await gate.promise; }
-    return execute(capture, fresh, beforeEffect);
+    return execute(capture, fresh, beforeEffect, onEnter);
   };
   const original = host.reconcile(hostScope, command.clientCommandId, actor).then(value => ({value}), error => ({error}));
   await entered.promise;
   const followup = host.conversation(hostScope, other).submit(send(hostScope, 'follow-up', 'Next'));
-  // submit reaches its shared-read join synchronously before returning the promise.
-  originalAuthorized = false; gate.resolve();
+  originalAuthorized = false;
+  await new Promise(setImmediate);
+  assert.equal(nonFresh, 1, 'the follow-up joins the still-held lookup before it can retry');
+  gate.resolve();
   assert.ok((await original).error);
   const result = await followup;
   assert.equal(result.kind, 'receipt'); assert.equal(result.receipt.state.kind, 'accepted');
+  assert.equal(nonFresh, 2, 'a denied shared read is followed by one independently authorized retry');
   assert.equal(a.calls.reconciles.length, 1, 'only the independently authorized retry reaches provider admission');
   assert.equal(a.calls.submits.length, 2);
+});
+
+
+test('an explicit reconcile retries a shared read whose original actor lost authority before admission', async t => {
+  const gate = Promise.withResolvers(), entered = Promise.withResolvers();
+  t.after(() => gate.resolve());
+  const a = aguiExtension({ submit: (operation, { effect }) => effect(operation, 'accepted', operation.request.runId) });
+  const registry = createProviderRegistry([{ ...a.value, authority: { credentials: {},
+    issue: () => ({ credential: null, expectedAuthority: 'remote-provider', assertAuthorized() {} }), async close() {} } }]);
+  await registry.activate(); t.after(() => registry.close());
+  const [discovered] = await registry.discover();
+  const target = { kind: 'provider', contributionId: discovered.contributionId, instance: discovered.instance, agent: discovered.agents[0], presentationVersion: 1, expectedAuthority: discovered.expectedAuthority };
+  const f = hostFixture(t); let originalAuthorized = true;
+  const actor = { id: 'owner', platform: 'desktop', authorized: () => originalAuthorized };
+  const currentActor = { ...actor, authorized: () => true };
+  const host = f.open({ providers: registry });
+  await host.createProviderConversation(hostScope, target, registry);
+  const command = offered(hostScope);
+  await host.conversation(hostScope, actor).submit(command);
+  const execute = registry.executeCommand;
+  let nonFresh = 0;
+  registry.executeCommand = async (capture, fresh, beforeEffect, onEnter) => {
+    if (!fresh && ++nonFresh === 1) { entered.resolve(); await gate.promise; }
+    return execute(capture, fresh, beforeEffect, onEnter);
+  };
+  const original = host.reconcile(hostScope, command.clientCommandId, actor).then(value => ({value}), error => ({error}));
+  await entered.promise;
+  const current = host.reconcile(hostScope, command.clientCommandId, currentActor);
+  originalAuthorized = false;
+  await new Promise(setImmediate);
+  assert.equal(nonFresh, 1);
+  gate.resolve();
+  assert.ok((await original).error);
+  assert.equal((await current).state.kind, 'completed');
+  assert.equal(nonFresh, 2);
+  assert.equal(a.calls.reconciles.length, 1);
+  assert.equal(a.calls.submits.length, 1, 'a status read never resubmits the command');
+});
+
+
+test('overlapping reconciles share a provider reconnect refusal before command entry', { timeout: 10000 }, async t => {
+  const reconnect = Promise.withResolvers();
+  const a = extension();
+  let unavailable = false, connects = 0;
+  const activate = a.value.entry.activate;
+  const registry = createProviderRegistry([{ ...a.value, entry: { ...a.value.entry, activate(context) {
+    return activate({ ...context, providers: { ...context.providers, add(id, backend, presentation) {
+      return context.providers.add(id, { ...backend, async connect(input) {
+        connects++;
+        if (unavailable) { await reconnect.promise; return { kind: 'unavailable', reason: 'Fixture service offline' }; }
+        return backend.connect(input);
+      } }, presentation);
+    } } });
+  } }, authority: { credentials: {}, issue: () => ({ credential: null, expectedAuthority: 'remote-provider', assertAuthorized() {} }), async close() {} } }]);
+  await registry.activate();
+  const f = hostFixture(t), host = f.open({ providers: registry });
+  try {
+    const [discovered] = await registry.discover();
+    const target = { kind: 'provider', contributionId: discovered.contributionId, instance: discovered.instance, agent: discovered.agents[0], presentationVersion: 1, expectedAuthority: discovered.expectedAuthority };
+    await host.createProviderConversation(hostScope, target, registry);
+    assert.equal((await host.conversation(hostScope).submit(send(hostScope))).receipt.state.kind, 'accepted');
+    a.connected.discover = async () => ({ kind: 'version-unsupported', reason: 'Fixture service version changed' });
+    assert.equal((await registry.discover())[0].cause, 'version-unsupported');
+    unavailable = true;
+    const first = host.reconcile(hostScope, 'send');
+    await until(() => connects === 2);
+    const second = host.reconcile(hostScope, 'send'), third = host.reconcile(hostScope, 'send');
+    reconnect.resolve();
+    const receipts = await Promise.all([first, second, third]);
+    assert.deepEqual(receipts.map(receipt => receipt.state.kind), ['accepted', 'accepted', 'accepted']);
+    assert.equal(connects, 2, 'all overlapping callers share the one failed reconnect');
+    assert.equal(a.calls.reconciles.length, 0, 'the provider command is never entered');
+    assert.equal(a.calls.submits.length, 1, 'status recovery does not resend the command');
+  } finally { reconnect.resolve(); host.close(); await host.drained; await registry.close(); }
 });

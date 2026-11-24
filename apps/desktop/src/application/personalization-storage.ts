@@ -162,8 +162,11 @@ export class PersonalizationStorage {
     try {
       const { raw } = await this.transaction('readonly');
       const preferences = classify(raw);
-      // Disabling executable UI must not wait for unrelated palette verification.
-      if (token === this.readToken && preferences.kind === 'valid' && !preferences.document.ui.enabled) {
+      const previous = this.snapshot?.preferences;
+      const namespaceRevoked = preferences.kind === 'valid' && previous?.kind === 'valid'
+        && preferences.document.ui.disabledNamespaces.some(namespace => !previous.document.ui.disabledNamespaces.includes(namespace));
+      // Admission revocations must precede unrelated palette verification.
+      if (token === this.readToken && (preferences.kind !== 'valid' || !preferences.document.ui.enabled || namespaceRevoked)) {
         this.publish({ preferences, palettes: this.snapshot?.palettes ?? [] });
       }
       snapshot = { preferences, palettes: await Promise.all(raw.palettes.map(validateResource)) };

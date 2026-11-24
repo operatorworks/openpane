@@ -67,7 +67,8 @@ function color(value: unknown): string {
   if (typeof value !== 'string' || !/^#[a-fA-F0-9]{6}$/.test(value)) throw new Error('Expected #RRGGBB experience color');
   return value;
 }
-const fontFamily = String.raw`(?:-*[a-zA-Z][a-zA-Z0-9-]*(?: +-*[a-zA-Z][a-zA-Z0-9-]*)*|"[a-zA-Z0-9 '-]*[a-zA-Z][a-zA-Z0-9 '-]*"|'[a-zA-Z0-9 "-]*[a-zA-Z][a-zA-Z0-9 "-]*')`;
+const cssWideFont = ['inherit', 'initial', 'unset', 'revert', 'revert-layer', 'default'].map(word => [...word].map(letter => /[a-z]/.test(letter) ? `[${letter}${letter.toUpperCase()}]` : letter).join('')).join('|');
+const fontFamily = String.raw`(?!(?:${cssWideFont})(?: *,| *$))(?:-*[a-zA-Z][a-zA-Z0-9-]*(?: +-*[a-zA-Z][a-zA-Z0-9-]*)*|"[a-zA-Z0-9 '-]*[a-zA-Z][a-zA-Z0-9 '-]*"|'[a-zA-Z0-9 "-]*[a-zA-Z][a-zA-Z0-9 "-]*')`;
 export const LOCAL_FONT_STACK_PATTERN = `^ *${fontFamily}(?: *, *${fontFamily})* *$`;
 const localFontStack = new RegExp(LOCAL_FONT_STACK_PATTERN);
 function font(value: unknown): string {

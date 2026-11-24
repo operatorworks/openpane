@@ -32,7 +32,7 @@ test('Home reveals a recovered creation only after its original inline editor op
   await page.getByRole('button', { name: 'Recover creation', exact: true }).waitFor(); assert.equal(await nav('Home').getAttribute('aria-pressed'), 'true');
   await page.getByRole('button', { name: 'Recover creation', exact: true }).click();
   await wait(() => page.locator('textarea#message').inputValue().then(text => text === 'Original pending draft'), 'original draft recovered');
-  assert.equal(await nav('Chats').getAttribute('aria-pressed'), 'true'); await connected(page);
+  await wait(async () => await nav('Chats').getAttribute('aria-pressed') === 'true', 'recovered editor revealed after its route is saved'); await connected(page);
   assert.equal(await page.locator('.scope-label').textContent(), scope.conversationId); assert.deepEqual(await host.entries(), []);
 });
 
@@ -112,6 +112,7 @@ test('reopening a second independent legacy draft exposes read-only recovery wit
   assert.equal(await original.inputValue(), 'Authoritative first draft'); assert.equal(await page.locator('textarea#message').evaluate((node, prior) => node === prior, original), true);
   await page.getByRole('button', { name: 'Copy recovered draft', exact: true }).click();
   await wait(() => page.evaluate(() => window.recoveredClipboard === 'Independent second draft'), 'copied independent text');
+  await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Open chat to paste', exact: true }).click(); await connected(page);
   assert.equal(await editor.inputValue(), 'Authoritative first draft');
   const saved = await page.evaluate(async scope => {

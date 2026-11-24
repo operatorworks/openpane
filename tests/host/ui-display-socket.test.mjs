@@ -133,3 +133,22 @@ test('forced socket shutdown waits for its query recovery fault before settling'
   await disconnected.promise;
   assert.match(String(outcome.error),/Query recovery could not be saved/);
 });
+
+test('a new query rechecks its qualified executable after the reservation reply', async t => {
+  const f = await fixture(t), publicationId = f.id(), pup = join(f.directory, 'pup'), ran = join(f.directory, 'unexpected-query');
+  const raw = JSON.parse(await (await import('node:fs/promises')).readFile(new URL('./fixtures/metrics/pup-v1.json', import.meta.url), 'utf8'));
+  raw.from_date = Number(queryInput.from) * 1000; raw.to_date = Number(queryInput.to) * 1000; raw.series = [];
+  const program = version => `#!${process.execPath}\nif(process.argv.includes('--version')) console.log('pup ${version}');else if(process.argv.includes('auth'))console.log(JSON.stringify({site:'us3.datadoghq.com'}));else{require('node:fs').writeFileSync(${JSON.stringify(ran)},'started');console.log(${JSON.stringify(JSON.stringify(raw))});}`;
+  await writeFile(pup, program('2.0.1'), { mode: 0o700 });
+  f.behavior.after = async (request, value) => {
+    if (request.op === 'display-query-reserve' && value.granted) await writeFile(pup, program('2.0.2'), { mode: 0o700 });
+  };
+  await assert.rejects(publishDatadog({ socket: f.socket, scope, publicationId, action: {
+    kind: 'query', query: queryInput.query, title: queryInput.title, from: queryInput.from, to: queryInput.to, pup,
+  } }), /reserved pup version is unavailable/);
+  const saved = await f.status(publicationId);
+  assert.equal(saved.reservation.kind, 'failed');
+  assert.equal(saved.reservation.reason, 'pup-unavailable');
+  assert.equal(saved.reservation.version, '2.0.1');
+  await assert.rejects(import('node:fs/promises').then(({ access }) => access(ran)), { code: 'ENOENT' });
+});

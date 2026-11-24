@@ -191,12 +191,14 @@ test('authorized agent API and browser route two recorded agents and retain unav
   assert.equal(await page.getByRole('button', { name: `Start new chat with ${sonnet.label}`, exact: true }).isEnabled(), true);
   assert.match(await page.locator('.shell-footer').textContent(), /Local Codex · Approvals required for changes/);
   assert.equal(await message.inputValue(), 'Draft for Codex');
-  let loseCreate = true, dropCreate = false, droppedScope;
+  let loseCreate = true, dropCreate = false;
+  const droppedCreateAborted = Promise.withResolvers();
   const createRequests = [], recoveryResponses = [];
   await page.route('**/api/v1', async route => {
     if (route.request().postDataJSON().op === 'create') createRequests.push(route.request().postDataJSON());
     if (dropCreate && route.request().postDataJSON().op === 'create') {
-      dropCreate = false; droppedScope = route.request().postDataJSON().scope; await route.abort();
+      dropCreate = false; const scope = route.request().postDataJSON().scope;
+      await route.abort(); droppedCreateAborted.resolve(scope);
     } else if (loseCreate && route.request().postDataJSON().op === 'create') {
       loseCreate = false; await route.fetch(); await route.abort();
     } else await route.continue();
@@ -257,6 +259,7 @@ test('authorized agent API and browser route two recorded agents and retain unav
   await open('a');
   dropCreate = true;
   await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+  const droppedScope = await droppedCreateAborted.promise;
   await page.getByRole('button', { name: 'Recover creation', exact: true }).waitFor();
   assert.equal(host.installation(droppedScope), null);
   host.close(); await host.drained;

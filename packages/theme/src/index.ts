@@ -48,6 +48,7 @@ const chartTraces = {
   light: { trace1: '#3158b5', trace2: '#a5324e', trace3: '#16816b', trace4: '#8458a8', trace5: '#a85d15', trace6: '#59751d', trace7: '#8d4c79', trace8: '#347e9b' },
   dark: { trace1: '#94b6ff', trace2: '#ff9fae', trace3: '#83d5b3', trace4: '#d7b2ff', trace5: '#ffc17d', trace6: '#c4d98a', trace7: '#edaddc', trace8: '#8dd8ef' },
 } as const;
+function sameColor(a: string, b: string): boolean { return a === b || /^#[0-9a-f]{6}$/i.test(a) && a.toLowerCase() === b.toLowerCase(); }
 export function createTheme(options: ThemeOptions = {}, parent?: Theme): Theme {
   const appearance = options.appearance ?? parent?.appearance ?? 'light';
   if (appearance !== 'light' && appearance !== 'dark') {
@@ -74,7 +75,11 @@ export function createTheme(options: ThemeOptions = {}, parent?: Theme): Theme {
     chart: { ...(parent?.appearance === appearance ? parent.chart : {
       background: palettes[appearance].surface, grid: palettes[appearance].border, axis: palettes[appearance].muted,
       ...chartTraces[appearance],
-    }), ...options.chart },
+    }),
+      ...(overrides.surface && !sameColor(overrides.surface, inheritedColors.surface) ? { background: overrides.surface } : {}),
+      ...(overrides.border && !sameColor(overrides.border, inheritedColors.border) ? { grid: overrides.border } : {}),
+      ...(overrides.muted && !sameColor(overrides.muted, inheritedColors.muted) ? { axis: overrides.muted } : {}),
+      ...options.chart },
     motion: reducedMotion ? { quick: 0, standard: 0 } : motion,
   };
 }

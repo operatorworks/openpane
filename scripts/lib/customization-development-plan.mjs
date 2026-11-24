@@ -13,12 +13,12 @@ export async function developmentPlan(sourceRoot) {
   const metadata = JSON.parse(await readFile(file, 'utf8'));
   const mappings = metadata?.openpane?.sources;
   if (!mappings || typeof mappings !== 'object' || Array.isArray(mappings)) throw new Error('Preview requires package.json.openpane.sources and a desktop extension entry.');
-  const files = new Set();
+  const files = new Set(), resolved = new Map();
   for (const value of [...Object.values(mappings), ...(metadata.openpane.shared === undefined ? [] : [metadata.openpane.shared])]) {
     if (typeof value !== 'string' || !value.startsWith('./')) throw new Error('Preview source mappings must be contained relative paths.');
     const path = await realpath(resolve(root, value));
     if (!within(root, path) || !(await stat(path)).isFile()) throw new Error('Preview source is missing or outside the selected package.');
-    files.add(value.slice(2));
+    files.add(value.slice(2)); resolved.set(value, path);
   }
   const parsed = parseCustomizationPackage(metadata, files);
   if (!parsed?.local || parsed.extensions.length) throw new Error('Preview accepts exactly one local executable package, without external extension references.');
@@ -26,7 +26,7 @@ export async function developmentPlan(sourceRoot) {
   const desktop = parsed.local.manifest.entries.find(entry => entry.kind === 'desktop');
   if (!desktop) throw new Error('Preview requires an executable desktop entry.');
   return { kind: 'development', workingRoot: root, roots: [root], entries: [{ module: desktop.module, manifest: parsed.local.manifest,
-    source: await realpath(resolve(root, parsed.local.sources.get(desktop.module))) }], identity: null };
+    source: resolved.get(parsed.local.sources.get(desktop.module)) }], identity: null };
 }
 
 export function previewHost(value) {

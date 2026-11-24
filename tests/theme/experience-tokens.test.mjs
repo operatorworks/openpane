@@ -22,3 +22,29 @@ test('partial visual tokens inherit through nested themes without mutating sibli
   assert.equal(child.chart.trace1, '#123456'); assert.equal(child.radius.panel, 0);
   assert.equal(toCssVariables(child)['--aui-chart-trace1'], '#123456');
 });
+
+test('palette surface, border and muted colors supply chart defaults while explicit chart roles win', () => {
+  const colors = { surface: '#1d2027', border: '#8793a8', muted: '#eef0f5' };
+  const theme = createTheme({ colors });
+  assert.equal(theme.chart.background, colors.surface);
+  assert.equal(theme.chart.grid, colors.border);
+  assert.equal(theme.chart.axis, colors.muted);
+  assert.equal(createTheme({ colors, chart: { background: '#123456' } }).chart.background, '#123456');
+  const inherited = createTheme({ colors }, createTheme());
+  assert.equal(inherited.chart.background, colors.surface);
+});
+
+
+test('reapplying the same palette preserves explicitly authored chart roles', () => {
+  const chart = { background: '#000080', grid: '#00aaff', axis: '#ffeeaa' };
+  const parent = createTheme({ colors: palettes.light, chart });
+  const child = createTheme({ colors: { ...parent.colors } }, parent);
+  for (const [role, color] of Object.entries(chart)) assert.equal(child.chart[role], color);
+});
+
+
+test('equivalent hex spellings preserve explicit inherited chart colors', () => {
+  const parent = createTheme({ colors: { surface: '#1D2027', border: '#2A2B2C', muted: '#AABBCC' }, chart: { background: '#000080', grid: '#008000', axis: '#800000' } });
+  const child = createTheme({ colors: { surface: '#1d2027', border: '#2a2b2c', muted: '#aabbcc' } }, parent);
+  assert.equal(child.chart.background, '#000080'); assert.equal(child.chart.grid, '#008000'); assert.equal(child.chart.axis, '#800000');
+});

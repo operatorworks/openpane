@@ -21,6 +21,7 @@ export interface OwnedViewStorage {
   select(): void;
   readView(hostId: string): Promise<SavedView>;
   saveView(hostId: string, state: SavedView): Promise<void>;
+  openRemainingWork?(hostId: string): Promise<void>;
   saveInitialDraft?(scope: ConversationScope, agentId: string, text: string): Promise<void>;
   saveNavigation?(hostId: string, scope: ConversationScope): Promise<void>;
   savedViews(hostId: string, after: string | null): Promise<{
@@ -31,14 +32,18 @@ export interface OwnedViewStorage {
   close(): void | Promise<void>;
 }
 export interface SavedDraftRecovery { readonly pendingCreation?: NonNullable<SavedView['pendingCreation']>; readonly kind: 'independent' | 'bound' | 'continued'; readonly viewId: string; readonly scope: ConversationScope; readonly text: string; readonly scopes?: readonly ConversationScope[]; readonly queuedTexts?: readonly string[]; readonly queuedCount?: number; readonly image?: { readonly name: string; readonly bytes: Uint8Array } }
+export interface ViewReopenOptions {
+  readonly waitForPreviousDocument?: boolean;
+  readonly catalog?: boolean;
+  readonly purpose?: 'passive';
+}
 export interface ViewStorageFactory {
   readLegacyDraft?(viewId: string, hostId: string, selectedScope?: ConversationScope): Promise<SavedDraftRecovery | null>;
-  openRemainingWork?(viewId: string, hostId: string): Promise<void>;
   recoverClosedView?(viewId: string, onFailure: (error: unknown) => void): Promise<OwnedViewStorage | null>;
   locate?(scope: ConversationScope): Promise<string | null>;
   readonly catalogViewId?: string | undefined;
   open(onFailure: (error: unknown) => void): Promise<OwnedViewStorage>;
-  reopen(viewId: string, onFailure: (error: unknown) => void): Promise<OwnedViewStorage>;
+  reopen(viewId: string, onFailure: (error: unknown) => void, options?: ViewReopenOptions): Promise<OwnedViewStorage>;
 }
 
 export function decodeView(value: unknown, hostId: string): SavedView {

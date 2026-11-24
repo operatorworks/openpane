@@ -80,7 +80,7 @@ test('query sessions reserve fixed bounds once and fence raw publication, old ow
   const second = await f.execute({ op: 'display-query-retry', scope, publicationId, expectedAttempt: 1 }, 'owner-two');
   assert.equal(second.reservation.attempt, 2); assert.deepEqual([second.reservation.fromSeconds, second.reservation.toSeconds], [first.reservation.fromSeconds, first.reservation.toSeconds]);
   await assert.rejects(f.execute(finalize, 'owner-one'), /no longer current/);
-  await assert.rejects(f.execute({ ...finalize, attempt: 2, event: event(card('Unreserved title')) }, 'owner-two'), /fixed reservation/);
+  await assert.rejects(f.execute({ ...finalize, attempt: 2, event: { ...finalize.event, value: { ...finalize.event.value, title: 'Unreserved title' } } }, 'owner-two'), /fixed reservation/);
   const committed = await f.execute({ ...finalize, attempt: 2 }, 'owner-two'); assert.equal(committed.reservation.kind, 'published');
   f.store.endUiSession('owner-two'); f.restart();
   assert.deepEqual((await f.execute(request, 'lost-reply-retry')).reservation, committed.reservation);

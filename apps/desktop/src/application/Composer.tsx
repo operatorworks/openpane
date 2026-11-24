@@ -1,3 +1,5 @@
+import { useTheme } from '@openpane/theme/react';
+import { useExperience } from './experience-state.js';
 import { useEffect, useLayoutEffect, useRef, type FormEvent, type ReactNode, type RefObject } from 'react';
 
 /**
@@ -28,6 +30,7 @@ export function Composer({ id, label = 'Message', text, onText, placeholder, rea
   /** Before Send: Stop. */
   readonly actions?: ReactNode;
 }) {
+  const theme = useTheme(), experience = useExperience();
   const own = useRef<HTMLTextAreaElement>(null);
   const field = textareaRef ?? own;
   const form = useRef<HTMLFormElement>(null);
@@ -36,10 +39,10 @@ export function Composer({ id, label = 'Message', text, onText, placeholder, rea
     const node = field.current;
     if (!node) return;
     node.style.height = 'auto';
-    if (node.scrollHeight > 0) node.style.height = `${node.scrollHeight}px`;
+    if (node.scrollHeight > 0) node.style.height = `${node.scrollHeight + node.offsetHeight - node.clientHeight}px`;
     else node.style.height = '';
   }
-  useLayoutEffect(fit, [text]);
+  useLayoutEffect(fit, [text, theme, experience]);
   useEffect(() => {
     const node = field.current;
     if (!node || typeof ResizeObserver === 'undefined') return;

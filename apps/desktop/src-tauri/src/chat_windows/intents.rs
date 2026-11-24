@@ -56,12 +56,21 @@ impl ChatWindows {
             Command::ReadIntent {
                 incarnation,
                 request_id,
+                source_scope,
             } => {
-                let source = self
-                    .document(broker, label, &incarnation)?
-                    .scope
-                    .as_ref()
-                    .ok_or("child-only")?;
+                let document = self.document(broker, label, &incarnation)?;
+                let source = if label == "main" {
+                    self.require_main(broker, label, &incarnation)?;
+                    let source = source_scope.as_ref().ok_or("source-required")?;
+                    self.require_host(broker, source)?;
+                    source
+                } else {
+                    let own = document.scope.as_ref().ok_or("child-only")?;
+                    if source_scope.as_ref().is_some_and(|source| source != own) {
+                        return Err("foreign-intent-source");
+                    }
+                    own
+                };
                 Ok(json!(broker.storage.profile(&self.origin)?.intents.get(
                     &crate::chat_window_records::Profile::intent_key(source, &request_id)
                 )))
@@ -167,7 +176,7 @@ impl ChatWindows {
                             .host
                             .as_ref()
                             .is_some_and(|host| host.0 == reservation.scope.host_id)
-                            && !matches!(reservation.phase, Phase::TargetReady)
+                            && !matches!(reservation.phase, Phase::TargetReady | Phase::InlineReady)
                             && !broker.opening.contains_key(&reservation.label)
                     })
                     .collect();
@@ -190,9 +199,23 @@ impl ChatWindows {
                 scope,
                 view_id,
                 creation_agent_id,
+                current_binding,
             } => {
                 self.require_main(broker, label, &incarnation)?;
                 self.require_host(broker, &scope)?;
+                // Select and assign the current attempt under the same broker lock as readiness.
+                let prior_view_id = broker
+                    .storage
+                    .profile(&self.origin)?
+                    .windows
+                    .get(&scope.key())
+                    .map(|prior| prior.view_id.clone());
+                let view_id = match view_id.or(prior_view_id) {
+                    Some(view_id) => view_id,
+                    None => random_id()?,
+                };
+                let current_binding =
+                    assignment_binding(current_binding.as_ref(), &scope, &view_id)?;
                 self.retire_window_history(broker, &scope)?;
                 // Allocation and assignment are flushed in the same native-file transaction.
                 let reservation = Reservation {
@@ -205,8 +228,22 @@ impl ChatWindows {
                     binding_revision: None,
                     writer_generation: None,
                 };
+                let closed = !broker
+                    .opening
+                    .values()
+                    .any(|live| live == &reservation.scope)
+                    && !broker
+                        .documents
+                        .values()
+                        .any(|document| document.scope.as_ref() == Some(&reservation.scope));
                 let intent = broker.storage.mutate(&self.origin, |profile| {
-                    profile.assign_intent(&source_scope, &request_id, reservation)
+                    profile.assign_intent(
+                        &source_scope,
+                        &request_id,
+                        reservation,
+                        closed,
+                        current_binding,
+                    )
                 })?;
                 Ok(json!(intent))
             }
@@ -238,5 +275,94 @@ impl ChatWindows {
             }
             _ => Err("invalid-intents-command"),
         }
+    }
+}
+
+fn assignment_binding<'a>(
+    binding: Option<&'a types::Binding>,
+    scope: &Scope,
+    view_id: &str,
+) -> Result<Option<(&'a Scope, &'a str, u64, u64)>, &'static str> {
+    let Some(binding) = binding else {
+        return Ok(None);
+    };
+    if binding.schema_version != 1
+        || binding.kind != "editing"
+        || binding.scope != *scope
+        || binding.view_id != view_id
+        || binding.revision == 0
+        || binding.writer_generation == 0
+        || binding.revision > 9_007_199_254_740_991
+        || binding.writer_generation > 9_007_199_254_740_991
+    {
+        return Err("binding-mismatch");
+    }
+    Ok(Some((
+        &binding.scope,
+        binding.view_id.as_str(),
+        binding.revision,
+        binding.writer_generation,
+    )))
+}
+
+#[cfg(test)]
+mod assignment_binding_tests {
+    use super::*;
+    fn command() -> Value {
+        json!({"kind":"assign-intent","incarnation":"main","sourceScope":{"hostId":"host","conversationId":"source"},"requestId":"1:assignment","scope":{"hostId":"host","conversationId":"target"},"viewId":"target-view","creationAgentId":null,"currentBinding":{"schemaVersion":1,"kind":"editing","scope":{"hostId":"host","conversationId":"target"},"viewId":"target-view","revision":3,"writerGeneration":4}})
+    }
+    fn validate(value: Value) -> Result<bool, &'static str> {
+        let parsed: Command = serde_json::from_value(value).map_err(|_| "invalid-input")?;
+        let Command::AssignIntent {
+            scope,
+            view_id,
+            current_binding,
+            ..
+        } = parsed
+        else {
+            panic!("assignment command");
+        };
+        assignment_binding(
+            current_binding.as_ref(),
+            &scope,
+            view_id.as_deref().unwrap(),
+        )
+        .map(|binding| binding.is_some())
+    }
+    #[test]
+    fn assignment_wire_validates_current_binding_before_native_mutation() {
+        assert_eq!(validate(command()), Ok(true));
+        for (field, invalid) in [
+            ("schemaVersion", json!(2)),
+            ("kind", json!("handoff-reserved")),
+            ("viewId", json!("another-view")),
+            ("revision", json!(0)),
+            ("writerGeneration", json!(0)),
+            ("revision", json!(9007199254740992u64)),
+            ("writerGeneration", json!(9007199254740992u64)),
+            ("scope", json!({"hostId":"host","conversationId":"other"})),
+        ] {
+            let mut value = command();
+            value["currentBinding"][field] = invalid;
+            assert_eq!(validate(value), Err("binding-mismatch"), "{field}");
+        }
+        for invalid in [json!({}), json!("bad-binding"), json!(false)] {
+            let mut value = command();
+            value["currentBinding"] = invalid;
+            assert_eq!(validate(value), Err("invalid-input"));
+        }
+        let mut value = command();
+        value["currentBinding"]["unexpected"] = json!(true);
+        assert_eq!(validate(value), Err("invalid-input"));
+    }
+    #[test]
+    fn absent_binding_is_supported_but_observed_ready_hints_stay_rejected() {
+        let mut value = command();
+        value["currentBinding"] = Value::Null;
+        assert_eq!(validate(value.clone()), Ok(false));
+        value.as_object_mut().unwrap().remove("currentBinding");
+        assert_eq!(validate(value.clone()), Ok(false));
+        value["observedReadyTransitionId"] = json!("obsolete-boolean-observation");
+        assert_eq!(validate(value), Err("invalid-input"));
     }
 }

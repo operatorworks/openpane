@@ -25,9 +25,10 @@ export function fixture(options = {}) {
       drafts(onFailure) {
         return { load: async selected => { await behavior.load?.(selected, viewId); loads.push(`${viewId}/${selected.hostId}/${selected.conversationId}`); return drafts.get(`${viewId}/${selected.hostId}/${selected.conversationId}`) ?? null; },
           async commitTransfer(value, transfer) {
-            if (transfer.outcome !== 'copy-cleared') throw new Error('This fixture does not admit native carries');
+            if (transfer.outcome !== 'copy-cleared' && transfer.outcome !== 'copy-received') throw new Error('This fixture does not admit native carries');
             try {
               await behavior.write(); if (owner.closed) throw new Error('Closed owner');
+              if (transfer.outcome === 'copy-received') { drafts.set(`${viewId}/${value.scope.hostId}/${value.scope.conversationId}`, value); return true; }
               const target = drafts.get(`${transfer.targetViewId}/${transfer.target.hostId}/${transfer.target.conversationId}`)?.draft ?? '';
               if (target !== transfer.text && !target.startsWith(`${transfer.text}\n\n`)) return false;
               drafts.set(`${viewId}/${value.scope.hostId}/${value.scope.conversationId}`, value); return true;

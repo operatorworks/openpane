@@ -1,5 +1,5 @@
 import { initializeDraft } from './initial-draft.js';
-import { commitCarriedDraft, commitCopiedDraft } from './draft-carry-records.js';
+import { commitCarriedDraft, commitCopiedDraft, commitIncomingCopiedDraft } from './draft-carry-records.js';
 import type { ConversationScope, EditorBinding } from '@openpane/contracts';
 import { parseEditorBinding, parseScope, parseCommand, sameScope } from '@openpane/contracts';
 import { identifier, record } from '@openpane/contracts/decode';
@@ -8,7 +8,7 @@ import type { DraftStoragePort } from '@openpane/client';
 import { activateEditor, conversationLock, editorBindingKey, editorViewKey, readEditorBinding, recoverEditor, transferEditor } from './editor-bindings.js';
 import type { EditorClaim, EditorRecoveryGrant, HandoffPlan } from './editor-bindings.js';
 import { decodeView, SupersededDraftsError } from './view-state.js';
-import type { OwnedViewStorage, SavedDraftRecovery, SavedView, ViewStorageFactory } from './view-state.js';
+import type { OwnedViewStorage, SavedDraftRecovery, SavedView, ViewStorageFactory, ViewReopenOptions } from './view-state.js';
 
 export function openViewDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -74,7 +74,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
     } catch (error) { release(); throw error; }
   }
 
-  static async reopen(viewId: string, onFailure: (error: unknown) => void, waitForPreviousDocument = false, catalog = false): Promise<BrowserViewStorage> {
+  static async reopen(viewId: string, onFailure: (error: unknown) => void, { waitForPreviousDocument = false, catalog = false }: ViewReopenOptions = {}): Promise<BrowserViewStorage> {
     if (!globalThis.indexedDB || !navigator.locks) throw new Error('This browser cannot safely save an exclusive view. IndexedDB and Web Locks are required.');
     const release = await claim(viewId, waitForPreviousDocument);
     if (!release) throw new Error('This saved view is already open in another tab.');
@@ -86,71 +86,96 @@ export class BrowserViewStorage implements OwnedViewStorage {
   }
 
   static async readLegacyDraft(viewId: string, hostId: string, selectedScope?: ConversationScope): Promise<SavedDraftRecovery | null> {
-    const db = await openViewDatabase(); let release: (() => void) | null = null;
-    const read = (key: IDBValidKey): Promise<unknown> => new Promise((resolve, reject) => {
-      const tx = db.transaction('records'), request = tx.objectStore('records').get(key);
-      tx.oncomplete = () => resolve(request.result); tx.onabort = () => reject(tx.error ?? new Error('Saved draft recovery interrupted'));
-    });
+    const db = await openViewDatabase();
     try {
-      release = await claim(viewId);
-      if (!release) return null;
-      const bound = await read(editorViewKey(viewId));
-      const saved = decodeView(await read(['view', viewId, hostId]), hostId);
-      const keys = bound === undefined ? await new Promise<IDBValidKey[]>((resolve, reject) => {
-        const tx = db.transaction('records'), request = tx.objectStore('records').getAllKeys(IDBKeyRange.bound(['draft', viewId, hostId], ['draft', viewId, hostId, []], false, true), 1025);
-        tx.oncomplete = () => resolve(request.result); tx.onabort = () => reject(tx.error);
-      }) : [];
-      if (keys.length > 1024) throw new Error('This saved view has too many drafts for recovery. Its records are preserved.');
-      const scopes = bound === undefined ? keys.flatMap(key => Array.isArray(key) && typeof key[3] === 'string' ? [{ hostId, conversationId: key[3] }] : []) : [parseScope(bound)];
-      for (const scope of bound === undefined ? [selectedScope, saved.route ?? saved.pendingCreation?.scope, ...scopes] : scopes) {
-        if (!scope) continue;
-        if (scope.hostId !== hostId) throw new Error('Saved draft recovery belongs to another host');
-        const binding = await readEditorBinding(db, scope);
-        const value = await read(['draft', viewId, hostId, scope.conversationId]);
-        if (value === undefined) continue;
-        const draft = record(value);
-        if (typeof draft.draft !== 'string' || !sameScope(parseScope(draft.scope), scope)) throw new Error('Unsupported saved draft. Its original records are preserved.');
-        const entries = Array.isArray(draft.outbox) ? draft.outbox.slice(0, 1024) : [], queuedTexts: string[] = [];
-        for (const value of entries) {
-          try { const entry = record(value), command = parseCommand(entry.command); if (sameScope(command.scope, scope) && command.body.kind === 'send') queuedTexts.push(command.body.text); } catch {}
-        }
-        let image: SavedDraftRecovery['image'];
-        try {
-          if (draft.image) {
-            const metadata = record(draft.image), selectionId = identifier(metadata.selectionId), bytes = await read(['draft-image', viewId, hostId, scope.conversationId, selectionId]);
-            if (bytes instanceof Uint8Array && bytes.byteLength <= 4 * 1024 * 1024 && typeof metadata.name === 'string') image = { name: metadata.name.slice(0, 200), bytes };
-          }
-        } catch {}
-        return { ...(saved.pendingCreation && sameScope(saved.pendingCreation.scope, scope) ? { pendingCreation: saved.pendingCreation } : {}), kind: !binding || binding.viewId === viewId ? 'bound' : 'independent', viewId, scope, text: draft.draft, scopes, queuedTexts, queuedCount: entries.length, ...(image ? { image } : {}) };
-      }
-      return null;
-    } finally { db.close(); release?.(); }
+      return await new Promise<SavedDraftRecovery | null>((resolve, reject) => {
+        const tx = db.transaction('records'), store = tx.objectStore('records');
+        const bound = store.get(editorViewKey(viewId)), view = store.get(['view', viewId, hostId]);
+        const keys = store.getAllKeys(IDBKeyRange.bound(['draft', viewId, hostId], ['draft', viewId, hostId, []], false, true), 1025);
+        let remaining = 3, result: SavedDraftRecovery | null = null, failure: unknown, imageReadFailed = false;
+        const fail = (cause: unknown) => { failure = cause; tx.abort(); };
+        const inspect = () => {
+          if (--remaining !== 0) return;
+          try {
+            const saved = decodeView(view.result, hostId);
+            if (bound.result === undefined && keys.result.length > 1024) throw new Error('This saved view has too many drafts for recovery. Its records are preserved.');
+            const scopes = bound.result === undefined ? keys.result.flatMap(key => Array.isArray(key) && typeof key[3] === 'string' ? [{ hostId, conversationId: key[3] }] : []) : [parseScope(bound.result)];
+            const candidates = bound.result === undefined ? [selectedScope, saved.route ?? saved.pendingCreation?.scope, ...scopes] : scopes;
+            const readCandidate = (index: number): void => {
+              const scope = candidates[index];
+              if (!scope) { if (index < candidates.length) readCandidate(index + 1); return; }
+              if (scope.hostId !== hostId) throw new Error('Saved draft recovery belongs to another host');
+              const binding = store.get(editorBindingKey(scope)), value = store.get(['draft', viewId, hostId, scope.conversationId]);
+              let pending = 2;
+              const loaded = () => {
+                if (--pending !== 0) return;
+                try {
+                  if (value.result === undefined) { readCandidate(index + 1); return; }
+                  const owned = binding.result === undefined ? null : parseEditorBinding(binding.result), draft = record(value.result);
+                  if (typeof draft.draft !== 'string' || !sameScope(parseScope(draft.scope), scope)) throw new Error('Unsupported saved draft. Its original records are preserved.');
+                  const text = draft.draft, entries = Array.isArray(draft.outbox) ? draft.outbox.slice(0, 1024) : [], queuedTexts: string[] = [];
+                  for (const value of entries) {
+                    try { const entry = record(value), command = parseCommand(entry.command); if (sameScope(command.scope, scope) && command.body.kind === 'send') queuedTexts.push(command.body.text); } catch {}
+                  }
+                  const finish = (image?: SavedDraftRecovery['image']) => {
+                    result = { ...(saved.pendingCreation && sameScope(saved.pendingCreation.scope, scope) ? { pendingCreation: saved.pendingCreation } : {}), kind: !owned || owned.viewId === viewId ? 'bound' : 'independent', viewId, scope, text, scopes, queuedTexts, queuedCount: entries.length, ...(image ? { image } : {}) };
+                  };
+                  try {
+                    if (draft.image) {
+                      const metadata = record(draft.image), selectionId = identifier(metadata.selectionId), name = metadata.name;
+                      const image = store.get(['draft-image', viewId, hostId, scope.conversationId, selectionId]);
+                      image.onsuccess = () => { const bytes: unknown = image.result; finish(bytes instanceof Uint8Array && bytes.byteLength <= 4 * 1024 * 1024 && typeof name === 'string' ? { name: name.slice(0, 200), bytes } : undefined); };
+                      image.onerror = event => { imageReadFailed = image.error !== null && image.error.name !== 'AbortError'; event.preventDefault(); event.stopPropagation(); finish(); };
+                      return;
+                    }
+                  } catch {}
+                  finish();
+                } catch (cause) { fail(cause); }
+              };
+              binding.onsuccess = value.onsuccess = loaded;
+            };
+            readCandidate(0);
+          } catch (cause) { fail(cause); }
+        };
+        bound.onsuccess = view.onsuccess = keys.onsuccess = inspect;
+        tx.oncomplete = () => resolve(result);
+        tx.onabort = () => { if (imageReadFailed && result !== null && failure === undefined) resolve(result); else reject(failure ?? tx.error ?? new Error('Saved draft recovery interrupted')); };
+      });
+    } finally { db.close(); }
   }
 
-  static async openRemainingWork(viewId: string, hostId: string): Promise<void> {
-    const owner = await this.reopen(viewId, () => {});
-    try {
-      const saved = await owner.readView(hostId);
-      if (!saved.route) return;
-      const binding = await readEditorBinding(owner.db, saved.route);
-      if (binding && binding.viewId !== viewId) {
-        await owner.transaction('readwrite', store => store.put({ ...saved, route: null }, ['view', viewId, hostId]));
-      }
-    } finally { await owner.close(); }
+  async openRemainingWork(hostId: string): Promise<void> {
+    const saved = await this.readView(hostId);
+    if (!saved.route) return;
+    const binding = await readEditorBinding(this.db, saved.route);
+    if (binding && binding.viewId !== this.viewId) {
+      await this.transaction('readwrite', store => store.put({ ...saved, route: null }, ['view', this.viewId, hostId]));
+    }
   }
 
   static async bindingForView(viewId: string): Promise<EditorBinding | null> {
     const db = await openViewDatabase();
     try {
-      const scope = await new Promise<ConversationScope | null>((resolve, reject) => {
-        const transaction = db.transaction('records'), request = transaction.objectStore('records').get(editorViewKey(viewId));
-        transaction.oncomplete = () => { try { resolve(request.result === undefined ? null : parseScope(request.result)); } catch (error) { reject(error); } };
-        transaction.onabort = () => reject(transaction.error ?? new Error('Saved editor lookup interrupted.'));
+      return await new Promise<EditorBinding | null>((resolve, reject) => {
+        const transaction = db.transaction('records'), store = transaction.objectStore('records'), reverse = store.get(editorViewKey(viewId));
+        let result: EditorBinding | null = null, failure: unknown;
+        const fail = (error: unknown) => { failure = error; transaction.abort(); };
+        reverse.onsuccess = () => {
+          try {
+            if (reverse.result === undefined) return;
+            const scope = parseScope(reverse.result), forward = store.get(editorBindingKey(scope));
+            forward.onsuccess = () => {
+              try {
+                const binding = forward.result === undefined ? null : parseEditorBinding(forward.result);
+                if (!binding || binding.viewId !== viewId || !sameScope(binding.scope, scope)) throw new Error('Saved view and editor binding disagree. Original records are preserved.');
+                result = binding;
+              } catch (error) { fail(error); }
+            };
+          } catch (error) { fail(error); }
+        };
+        transaction.oncomplete = () => resolve(result);
+        transaction.onabort = () => reject(failure ?? transaction.error ?? new Error('Saved editor lookup interrupted.'));
       });
-      if (!scope) return null;
-      const binding = await readEditorBinding(db, scope);
-      if (!binding || binding.viewId !== viewId || !sameScope(binding.scope, scope)) throw new Error('Saved view and editor binding disagree. Original records are preserved.');
-      return binding;
     } finally { db.close(); }
   }
 
@@ -163,10 +188,10 @@ export class BrowserViewStorage implements OwnedViewStorage {
         return { binding, legacyViewIds: [] };
       }
       const legacyViewIds = await new Promise<readonly string[]>((resolve, reject) => {
-        const transaction = db.transaction('records'), request = transaction.objectStore('records').openCursor();
+        const transaction = db.transaction('records'), store = transaction.objectStore('records'), request = store.openKeyCursor();
         const found = new Set<string>(), unreadable = new Set<string>(); let scanned = 0, failure: unknown;
         if (preferredViewId) {
-          const store = transaction.objectStore('records'), draft = store.getKey(['draft', preferredViewId, scope.hostId, scope.conversationId]);
+          const draft = store.getKey(['draft', preferredViewId, scope.hostId, scope.conversationId]);
           const imagePrefix = ['draft-image', preferredViewId, scope.hostId, scope.conversationId];
           const image = store.getKey(IDBKeyRange.bound(imagePrefix, [...imagePrefix, []], false, true));
           const view = store.get(['view', preferredViewId, scope.hostId]);
@@ -186,21 +211,28 @@ export class BrowserViewStorage implements OwnedViewStorage {
             if (Array.isArray(key) && typeof key[1] === 'string' && key[2] === scope.hostId) {
               if ((key[0] === 'draft' || key[0] === 'draft-image') && key[3] === scope.conversationId) found.add(key[1]);
               if (key[0] === 'view') {
-                let saved;
-                try { saved = decodeView(cursor.value, scope.hostId); }
-                catch {
-                  unreadable.add(key[1]);
-                  const raw: unknown = cursor.value;
-                  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-                    const value = record(raw), pending = value.pendingCreation && typeof value.pendingCreation === 'object' && !Array.isArray(value.pendingCreation) ? record(value.pendingCreation) : null;
-                    for (const candidate of [value.route, pending?.scope, value.pendingCreation]) {
-                      let matches = false; try { matches = sameScope(parseScope(candidate), scope); } catch {}
-                      if (matches) throw new Error('The saved editor for this conversation is unreadable. Its original records are preserved.');
+                const viewId = key[1], view = store.get(key);
+                view.onsuccess = () => {
+                  try {
+                    let saved;
+                    try { saved = decodeView(view.result, scope.hostId); }
+                    catch {
+                      unreadable.add(viewId);
+                      const raw: unknown = view.result;
+                      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+                        const value = record(raw), pending = value.pendingCreation && typeof value.pendingCreation === 'object' && !Array.isArray(value.pendingCreation) ? record(value.pendingCreation) : null;
+                        for (const candidate of [value.route, pending?.scope, value.pendingCreation]) {
+                          let matches = false; try { matches = sameScope(parseScope(candidate), scope); } catch {}
+                          if (matches) throw new Error('The saved editor for this conversation is unreadable. Its original records are preserved.');
+                        }
+                      }
+                      cursor.continue(); return;
                     }
-                  }
-                  cursor.continue(); return;
-                }
-                if (saved.route && sameScope(saved.route, scope) || saved.pendingCreation && sameScope(saved.pendingCreation.scope, scope)) found.add(key[1]);
+                    if (saved.route && sameScope(saved.route, scope) || saved.pendingCreation && sameScope(saved.pendingCreation.scope, scope)) found.add(viewId);
+                    cursor.continue();
+                  } catch (error) { failure = error; transaction.abort(); }
+                };
+                return;
               }
             }
             cursor.continue();
@@ -215,7 +247,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
 
   editorBinding(): EditorBinding | null { return this.editor; }
 
-  static async prepareCreationDraft(target: { readonly scope: ConversationScope; readonly viewId: string; readonly label: string; readonly transitionId: string; readonly agentId: string }, text: string): Promise<void> {
+  static async prepareCreationDraft(target: { readonly scope: ConversationScope; readonly viewId: string; readonly label: string; readonly transitionId: string; readonly agentId: string }, text: string, assertCurrent?: () => void): Promise<void> {
     const releaseConversation = await conversationLock(target.scope);
     if (!releaseConversation) throw new Error('The new conversation already has an editor');
     let release: (() => void) | null = null, db: IDBDatabase | undefined;
@@ -232,6 +264,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
             const previous = binding.result === undefined ? null : parseEditorBinding(binding.result);
             if (owner.result !== undefined && !sameScope(parseScope(owner.result), target.scope)) throw new Error('The destination belongs to another conversation');
             if (previous && (previous.kind !== 'handoff-reserved' || previous.viewId !== target.viewId || previous.transitionId !== target.transitionId || previous.targetLabel !== target.label)) throw new Error('The destination editor already changed');
+            assertCurrent?.();
             const reserved: EditorBinding = previous ?? { schemaVersion: 1, kind: 'handoff-reserved', scope: target.scope, viewId: target.viewId, transitionId: target.transitionId, targetLabel: target.label, revision: 1, writerGeneration: 1 };
             store.put(reserved, editorBindingKey(target.scope)); store.put(target.scope, editorViewKey(target.viewId));
             initializeDraft(store, target.viewId, target.scope, target.agentId, text, () => {}, fail);
@@ -298,8 +331,17 @@ export class BrowserViewStorage implements OwnedViewStorage {
     if (!binding) {
       const release = await claim(viewId);
       if (!release) return null;
-      try { return new BrowserViewStorage(viewId, await openViewDatabase(), release, onFailure); }
-      catch (error) { release(); throw error; }
+      let db: IDBDatabase | undefined;
+      try {
+        const database = await openViewDatabase(); db = database;
+        const bound = await new Promise<boolean>((resolve, reject) => {
+          const transaction = database.transaction('records'), request = transaction.objectStore('records').get(editorViewKey(viewId));
+          transaction.oncomplete = () => resolve(request.result !== undefined);
+          transaction.onabort = () => reject(transaction.error ?? new Error('Saved editor lookup interrupted.'));
+        });
+        if (bound) { db.close(); release(); return null; }
+        return new BrowserViewStorage(viewId, db, release, onFailure);
+      } catch (error) { db?.close(); release(); throw error; }
     }
     if (binding.kind !== 'editing') return null;
     const releaseConversation = await conversationLock(binding.scope);
@@ -554,6 +596,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
         current(records.scope);
         return protect(() => this.fenced<boolean>(records.scope, 'readwrite', generation(records.scope), (store, result, fail) => {
           if (transfer.outcome === 'copy-cleared') commitCopiedDraft(store, this.viewId, records, transfer, result, fail);
+          else if (transfer.outcome === 'copy-received') commitIncomingCopiedDraft(store, this.viewId, records, transfer, result, fail);
           else commitCarriedDraft(store, this.viewId, records, transfer, result, fail);
         }));
       },

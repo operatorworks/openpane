@@ -25,7 +25,7 @@ export class DesktopExtensionLifecycle {
   private readonly listeners = new Set<() => void>();
   private snapshot: readonly NamespaceActivation[] = [];
   private attachment: { sink: GenerationSink; token: object } | undefined;
-  private initialSettled = false;
+  private admissionReady = false;
   private nextId = 0;
   private closed = false;
   readonly subscribe = (notify: () => void) => { this.listeners.add(notify); return () => { this.listeners.delete(notify); }; };
@@ -117,7 +117,7 @@ export class DesktopExtensionLifecycle {
 
   private publishSink(): void {
     const generations = this.snapshot.flatMap(owner => owner.kind === 'ready' ? [owner.generation] : []);
-    const value: GenerationSnapshot = this.initialSettled ? { kind: 'ready', generations } : { kind: 'transitioning' };
+    const value: GenerationSnapshot = this.admissionReady ? { kind: 'ready', generations } : { kind: 'transitioning' };
     this.attachment?.sink.publish(this.attachment.token, value);
   }
 
@@ -128,7 +128,7 @@ export class DesktopExtensionLifecycle {
       const owner = this.owners.get(namespace);
       return owner?.wanted ? owner.state : { kind: 'loading', namespace };
     });
-    if (!this.snapshot.some(owner => owner.kind === 'loading')) this.initialSettled = true;
+    if (this.snapshot.some(owner => owner.kind === 'ready') || !this.snapshot.some(owner => owner.kind === 'loading')) this.admissionReady = true;
     this.publishSink();
     this.listeners.forEach(notify => notify());
   }

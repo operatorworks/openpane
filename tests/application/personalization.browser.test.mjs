@@ -758,3 +758,41 @@ test('a committed disable reaches its writer before unrelated palette digest ver
   });
   assert.equal(result.document.ui.enabled, false);
 });
+
+for (const classification of ['invalid', 'future']) test(`a live ${classification} preference reread blocks UI before unrelated palette verification`, async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async classification => {
+    const session = new PersonalizationSession(); session.start(); await until(() => session.getSnapshot().readiness === 'ready');
+    await session.importPalette(JSON.stringify(starterPalette()));
+    const initial = session.getSnapshot();
+    await writeRaw(classification === 'invalid' ? { broken: true } : { storageVersion: 2, revision: 9, document: defaultDesktopPreferences });
+    const gate = holdDigests(); dispatchEvent(new Event('focus')); await until(() => gate.entered === 1);
+    const pending = session.getSnapshot();
+    gate.release(); await until(() => session.getSnapshot().saved !== pending.saved);
+    const settled = session.getSnapshot(); gate.restore(); session.close(); return { initial, pending, settled };
+  }, classification);
+  assert.equal(result.initial.readiness, 'ready'); assert.equal(result.initial.document.ui.enabled, true);
+  assert.equal(result.pending.readiness, 'blocked'); assert.equal(result.pending.document.ui.enabled, false);
+  assert.equal(result.pending.saved.preferences.kind, classification === 'invalid' ? 'invalid' : 'unavailable');
+  assert.deepEqual(result.pending.saved.palettes, result.initial.saved.palettes);
+  assert.equal(result.settled.readiness, 'blocked'); assert.equal(result.settled.document.ui.enabled, false);
+  assert.deepEqual(result.settled.saved.palettes, result.initial.saved.palettes);
+});
+
+
+test('a selective namespace disable reaches its writer before unrelated palette verification', async t => {
+  const page = await fixture(t);
+  const result = await page.evaluate(async () => {
+    const session = new PersonalizationSession(); session.start(); await until(() => session.getSnapshot().readiness === 'ready');
+    await session.importPalette(JSON.stringify(starterPalette()));
+    const initial = session.getSnapshot();
+    const gate = holdDigests(), disabling = session.patchPreferences({ kind: 'namespace-enabled', namespace: 'fixture', enabled: false });
+    await until(() => gate.entered === 1);
+    const pending = session.getSnapshot();
+    gate.release(); await disabling; gate.restore(); session.close(); return { initial, pending };
+  });
+  assert.equal(result.pending.document.ui.enabled, true);
+  assert.deepEqual(result.pending.document.ui.disabledNamespaces, ['fixture']);
+  assert.equal(result.pending.document.ui.disabledNamespaces.includes('other'), false);
+  assert.deepEqual(result.pending.saved.palettes, result.initial.saved.palettes);
+});

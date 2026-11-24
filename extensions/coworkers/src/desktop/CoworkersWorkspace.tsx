@@ -57,6 +57,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   const [notice, setNotice] = useState('');
   const waiting = useRef<object | null>(null);
   const inFlight = useRef<object | null>(null);
+  const [opening, setOpening] = useState(false);
   function stopAwaiting() { waiting.current = null; setAwaiting(null); }
   const selectedKey = props.selected ? `${props.selected.hostId}/${props.selected.conversationId}` : null;
   useEffect(() => {
@@ -107,8 +108,8 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   const chats = entries.filter(entry => !filter || entry.provider.providerAgentId === filter);
   /** Opens or creates a chat. A rejection is shown here; any other failure is in the host status strip. */
   async function attempt(action: () => ReturnType<WorkspaceViewProps['open']>) {
-    if (inFlight.current) { setNotice('The previous chat operation is still finishing. Try again when it finishes.'); return; }
-    const attempt = {}; inFlight.current = attempt; waiting.current = attempt;
+    if (inFlight.current) return;
+    const attempt = {}; inFlight.current = attempt; waiting.current = attempt; setOpening(true);
     setNotice(''); setAwaiting({ before: selectedKey });
     try {
       const result = await action();
@@ -118,7 +119,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
       else { setNarrowPane('list'); setNotice(result.kind === 'detached' ? 'Chat opened in its own window.' : result.reason); }
     }
     catch { if (waiting.current !== attempt) return; stopAwaiting(); setNotice('That chat could not be opened. Refresh the list and try again.'); }
-    finally { if (inFlight.current === attempt) inFlight.current = null; }
+    finally { if (inFlight.current === attempt) { inFlight.current = null; setOpening(false); } }
   }
   function openChat(scope: ConversationScope) {
     if (selectedKey === `${scope.hostId}/${scope.conversationId}`) { stopAwaiting(); setNotice(''); setNarrowPane('conversation'); return; }
@@ -161,7 +162,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
               {info?.slack && <span className="coworkers-badge">Slack</span>}
             </div>
             <div className="coworkers-card-actions">
-              <button type="button" disabled={item.availability.kind !== 'ready'} aria-label={`Chat with ${item.label}`} onClick={() => chatWith(item)}>Chat</button>
+              <button type="button" disabled={opening || item.availability.kind !== 'ready'} aria-label={`Chat with ${item.label}`} onClick={() => chatWith(item)}>Chat</button>
               <button type="button" disabled={!management} title={management ? undefined : NEWER}>Edit</button>
               <button type="button" disabled={!management} title={management ? undefined : NEWER}>Delete</button>
             </div>
@@ -172,7 +173,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
       <section className="coworkers-chat-list" aria-label="Chats">
         <header className="coworkers-chat-list-header">
           <h2>Chats</h2>
-          {target && <button type="button" onClick={() => void attempt(() => props.create(target.id))}>New chat</button>}
+          {target && <button type="button" disabled={opening} onClick={() => void attempt(() => props.create(target.id))}>New chat</button>}
         </header>
         {notice && <p role="alert" className="coworkers-notice">{notice}</p>}
         {listError && <p role="status" className="coworkers-notice">{listError} <button type="button" onClick={() => setListAttempt(attempt => attempt + 1)}>Retry</button></p>}
@@ -185,7 +186,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
             const who = byId.get(entry.provider.providerAgentId);
             const name = who?.label ?? entry.provider.providerAgentId;
             return <li key={entry.scope.conversationId}>
-              <button type="button" className="coworkers-chat-card" aria-current={props.selected?.conversationId === entry.scope.conversationId ? 'page' : undefined}
+              <button type="button" disabled={opening && selectedKey !== `${entry.scope.hostId}/${entry.scope.conversationId}`} className="coworkers-chat-card" aria-current={props.selected?.conversationId === entry.scope.conversationId ? 'page' : undefined}
                 onClick={() => openChat(entry.scope)}>
                 <span className="coworkers-avatar" aria-hidden="true">{initials(name)}</span>
                 <span className="coworkers-chat-text"><strong>{name}</strong><span>{entry.preview ?? 'New chat'}</span></span>
@@ -215,7 +216,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
             </dl> : selectedEntry && props.conversation
               ? <CoworkerContext.Provider value={{ name: shown.label }}>{props.conversation}</CoworkerContext.Provider>
               : <div className="coworkers-empty-state"><p>No chat with {shown.label} is open.</p>
-                  {current && <button type="button" onClick={() => void attempt(() => props.create(current.id))}>Start a chat</button>}</div>}
+                  {current && <button type="button" disabled={opening} onClick={() => void attempt(() => props.create(current.id))}>Start a chat</button>}</div>}
           </div>
         </> : <div className="coworkers-empty-state"><p>Choose a chat, or open the Coworkers tab to start one.</p></div>}
       </section>

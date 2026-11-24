@@ -1,6 +1,7 @@
 import { count, identifier, record } from '@openpane/contracts/decode';
 import type { UiContextV1 } from '@openpane/contracts';
 
+export type UiRecoveryHost = Pick<UiContextV1, 'hostId' | 'profileId'>;
 export const UI_RECOVERY_KEY = 'openpane.ui-recovery.v1';
 export interface RecoveryRequest {
   readonly op: 'restore'; readonly requestId: string; readonly expectedRecoveryGeneration: number; readonly expectedRevision: number;

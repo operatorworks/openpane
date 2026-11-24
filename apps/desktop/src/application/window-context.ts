@@ -11,7 +11,7 @@ export interface NativeReservation {
   readonly label: string;
   readonly transitionId: string;
   readonly creationAgentId: string | null;
-  readonly phase: 'assigned' | 'requested' | 'source-saved' | 'transfer-committed' | 'source-released' | 'target-ready' | 'failed';
+  readonly phase: 'assigned' | 'requested' | 'source-saved' | 'transfer-committed' | 'source-released' | 'target-ready' | 'inline-ready' | 'failed';
   readonly bindingRevision: number | null;
   readonly writerGeneration: number | null;
 }
@@ -36,7 +36,7 @@ export type DesktopWindowContext =
 export function parseNativeReservation(value: unknown): NativeReservation {
   const input = record(value, ['scope', 'viewId', 'label', 'transitionId', 'creationAgentId', 'phase', 'bindingRevision', 'writerGeneration']);
   const phase = input.phase;
-  if (phase !== 'assigned' && phase !== 'requested' && phase !== 'source-saved' && phase !== 'transfer-committed' && phase !== 'source-released' && phase !== 'target-ready' && phase !== 'failed') throw new Error('Invalid native reservation phase');
+  if (phase !== 'assigned' && phase !== 'requested' && phase !== 'source-saved' && phase !== 'transfer-committed' && phase !== 'source-released' && phase !== 'target-ready' && phase !== 'inline-ready' && phase !== 'failed') throw new Error('Invalid native reservation phase');
   function generation(value: unknown): number | null {
     if (value === null) return null;
     if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) throw new Error('Invalid native binding generation');
@@ -71,7 +71,7 @@ export class DesktopWindowPort {
 export interface NativePlacementIntent {
   readonly sourceScope: ConversationScope;
   readonly requestId: string;
-  readonly action: { readonly kind: 'create'; readonly agentId: string; readonly carry: boolean } | { readonly kind: 'open'; readonly scope: ConversationScope; readonly carry: boolean };
+  readonly action: { readonly kind: 'create'; readonly agentId: string; readonly carry: boolean } | { readonly kind: 'open'; readonly scope: ConversationScope; readonly carry: boolean; readonly passive?: true };
   readonly target: NativeReservation | null;
   readonly result: ConversationOpenResult | null;
 }
@@ -80,7 +80,11 @@ export function parseNativePlacementIntent(value: unknown): NativePlacementInten
   let parsed: NativePlacementIntent['action'];
   if (typeof action.carry !== 'boolean') throw new Error('Invalid native draft carry action');
   if (action.kind === 'create') { record(action, ['kind', 'agentId', 'carry']); parsed = { kind: 'create', agentId: identifier(action.agentId), carry: action.carry }; }
-  else if (action.kind === 'open') { record(action, ['kind', 'scope', 'carry']); parsed = { kind: 'open', scope: parseScope(action.scope), carry: action.carry }; }
+  else if (action.kind === 'open') {
+    record(action, ['kind', 'scope', 'carry', ...(Object.hasOwn(action, 'passive') ? ['passive'] : [])]);
+    if (Object.hasOwn(action, 'passive') && action.passive !== true) throw new Error('Invalid passive native placement action');
+    parsed = { kind: 'open', scope: parseScope(action.scope), carry: action.carry, ...(action.passive === true ? { passive: true } : {}) };
+  }
   else throw new Error('Invalid native placement action');
   const sourceScope = parseScope(input.sourceScope), target = input.target === null ? null : parseNativeReservation(input.target);
   if (target && target.scope.hostId !== sourceScope.hostId) throw new Error('Foreign native placement intent');

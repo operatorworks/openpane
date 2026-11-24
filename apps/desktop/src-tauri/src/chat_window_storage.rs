@@ -69,11 +69,12 @@ impl Storage {
         std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))
             .map_err(|_| "native-records-unavailable")?;
         let lock_path = directory.join("chat-windows-v1.lock");
-        if lock_path
-            .try_exists()
-            .map_err(|_| "native-records-unavailable")?
-        {
-            private_metadata(&lock_path, &dir)?;
+        match std::fs::symlink_metadata(&lock_path) {
+            Ok(_) => {
+                private_metadata(&lock_path, &dir)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("native-records-unavailable"),
         }
         let lock = OpenOptions::new()
             .read(true)
@@ -265,6 +266,15 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
+    fn a_dangling_lock_link_is_rejected_without_creating_its_target() {
+        let dir = temp();
+        let target = dir.join("not-a-lock");
+        std::os::unix::fs::symlink(&target, dir.join("chat-windows-v1.lock")).unwrap();
+        assert!(matches!(Storage::open(&dir), Err("unsafe-native-records")));
+        assert!(!target.exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
     fn rejected_mutation_does_not_change_memory_or_disk() {
         let dir = temp();
         let mut store = Storage::open(&dir).unwrap();
@@ -376,6 +386,7 @@ mod tests {
                     "1:old".into(),
                     Action::Open {
                         scope: scope.clone(),
+                        passive: false,
                         carry: false,
                     },
                 )?;
@@ -392,6 +403,8 @@ mod tests {
                         binding_revision: None,
                         writer_generation: None,
                     },
+                    false,
+                    None,
                 )?;
                 profile
                     .intents
@@ -406,7 +419,7 @@ mod tests {
         reopened.ensure_profile("origin").unwrap();
         assert_eq!(
             reopened.profile("origin").unwrap().windows[&scope.key()].phase,
-            Phase::TargetReady
+            Phase::InlineReady
         );
         reopened
             .mutate("origin", |profile| {

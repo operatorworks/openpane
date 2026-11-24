@@ -121,11 +121,9 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     else if (committed && navigation === 'home' && !experience) storeSelectedView('chats');
   }, [bootstrap.kind, navigation, selectedView, experience, committed]);
   const home = experience?.manifest.presentation.home ?? BUILTIN_HOME;
-  const currentDestination = useRef({ selectedView, home });
-  useLayoutEffect(() => { currentDestination.current = { selectedView, home }; }, [selectedView, home]);
   function revealOpened(epoch: number): void {
-    const current = currentDestination.current;
-    if (current.selectedView !== 'home' && current.selectedView !== 'chats') return;
+    const current = currentDestination.current, active = controller.getSnapshot().active;
+    if (current.selectedView === 'extensions' && current.workspaceNamespace && active && 'kind' in active.agent && active.agent.namespace === current.workspaceNamespace) return;
     if (navigationEpoch.current === epoch && !(current.selectedView === 'home' && homePaneOrder(current.home).includes('conversation'))) storeSelectedView('chats');
   }
   async function reopenFromPane(viewId: string): Promise<void> {
@@ -138,7 +136,8 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     if (result?.kind === 'inline') revealOpened(epoch);
     return result;
   }
-  const [selectedExtension, setSelectedExtension] = useState<string | null>(null);
+  const [selectedExtension, storeSelectedExtension] = useState<string | null>(null);
+  const setSelectedExtension = (namespace: string | null) => { navigationEpoch.current++; storeSelectedExtension(namespace); };
   const personalization = usePersonalization();
   const { document: preferences, session: personalizationSession } = personalization;
   const customizationEnabled = personalization.readiness === 'ready' && preferences.ui.enabled;
@@ -216,12 +215,15 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     active={app.active} actions={activeActions} enabled={enabled} agent={agent} surface={surface} />);
   // Tools leave the conversation column: it keeps load notices, a claimed layout places everything, Extensions runs the rest.
   const layoutClaimed = custom.contentLayout.kind === 'claimed';
-  const modules = moduleList(layoutClaimed ? 'all' : 'status');
+  const modules = moduleList(layoutClaimed || fixedChat ? 'all' : 'status');
   const rows = extensionRows({ customizations: customization, activations: custom.namespaces, enabled: customizationsOn, disabledNamespaces: preferences.ui.disabledNamespaces, metadata });
   const workspaceRow = openableRow(rows.find(row => row.namespace === selectedExtension));
   const workspaceOpen = selectedView === 'extensions' && workspaceRow !== null;
   // One element, placed in one slot: the Chats view, or the open workspace of the active conversation's namespace.
   const slots = conversationSlots({ row: workspaceOpen ? workspaceRow : null, active: app.active, metadata, custom, modules, agents: choices });
+  const workspaceNamespace = workspaceOpen ? workspaceRow?.namespace ?? null : null;
+  const currentDestination = useRef({ selectedView, home, workspaceNamespace });
+  useLayoutEffect(() => { currentDestination.current = { selectedView, home, workspaceNamespace }; }, [selectedView, home, workspaceNamespace]);
   const customizationNotices = custom.namespaces.some(owner => owner.kind === 'loading' || owner.kind === 'failed');
   const activeAgent = app.active?.agent;
   const composerAgents = fixedChat && activeAgent ? slots.composerAgents.filter(choice => ('kind' in choice ? choice.namespace : null) === ('kind' in activeAgent ? activeAgent.namespace : null)) : slots.composerAgents;
@@ -242,7 +244,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
   // The footer carries the conversation's disclosure wherever its composer is on screen.
   const composerVisible = Boolean(activeConversation) && (((selectedView === 'chats' || selectedView === 'home' && homePaneOrder(home).includes('conversation')) && !slots.workspace) || (workspaceOpen && Boolean(slots.workspace)));
   const canStart = enabled && app.saved.pendingCreation === null && !opening;
-  const conversation = catalogOnly ? <section className="chat-catalog-empty" aria-label="Chats in separate windows"><h1>Chats open in their own windows</h1><p>Choose a chat from the catalog or start a new chat with an available agent.</p>{placementNotice && <p data-openpane-part="status" role="status">{placementNotice}</p>}</section> : slots.workspace ? <p data-openpane-part="status">This conversation is open in its extension workspace.</p> : activeConversation && !opening
+  const conversation = catalogOnly ? <section className="chat-catalog-empty" aria-label="Chats in separate windows"><h1>Chats open in their own windows</h1><p>Choose a chat from the catalog or start a new chat with an available agent.</p></section> : slots.workspace ? <p data-openpane-part="status">This conversation is open in its extension workspace.</p> : activeConversation && !opening
     ? activeConversation
     : <NewConversation text={launchText} onText={setLaunchText} placeholder={presentation.placeholder} opening={opening}
         note={app.host.kind === 'ready' && !selected ? 'No agents are available to start a conversation.'

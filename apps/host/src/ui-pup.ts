@@ -1,3 +1,4 @@
+import { UiRefusal } from './ui-protocol.js';
 import { METRICS_CARD_LIMITS, parseMetricsCard } from '@openpane/contracts';
 import type { MetricsCardV1 } from '@openpane/contracts';
 import { boundedText, count, record } from '@openpane/contracts/decode';
@@ -7,14 +8,14 @@ export function resolvePupRange(from: string, to: string, nowMs: number): PupRan
   const now = Math.floor(nowMs / 1000);
   const resolve = (input: string): number => {
     if (input === 'now') return now;
-    if (/^\d+$/.test(input)) return count(Number(input));
+    if (/^\d+$/.test(input)) return Number(input);
     const relative = /^(\d+)([mhd])$/.exec(input);
-    if (!relative) throw new Error('Use now, whole epoch seconds, or a relative range such as 1h');
+    if (!relative) throw new UiRefusal('invalid-input', 'Use now, whole epoch seconds, or a relative range such as 1h');
     const amount = Number(relative[1]), unit = relative[2];
-    return count(now - amount * (unit === 'm' ? 60 : unit === 'h' ? 3600 : 86400));
+    return now - amount * (unit === 'm' ? 60 : unit === 'h' ? 3600 : 86400);
   };
   const fromSeconds = resolve(from), toSeconds = resolve(to);
-  if (fromSeconds >= toSeconds || toSeconds > Math.floor(Number.MAX_SAFE_INTEGER / 1000)) throw new Error('Invalid metrics query range');
+  if (!Number.isSafeInteger(fromSeconds) || !Number.isSafeInteger(toSeconds) || fromSeconds < 0 || fromSeconds >= toSeconds || toSeconds > Math.floor(Number.MAX_SAFE_INTEGER / 1000)) throw new UiRefusal('invalid-input', 'Invalid metrics query range');
   return { fromSeconds, toSeconds };
 }
 

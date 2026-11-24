@@ -1,3 +1,4 @@
+import type { PlacementPurpose } from './placement-port.js';
 import { carriedDraftText, copiedDraftPresent } from './draft-carry-records.js';
 import { ServiceError } from '@openpane/contracts/service';
 import { sameScope } from '@openpane/contracts';
@@ -10,9 +11,12 @@ import type { StoreBorrow, ViewBorrow } from './view-leases.js';
 import type { ApplicationSnapshot, ContinuationBoundary, ConversationContinuation, EarlierSegment, OpenConversation } from './application-controller.js';
 
 export const EARLIER_SEGMENT_LIMIT = 5;
+const carryKey = (scope: ConversationScope): string => JSON.stringify([scope.hostId, scope.conversationId]);
 const CONTINUATION_POLL_MS = 500, CONTINUATION_POLL_MAX_MS = 4_000, CONTINUATION_READ_ATTEMPTS = 6, CONTINUATION_MOVE_ATTEMPTS = 3, CHAIN_HOP_LIMIT = 64;
 
 interface ContinuationOwner {
+  readonly continuationCarries: Set<string>;
+  readonly pendingContinuationCarries: Map<Extract<ConversationOpenResult, { readonly kind: 'pending' }>, string>;
   readonly connection: ServiceConnection;
   readonly pool: { recovery(view: ViewBorrow, scope: ConversationScope): Promise<StoreBorrow> };
   readonly view: { readonly borrow: ViewBorrow } | null;
@@ -36,7 +40,9 @@ interface ContinuationRecord<Owner extends ContinuationOwner> {
   /** Check again returned no view. A click zeroes this with the budgets; settling a view clears it. */
   checkFailed: boolean;
   stopped: boolean;
-  explicitCarry: boolean;
+  successorPlaced: boolean;
+  follow: boolean;
+  purpose: PlacementPurpose;
   placement: Extract<ConversationOpenResult, { readonly kind: 'pending' }> | null;
 }
 interface ContinuationPort<Owner extends ContinuationOwner> {
@@ -46,7 +52,7 @@ interface ContinuationPort<Owner extends ContinuationOwner> {
   publish(update: Partial<Pick<ApplicationSnapshot, 'continuation' | 'catalog' | 'workspaces' | 'lastPlacement' | 'error' | 'savedDraftRecovery'>>): void;
   current<T>(owner: Owner, operation: Promise<T>): Promise<T>;
   recoverDraft(owner: Owner, scope: ConversationScope): Promise<StoreBorrow | null>;
-  install(owner: Owner, scope: ConversationScope, arrived?: ConversationContinuation['arrived']): Promise<ConversationOpenResult>;
+  install(owner: Owner, scope: ConversationScope, arrived: ConversationContinuation['arrived'], purpose: PlacementPurpose, carryEmptyOnly: boolean): Promise<ConversationOpenResult>;
   save(owner: Owner, next: SavedView): Promise<void>;
   requireSaved(owner: Owner): { readonly saved: SavedView };
   requireTarget(owner: Owner, target: OpenConversation): void;
@@ -131,32 +137,52 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
   }
   /** Background reads; a click owns the record while its action runs. */
   async function refreshContinuation(record: ContinuationRecord<Owner>): Promise<void> {
-    if (!liveContinuation(record) || record.action || record.placement) return;
+    if (!liveContinuation(record) || record.action || record.placement || record.successorPlaced || stalled(record)) return;
     let view: ContinuationView;
     try { view = await readContinuation(record.owner, record.target.scope); }
     catch {
-      if (!liveContinuation(record) || record.action || record.placement) return;
+      if (!liveContinuation(record) || record.action || record.placement || record.successorPlaced || stalled(record)) return;
       if (++record.failures < CONTINUATION_READ_ATTEMPTS) pollContinuation(record);
       else publishContinuation(record);
       return;
     }
-    if (!liveContinuation(record) || record.action || record.placement) return;
+    if (!liveContinuation(record) || record.action || record.placement || record.successorPlaced || stalled(record)) return;
     const successor = await settleContinuation(record, view);
-    if (!successor || !liveContinuation(record) || record.action || stalled(record)) return;
+    if (!successor || !liveContinuation(record) || record.action || record.placement || record.successorPlaced || stalled(record)) return;
+    if (!record.follow) return;
     if (port.busy()) pollContinuation(record);
     else void port.run(owner => moveToSuccessor(owner, record, successor));
   }
-  function watch(owner: Owner, target: OpenConversation, arrived: ConversationContinuation['arrived'] = null): void {
+  function watch(owner: Owner, target: OpenConversation, arrived: ConversationContinuation['arrived'] = null, follow = true): void {
     if (continuation && liveContinuation(continuation) && continuation.target.store === target.store) {
+      continuation.follow = follow;
       void refreshContinuation(continuation);
       return;
     }
     stop();
     const record: ContinuationRecord<Owner> = { owner, target, chain: [{ scope: target.scope, view: null }], arrived, earlier: [], action: null,
-      error: '', earlierError: '', timer: undefined, delay: CONTINUATION_POLL_MS, failures: 0, moves: 0, checkFailed: false, stopped: false, explicitCarry: false, placement: null };
+      error: '', earlierError: '', timer: undefined, delay: CONTINUATION_POLL_MS, failures: 0, moves: 0, checkFailed: false, stopped: false, successorPlaced: false, follow, purpose: 'passive', placement: null };
     continuation = record;
     publishContinuation(record);
     void refreshContinuation(record);
+  }
+  function consumeCarry(owner: Owner, key: string): void {
+    owner.continuationCarries.delete(key);
+    for (const [pending, sourceKey] of owner.pendingContinuationCarries) if (sourceKey === key) owner.pendingContinuationCarries.delete(pending);
+  }
+  /** Consent belongs to the living Session, including exact native receipts whose watcher has stopped. */
+  function carry(owner: Owner, source: ConversationScope) {
+    const key = carryKey(source), explicit = owner.continuationCarries.has(key);
+    const consume = () => consumeCarry(owner, key);
+    return {
+      explicit,
+      placed(result: ConversationOpenResult): void {
+        if (!explicit || !owner.continuationCarries.has(key)) return;
+        if (result.kind === 'pending') owner.pendingContinuationCarries.set(result, key);
+        else if (result.kind === 'detached') consume();
+      },
+      moved: consume,
+    };
   }
   /** Moves the unsent draft of a chat that is no longer open into the open composer. It is never sent. */
   async function moveDraft(owner: Owner, earlier: ConversationScope, onlyWhenEmpty = false): Promise<void> {
@@ -178,7 +204,9 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
         if (port.owner() !== owner || port.active()?.store !== next.store) return;
         if (onlyWhenEmpty && destination.text) { await recoverText(); return; }
         const merged = copiedDraftPresent(text, destination.text) ? destination.text : carriedDraftText(text, destination.text);
-        if (merged === destination.text || await next.store.replaceDraft(destination, merged)) { copied = true; break; }
+        const received = await next.store.transferDraft(destination, merged, { kind: 'receive-copy', source: earlier });
+        if (received === 'cancelled') return;
+        if (received === 'committed') { copied = true; break; }
       }
       if (!copied) { await recoverText(); return; }
       if (port.owner() === owner && port.active()?.store === next.store) {
@@ -195,22 +223,38 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     }
     return undefined;
   }
-  async function moveToSuccessor(owner: Owner, record: ContinuationRecord<Owner>, successor: ConversationScope, explicit = record.explicitCarry): Promise<void> {
+  function restoredRecord(record: ContinuationRecord<Owner>): ContinuationRecord<Owner> {
+    if (continuation !== record && continuation?.owner === record.owner && sameScope(continuation.target.scope, record.target.scope) && liveContinuation(continuation)) {
+      clearTimeout(continuation.timer);
+      clearTimeout(record.timer);
+      continuation = { ...record, target: continuation.target, stopped: false, timer: undefined };
+      return continuation;
+    }
+    return record;
+  }
+  async function moveToSuccessor(owner: Owner, record: ContinuationRecord<Owner>, successor: ConversationScope, purpose: PlacementPurpose = record.purpose): Promise<void> {
     if (!liveContinuation(record)) return;
     const from = record.target;
     record.action = 'move';
     publishContinuation(record);
     try {
       const newest = await newestSegment(owner, successor);
-      const opened = await port.install(owner, newest, 'continue');
+      const permission = carry(owner, from.scope);
+      const opened = await port.install(owner, newest, 'continue', purpose, !permission.explicit);
+      permission.placed(opened);
       port.publish({ lastPlacement: opened });
       if (opened.kind !== 'inline') {
+        record = restoredRecord(record);
+        if (!liveContinuation(record)) return;
+        clearTimeout(record.timer);
         record.placement = opened.kind === 'pending' ? opened : null;
-        record.action = null; record.stopped = opened.kind === 'detached';
+        record.checkFailed = opened.kind === 'refused';
+        record.action = null; record.successorPlaced = opened.kind === 'detached';
         record.error = opened.kind === 'detached' ? 'Continuation opened in its own window.' : opened.reason;
         publishContinuation(record); return;
       }
-      await moveDraft(owner, from.scope, !explicit);
+      await moveDraft(owner, from.scope, !permission.explicit);
+      permission.moved();
       await port.save(owner, { ...port.requireSaved(owner).saved, route: newest });
       const agent = from.agent;
       const fromAgent = 'kind' in agent && agent.providerAgentId !== null
@@ -227,7 +271,9 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
         return index < 0 ? [entry, ...rest] : rest.map((item, position) => position === index ? entry : item);
       }));
     } catch (cause) {
+      record = restoredRecord(record);
       if (liveContinuation(record)) {
+        clearTimeout(record.timer);
         record.action = null;
         if (++record.moves < CONTINUATION_MOVE_ATTEMPTS) pollContinuation(record);
         publishContinuation(record);
@@ -238,10 +284,12 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
   async function act(owner: Owner, target: OpenConversation, action: 'start' | 'check'): Promise<void> {
     port.requireTarget(owner, target);
     const record = continuation;
-    if (!record || !liveContinuation(record) || record.action || record.placement) return;
+    if (!record || !liveContinuation(record) || record.action || record.placement || record.successorPlaced) return;
     clearTimeout(record.timer);
     record.action = action;
-    if (action === 'start') record.explicitCarry = true;
+    record.follow = true;
+    record.purpose = 'explicit';
+    if (action === 'start') owner.continuationCarries.add(carryKey(target.scope));
     record.error = '';
     record.delay = CONTINUATION_POLL_MS;
     record.failures = 0;
@@ -303,21 +351,33 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
         publishContinuation(record);
         // A poll that fired during the load gave way to it without arming another. A move that started during the load keeps its action.
         const kind = record.chain[0]?.view?.successor?.kind;
-        if (record.action === null && (kind === 'starting' || kind === 'confirmed') && !stalled(record)) pollContinuation(record);
+        if (record.action === null && !record.placement && !record.successorPlaced && (kind === 'starting' || kind === 'confirmed') && !stalled(record)) pollContinuation(record);
       }
     }
   }
-  function settlePlacement(expected: Extract<ConversationOpenResult, { readonly kind: 'pending' }>, result: Exclude<ConversationOpenResult, { readonly kind: 'pending' }>): boolean {
+  function settlePlacement(owner: Owner, expected: Extract<ConversationOpenResult, { readonly kind: 'pending' }>, result: Exclude<ConversationOpenResult, { readonly kind: 'pending' }>): boolean {
+    const key = owner.pendingContinuationCarries.get(expected);
+    owner.pendingContinuationCarries.delete(expected);
+    if (key !== undefined && result.kind !== 'refused') consumeCarry(owner, key);
     const record = continuation;
-    if (!record || record.placement !== expected || !liveContinuation(record)) return false;
+    if (!record || record.placement !== expected || !liveContinuation(record)) return key !== undefined;
     record.placement = null;
-    record.stopped = result.kind !== 'refused';
+    record.checkFailed = result.kind === 'refused';
+    record.successorPlaced = result.kind !== 'refused';
+    if (record.successorPlaced) consumeCarry(owner, carryKey(record.target.scope));
     record.error = result.kind === 'refused' ? result.reason : 'Continuation opened in its assigned editor.';
     publishContinuation(record); return true;
   }
-  function trackPlacement(result: ConversationOpenResult): void {
-    if (result.kind !== 'pending' || !result.scope || !continuation?.placement?.scope || !sameScope(continuation.placement.scope, result.scope)) return;
-    continuation.placement = result;
+  function pendingPlacement() {
+    const record = continuation;
+    return record && liveContinuation(record) ? record.placement : null;
   }
-  return { stop, watch, newestSegment, moveDraft, act, readEarlier, settlePlacement, trackPlacement };
+  function trackPlacement(result: ConversationOpenResult): void {
+    const record = continuation;
+    if (result.kind !== 'pending' || !result.scope || !record?.placement?.scope || !sameScope(record.placement.scope, result.scope)) return;
+    const key = record.owner.pendingContinuationCarries.get(record.placement);
+    if (key !== undefined && liveContinuation(record)) record.owner.pendingContinuationCarries.set(result, key);
+    record.placement = result;
+  }
+  return { stop, watch, newestSegment, carry, moveDraft, act, readEarlier, settlePlacement, pendingPlacement, trackPlacement };
 }

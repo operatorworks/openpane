@@ -42,8 +42,10 @@ export interface DraftImageChange {
   readonly remove?: readonly string[];
 }
 export type DraftTransfer = { readonly source: ConversationScope; readonly requestId: string; readonly kind: 'receive' | 'release' }
+  | { readonly kind: 'receive-copy'; readonly source: ConversationScope }
   | { readonly kind: 'release-copy'; readonly target: ConversationScope; readonly targetViewId: string };
 export type DraftTransferCommit = { readonly source: ConversationScope; readonly requestId: string; readonly outcome: 'received' | 'cleared' | 'changed' }
+  | { readonly outcome: 'copy-received'; readonly source: ConversationScope }
   | { readonly outcome: 'copy-cleared'; readonly target: ConversationScope; readonly targetViewId: string; readonly text: string };
 /** Image bytes are stored once beside the records and must change in the same transaction as them. */
 export interface DraftStoragePort {
@@ -87,7 +89,7 @@ export interface ConversationStore<P> {
   replaceDraft(expected: { readonly text: string; readonly revision: number }, text: string): Promise<boolean>;
   transferDraft(expected: { readonly text: string; readonly revision: number }, text: string, transfer: DraftTransfer): Promise<'committed' | 'changed' | 'cancelled'>;
   /** Upload failures are reported through the view's image status, not by rejecting. */
-  selectImage(file: { readonly name: string; readonly bytes: Uint8Array }): Promise<void>;
+  selectImage(file: { readonly name: string; readonly bytes: Uint8Array | Promise<Uint8Array> }, signal?: { readonly aborted: boolean }): Promise<void>;
   retryImage(): Promise<void>;
   removeImage(): Promise<void>;
   send(text?: string): Promise<SubmitResult>;

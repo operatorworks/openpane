@@ -21,6 +21,13 @@ impl Geometry {
     }
 }
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UiRecoveryContext {
+    pub host_id: String,
+    pub profile_id: String,
+}
+
+#[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Command {
     Context {
@@ -33,6 +40,15 @@ pub enum Command {
         view_id: String,
         creation_agent_id: Option<String>,
         new_transition: bool,
+        intent_ref: Option<IntentRef>,
+    },
+    #[serde(rename_all = "camelCase")]
+    CancelReservation {
+        incarnation: String,
+        scope: Scope,
+        transition_id: String,
+        #[serde(default)]
+        previous: Option<Reservation>,
     },
     #[serde(rename_all = "camelCase")]
     Phase {
@@ -55,6 +71,10 @@ pub enum Command {
         incarnation: String,
         scope: Scope,
         geometry: Geometry,
+        #[serde(default, rename = "existingOnly")]
+        existing_only: bool,
+        #[serde(default, rename = "intentRef")]
+        intent_ref: Option<IntentRef>,
     },
     #[serde(rename_all = "camelCase")]
     Ready {
@@ -111,6 +131,7 @@ pub enum Command {
     ReadIntent {
         incarnation: String,
         request_id: String,
+        source_scope: Option<Scope>,
     },
     PendingIntents {
         incarnation: String,
@@ -140,8 +161,9 @@ pub enum Command {
         source_scope: Scope,
         request_id: String,
         scope: Scope,
-        view_id: String,
+        view_id: Option<String>,
         creation_agent_id: Option<String>,
+        current_binding: Option<Binding>,
     },
     #[serde(rename_all = "camelCase")]
     CompleteIntent {
@@ -150,8 +172,10 @@ pub enum Command {
         request_id: String,
         result: Value,
     },
+    #[serde(rename_all = "camelCase")]
     RestoreBuiltin {
         incarnation: String,
+        expected_context: Option<UiRecoveryContext>,
     },
     ReadRecovery {
         incarnation: String,
@@ -160,14 +184,18 @@ pub enum Command {
         incarnation: String,
         sequence: u64,
     },
+    #[serde(rename_all = "camelCase")]
     CloseCancelled {
         incarnation: String,
+        attempt_id: String,
     },
     ReadClose {
         incarnation: String,
     },
+    #[serde(rename_all = "camelCase")]
     CloseReady {
         incarnation: String,
+        attempt_id: String,
     },
 }
 #[derive(Deserialize)]

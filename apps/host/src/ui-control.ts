@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { sameScope } from '@openpane/contracts';
 import { UiFrames, uiFrame, uiResponse } from './ui-frames.js';
 import { record } from '@openpane/contracts/decode';
-import { parseUiRequest, UiRefusal } from './ui-protocol.js';
+import { parseUiRequest, UiRefusal, UiTimeout } from './ui-protocol.js';
 import type { UiRequest } from './ui-protocol.js';
 
 export function uiFailure(error: unknown): { readonly ok: false; readonly code: string; readonly error: string } {
@@ -103,11 +103,11 @@ export async function openUiQuerySession(path: string, request: unknown): Promis
   const input = uiFrame(request);
   const socket = createConnection(path), reader = new UiFrames(socket);
   const deadline = setTimeout(() => socket.destroy(), 45000);
-  let busy = false;
+  let busy = false, connected = false;
   const close = () => { clearTimeout(deadline); reader.close(); };
   void reader.ended.then(() => clearTimeout(deadline));
   try {
-    socket.once('connect', () => socket.write(input));
+    socket.once('connect', () => { connected = true; socket.write(input); });
     const first = uiResponse(await reader.next(10000));
     return { first, ended: reader.ended, alive: () => reader.alive,
       async request(request) {
@@ -116,15 +116,27 @@ export async function openUiQuerySession(path: string, request: unknown): Promis
         try { socket.write(uiFrame(request)); return uiResponse(await reader.next(10000)); }
         finally { busy = false; }
       }, close };
-  } catch (error) { close(); throw error; }
+  } catch (error) {
+    close();
+    const message = connected ? 'Query reservation is unconfirmed. Inspect display status before an explicit retry.' : 'UI host could not be reached. Check that this profile is running.';
+    if (error instanceof UiTimeout) throw new UiTimeout(message);
+    if (error instanceof UiRefusal) throw error;
+    throw new UiRefusal('unavailable', message);
+  }
 }
 export async function requestUi(path: string, request: unknown, timeoutMs = 10000): Promise<unknown> {
   checkSocket(path);
   const input = uiFrame(request);
   const socket = createConnection(path), reader = new UiFrames(socket);
-  const deadline = setTimeout(() => socket.destroy(), timeoutMs);
+  let connected = false;
+  const deadline = setTimeout(() => socket.destroy(new UiTimeout('UI response timed out')), timeoutMs);
   try {
-    socket.once('connect', () => socket.write(input));
+    socket.once('connect', () => { connected = true; socket.write(input); });
     return uiResponse(await reader.next(timeoutMs));
+  } catch (error) {
+    const message = connected ? 'UI response is unconfirmed. For a change, inspect its status and reuse the original request or publication ID.' : 'UI host could not be reached. Check that this profile is running, then retry the original request.';
+    if (error instanceof UiTimeout) throw new UiTimeout(message);
+    if (error instanceof UiRefusal) throw error;
+    throw new UiRefusal('unavailable', message);
   } finally { clearTimeout(deadline); reader.close(); }
 }

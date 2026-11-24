@@ -20,7 +20,8 @@ export async function ledgerService(t, { key = 'ledger-private-key-5e1a' } = {})
     for (const tail of tails) if (tail.room === room) tail.response.write(`${JSON.stringify({ at: [room.epoch, offset], entry })}\n`);
   };
   const server = createServer(async (request, response) => {
-    let text = ''; for await (const chunk of request) text += chunk;
+    const chunks = []; for await (const chunk of request) chunks.push(chunk);
+    const text = Buffer.concat(chunks).toString('utf8');
     const json = (status, body) => {
       if (lostRoute === request.url && status < 300) { response.destroy(); return; }
       response.writeHead(status, { 'content-type': 'application/json' }); response.end(JSON.stringify(body));
@@ -111,8 +112,9 @@ export async function ledgerService(t, { key = 'ledger-private-key-5e1a' } = {})
 
 async function* lines(body) {
   let buffered = '';
+  const decoder = new TextDecoder();
   for await (const bytes of body) {
-    buffered += Buffer.from(bytes).toString();
+    buffered += decoder.decode(bytes, { stream: true });
     for (let newline; (newline = buffered.indexOf('\n')) >= 0; buffered = buffered.slice(newline + 1)) yield JSON.parse(buffered.slice(0, newline));
   }
 }

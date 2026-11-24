@@ -1,7 +1,9 @@
+import { nativeEditorOriginKey, nativeEditorOriginMatches, parseNativeEditorOrigin } from './native-editor-origin-records.js';
 import { canonicalJson, parseEditorBinding, parseScope, sameScope } from '@openpane/contracts';
 import type { ConversationScope, EditorBinding } from '@openpane/contracts';
 import type { SavedView } from './view-state.js';
 import { decodeView } from './view-state.js';
+import { carryKey, carryPrefix, namedCarry } from './draft-carry-records.js';
 
 export const editorBindingKey = (scope: ConversationScope): IDBValidKey => ['editor-binding', scope.hostId, scope.conversationId];
 export const editorViewKey = (viewId: string): IDBValidKey => ['editor-view-binding', viewId];
@@ -40,6 +42,7 @@ export interface HandoffPlan {
   readonly transitionId: string;
   readonly targetLabel: string;
   readonly expectedBinding: EditorBinding | null;
+  readonly purpose?: 'passive';
   readonly assertCurrent?: () => void;
 }
 /** The caller owns the conversation lock and both distinct view locks, or reuses its already held source locks. */
@@ -51,12 +54,14 @@ export function transferEditor(db: IDBDatabase, plan: HandoffPlan, transaction =
     const targetDraftKey = ['draft', targetViewId, scope.hostId, scope.conversationId];
     const sourceViewKey = ['view', sourceViewId, scope.hostId], targetViewKey = ['view', targetViewId, scope.hostId];
     const requests = {
-      binding: store.get(editorBindingKey(scope)), sourceView: store.get(sourceViewKey), targetView: store.get(targetViewKey),
+      nativeOrigin: store.get(nativeEditorOriginKey(scope)), binding: store.get(editorBindingKey(scope)), sourceView: store.get(sourceViewKey), targetView: store.get(targetViewKey),
       sourceDraft: store.get(sourceDraftKey), targetDraft: store.get(targetDraftKey),
       imageKeys: store.getAllKeys(scopeImageRange(sourceViewId, scope)), images: store.getAll(scopeImageRange(sourceViewId, scope)),
       targetDrafts: store.count(IDBKeyRange.bound(['draft', targetViewId], ['draft', targetViewId, []], false, true)),
       targetImages: store.count(IDBKeyRange.bound(['draft-image', targetViewId], ['draft-image', targetViewId, []], false, true)),
       targetOwner: store.get(editorViewKey(targetViewId)), sourceOwner: store.get(editorViewKey(sourceViewId)),
+      carries: store.getAll(carryPrefix(['draft-carry', scope.hostId, scope.conversationId]), 1025),
+      carryKeys: store.getAllKeys(carryPrefix(['draft-carry', scope.hostId, scope.conversationId]), 1025),
     };
     let remaining = Object.keys(requests).length, result: EditorBinding | undefined, failure: unknown;
     const commit = () => {
@@ -71,12 +76,27 @@ export function transferEditor(db: IDBDatabase, plan: HandoffPlan, transaction =
         if (current?.kind === 'handoff-reserved') throw new Error('This editor is already reserved for another handoff');
         if (current && !sameScope(current.scope, scope)) throw new Error('Editor binding scope mismatch');
         if (canonicalJson(current) !== canonicalJson(plan.expectedBinding) || current && current.viewId !== sourceViewId) throw new Error('Editor binding changed before handoff');
+        if (plan.purpose === 'passive' && current?.kind === 'editing' && requests.nativeOrigin.result !== undefined
+          && nativeEditorOriginMatches(parseNativeEditorOrigin(requests.nativeOrigin.result, scope), current)) throw new Error('This saved native editor needs an explicit reopen.');
         plan.assertCurrent?.();
         const source = decodeView(requests.sourceView.result, scope.hostId);
         if (sourceViewId === targetViewId && (requests.targetDrafts.result > (requests.sourceDraft.result === undefined ? 0 : 1) || requests.targetImages.result !== requests.imageKeys.result.length || source.route && !sameScope(source.route, scope) || source.pendingCreation && !sameScope(source.pendingCreation.scope, scope))) throw new Error('This legacy view contains other conversations; use a distinct dedicated destination.');
         if (sourceViewId !== targetViewId) {
+          if (requests.carries.result.length > 1024) throw new Error('Draft carry history exceeds limits');
+          if (requests.carryKeys.result.length !== requests.carries.result.length) throw new Error('Draft carry identity changed');
+          const carries = requests.carries.result.map((value, index) => {
+            const key = requests.carryKeys.result[index];
+            if (!Array.isArray(key) || key.length !== 4 || key[0] !== 'draft-carry' || key[1] !== scope.hostId || key[2] !== scope.conversationId || typeof key[3] !== 'string') throw new Error('Invalid saved draft carry key');
+            const carry = namedCarry(value, scope, key[3]);
+            if (carry.kind === 'offered' || carry.kind === 'applied' || carry.kind === 'refused') {
+              if (!current) throw new Error('Draft carry has no authoritative source editor');
+              return { ...carry, sourceViewId: targetViewId };
+            }
+            return carry;
+          });
           const target = decodeView(requests.targetView.result, scope.hostId);
           if (target.route !== null || target.pendingCreation !== null || requests.targetDrafts.result !== 0 || requests.targetImages.result !== 0 || requests.targetOwner.result !== undefined) throw new Error('Target saved view already contains work; no records were moved');
+          for (const carry of carries) store.put(carry, carryKey(scope, carry.requestId));
           if (requests.sourceDraft.result !== undefined) store.put(requests.sourceDraft.result, targetDraftKey);
           store.delete(sourceDraftKey);
           const keys = requests.imageKeys.result, images = requests.images.result;
@@ -110,19 +130,23 @@ export interface EditorClaim {
   readonly label: string;
   readonly creation: { readonly agentId: string } | null;
   readonly transitionId: string | null;
+  readonly purpose?: 'passive';
 }
 /** The caller holds the conversation lock, then the assigned view lock. */
 export function activateEditor(db: IDBDatabase, claim: EditorClaim): Promise<EditorBinding> {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction('records', 'readwrite'), store = transaction.objectStore('records');
-    const binding = store.get(editorBindingKey(claim.scope)), view = store.get(['view', claim.viewId, claim.scope.hostId]), owner = store.get(editorViewKey(claim.viewId));
-    let remaining = 3, result: EditorBinding | undefined, failure: unknown;
+    const binding = store.get(editorBindingKey(claim.scope)), view = store.get(['view', claim.viewId, claim.scope.hostId]), owner = store.get(editorViewKey(claim.viewId)), nativeOrigin = store.get(nativeEditorOriginKey(claim.scope));
+    let remaining = 4, result: EditorBinding | undefined, failure: unknown;
     const commit = () => {
       try {
         const previous = binding.result === undefined ? null : parseEditorBinding(binding.result);
         if (owner.result !== undefined && !sameScope(parseScope(owner.result), claim.scope)) throw new Error('Assigned view belongs to another conversation');
         if (previous && (!sameScope(previous.scope, claim.scope) || previous.viewId !== claim.viewId || previous.kind === 'handoff-reserved' && (previous.targetLabel !== claim.label || previous.transitionId !== claim.transitionId))) throw new Error('The editor is reserved for another window');
         if (!previous && !claim.creation) throw new Error('This conversation has no committed editor binding');
+        const origin = previous?.kind === 'editing' && nativeOrigin.result !== undefined ? parseNativeEditorOrigin(nativeOrigin.result, claim.scope) : null;
+        const matchingOrigin = origin && previous?.kind === 'editing' && nativeEditorOriginMatches(origin, previous) ? origin : null;
+        if (claim.purpose === 'passive' && matchingOrigin) throw new Error('This saved native editor needs an explicit reopen.');
         const saved = decodeView(view.result, claim.scope.hostId);
         if (saved.route && !sameScope(saved.route, claim.scope) || saved.pendingCreation && !sameScope(saved.pendingCreation.scope, claim.scope)) throw new Error('Assigned view contains another conversation');
         if (claim.creation && saved.pendingCreation && saved.pendingCreation.agentId !== claim.creation.agentId) throw new Error('Saved creation belongs to a different agent');
@@ -131,10 +155,11 @@ export function activateEditor(db: IDBDatabase, claim: EditorClaim): Promise<Edi
         const pending = saved.pendingCreation ?? (claim.creation && saved.route === null ? { scope: claim.scope, agentId: claim.creation.agentId } : null);
         const nextSaved: SavedView = { version: 2, route: saved.route ?? (pending ? null : claim.scope), pendingCreation: pending };
         store.put(result, editorBindingKey(claim.scope)); store.put(claim.scope, editorViewKey(claim.viewId));
+        if (matchingOrigin?.label === claim.label) store.put({ ...matchingOrigin, revision: result.revision, writerGeneration: result.writerGeneration }, nativeEditorOriginKey(claim.scope));
         store.put(nextSaved, ['view', claim.viewId, claim.scope.hostId]);
       } catch (error) { failure = error; transaction.abort(); }
     };
-    binding.onsuccess = view.onsuccess = owner.onsuccess = () => { if (--remaining === 0) commit(); };
+    binding.onsuccess = view.onsuccess = owner.onsuccess = nativeOrigin.onsuccess = () => { if (--remaining === 0) commit(); };
     transaction.oncomplete = () => result ? resolve(result) : reject(new Error('Editor claim did not commit'));
     transaction.onabort = () => reject(failure ?? transaction.error ?? new Error('Editor claim interrupted'));
   });

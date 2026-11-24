@@ -28,7 +28,7 @@ export function uiEndpoint(store: UiStore | null, fault: string | null, observab
         const bytes = asset.mimeType === 'text/css' ? Buffer.from(scopeExperienceCss(bundle.stylesheet ?? '', bundle.digest, new Set(bundle.assets.map(asset => asset.name))))
           : artwork ? Buffer.from(artwork.base64, 'base64') : null;
         if (!bytes) throw new UiRefusal('not-found', 'Missing UI asset');
-        response.writeHead(200, { 'content-type': asset.mimeType, 'cache-control': 'private, max-age=31536000, immutable', 'x-content-type-options': 'nosniff', 'content-security-policy': CSP });
+        response.writeHead(200, { 'content-type': asset.mimeType, 'cache-control': asset.mimeType === 'text/css' ? 'private, no-cache' : 'private, max-age=31536000, immutable', 'x-content-type-options': 'nosniff', 'content-security-policy': CSP });
         response.end(request.method === 'HEAD' ? undefined : bytes); return;
       }
       if (request.url !== '/api/ui/v1' || request.method !== 'POST' || request.headersDistinct.origin?.length !== 1 || request.headers.origin !== origin || request.headersDistinct['content-type']?.length !== 1 || request.headers['content-type'] !== 'application/json') throw new Error('Origin or content type mismatch');

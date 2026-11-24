@@ -4,9 +4,9 @@ Code commit: `9ee400966e80fad34f54ecf04f6b9587b26118cf` on `codex/home-pane-them
 Base commit: `725ab8b53805a1e540bafe2b2d3925dc0f24463d`.
 Qualification date: November 23, 2026.
 
-The implementation and platform checks passed. Integration remains pending the
-predecessor's unfinished review gauntlet. This work does not close that review,
-push a branch, open a pull request, or merge either branch.
+The checks below passed for the code commit named above. They are historical
+evidence, not qualification of later commits. The current branch review and
+verification results are recorded separately by each review-gauntlet invocation.
 
 ## Implemented behavior
 

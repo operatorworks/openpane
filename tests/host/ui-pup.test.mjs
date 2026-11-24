@@ -60,7 +60,7 @@ async function isRunning(pid) {
     try {
       const stat = await readFile(`/proc/${pid}/stat`, 'utf8');
       return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0] !== 'Z';
-    } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+    } catch (error) { if (error.code === 'ENOENT' || error.code === 'ESRCH') return false; throw error; }
   }
   return true;
 }
@@ -92,7 +92,9 @@ test('cancelling a running pup drains a child that ignores the first termination
   while (!await access(ready).then(() => true, () => false)) { if (Date.now() > until) throw new Error('Pup fixture did not start'); await new Promise(resolve => setTimeout(resolve, 20)); }
   const pid = await processId(ready); controller.abort();
   assert.deepEqual(await running, { kind: 'failed', reason: 'cancelled' });
-  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+  const stoppedBy = Date.now() + 1500;
+  while (await isRunning(pid) && Date.now() < stoppedBy) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(await isRunning(pid), false, 'the cancelled Pup is no longer running');
 });
 test('pup version discovery accepts the qualified version line without exposing unexpected output', async t => {
   const f = await executable(t, "console.log('pup 2.0.1');");
@@ -124,13 +126,13 @@ test('the independent pup guardian drains a SIGTERM-resistant child after its CL
   const module = process.env.OPENPANE_PUP_REPRO_MODULE ?? new URL('../../apps/host/build/tsc/ui-pup-process.js', import.meta.url).href;
   const owner = spawn(process.execPath, ['--input-type=module', '-e', `import {runPup} from ${JSON.stringify(module)}; await runPup(${JSON.stringify(f.path)},[${JSON.stringify(ready)}],{signal:new AbortController().signal,timeoutMs:10000});`], { stdio: 'ignore' });
   let pid;
-  t.after(() => { if (owner.exitCode === null && owner.signalCode === null) owner.kill('SIGKILL'); if (pid) try { process.kill(-pid, 'SIGKILL'); } catch {} });
+  t.after(() => { if (owner.exitCode === null && owner.signalCode === null) owner.kill('SIGKILL'); if (pid) try { process.kill(pid, 'SIGKILL'); } catch {} });
   const until = Date.now() + 5000;
   while (!await access(ready).then(() => true, () => false)) { if (Date.now() > until) throw new Error('Supervised pup did not start'); await new Promise(resolve => setTimeout(resolve, 20)); }
   pid = await processId(ready);
   const exit = once(owner, 'exit'); owner.kill('SIGKILL'); await exit;
   const drained = Date.now() + 3500;
-  while (Date.now() < drained) { if (!await isRunning(pid)) return; await new Promise(resolve => setTimeout(resolve, 20)); }
+  while (Date.now() < drained) { if (!await isRunning(pid)) { pid = undefined; return; } await new Promise(resolve => setTimeout(resolve, 20)); }
   assert.fail('Pup survived the death of its publishing CLI');
 });
 test('an expired execution grant cannot start a late pup process', async t => {
@@ -158,7 +160,7 @@ for (const exitCode of [0, 7]) test(`ordinary pup exit ${exitCode} drains a help
   assert.equal(result.kind, exitCode === 0 ? 'completed' : 'failed');
   const deadline = Date.now() + 1000;
   while (Date.now() < deadline) {
-    if (!await isRunning(pid)) return;
+    if (!await isRunning(pid)) { pid = undefined; return; }
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   assert.fail('Pup helper survived a completed query attempt');
@@ -175,7 +177,7 @@ for (const exitCode of [0, 7]) test(`ordinary pup exit ${exitCode} drains a help
   assert.deepEqual(result, exitCode === 0 ? { kind: 'completed', stdout: 'complete result' } : { kind: 'failed', reason: 'pup-failed' });
   const deadline = Date.now() + 1000;
   while (Date.now() < deadline) {
-    if (!await isRunning(pid)) return;
+    if (!await isRunning(pid)) { pid = undefined; return; }
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   assert.fail('Pup helper survived a completed query attempt');
@@ -214,4 +216,172 @@ test('grouped labels beyond the contract bound refuse instead of truncating seri
   raw.series[0].display_name = 'a'.repeat(150); raw.series[0].scope = 'host:' + 'b'.repeat(100);
   assert.throws(() => normalize(raw), /text|label|200/i);
   assert.deepEqual(raw.series[0].pointlist, source.series[0].pointlist);
+});
+
+
+test('the pup deadline covers inherited output while a synchronized detached helper still holds it open', { timeout: 15000, skip: process.platform === 'win32' }, async t => {
+  const f = await executable(t, `const {spawn}=require('node:child_process');
+    const helper=spawn(process.execPath,['-e',${JSON.stringify(`const fs=require('node:fs');
+      const prefix=process.argv[1];
+      fs.writeFileSync(prefix+'.ready.tmp',String(process.pid));fs.renameSync(prefix+'.ready.tmp',prefix+'.ready');
+      process.stdout.write('{}');process.send('ready');
+      const close=()=>{fs.writeFileSync(prefix+'.closed','closed');process.exit(0);};
+      setInterval(()=>{if(fs.existsSync(prefix+'.release'))close();},10);setTimeout(close,12000);`)},process.argv[2]],{detached:true,stdio:['ignore','inherit','inherit','ipc']});
+    helper.once('message',()=>{helper.disconnect();helper.unref();process.exit(0);});`);
+  const prefix = join(f.directory, 'held-output'); let pid;
+  t.after(async () => {
+    await writeFile(prefix+'.release', 'released').catch(() => {});
+    if (pid) try { process.kill(pid, 'SIGKILL'); } catch {}
+  });
+  const outcome = await runPup(f.path, [prefix], { signal: new AbortController().signal, timeoutMs: 2000 });
+  pid = await processId(prefix+'.ready');
+  assert.deepEqual(outcome, { kind: 'failed', reason: 'pup-timeout' });
+  assert.equal(await isRunning(pid), true, 'the helper is still running when the deadline ends the call');
+  await assert.rejects(access(prefix+'.closed'), { code: 'ENOENT' });
+  await writeFile(prefix+'.release', 'released');
+  const until = Date.now()+1500;
+  while (await isRunning(pid) && Date.now()<until) await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(await isRunning(pid), false); pid = undefined;
+});
+
+async function observeGuardian(t, holdLaunch = false) {
+  const childProcess = (await import('node:child_process')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const originalSpawn = childProcess.spawn, announced = Promise.withResolvers();
+  let guardian, launcherPid, ownership = '';
+  const mock = t.mock.method(childProcess, 'spawn', (...args) => {
+    const child = originalSpawn(...args);
+    if (args[1]?.[0] === '-e' && args[1][1].includes('const failures')) {
+      guardian = child;
+      child.stdio[3]?.on('data', chunk => {
+        ownership += chunk.toString('ascii');
+        if (/^\d+\n$/.test(ownership) && Number.isSafeInteger(Number(ownership)) && Number(ownership)>0) launcherPid = Number(ownership);
+      });
+      if (holdLaunch) {
+        const write = child.stdin.write.bind(child.stdin);
+        child.stdin.write = (value, ...rest) => {
+          if (value === 'start') { announced.resolve(); return true; }
+          return write(value, ...rest);
+        };
+      }
+    }
+    return child;
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    mock.mock.restore(); syncBuiltinESMExports();
+    if (guardian && guardian.exitCode === null && guardian.signalCode === null) guardian.kill('SIGKILL');
+    if (launcherPid) try { process.kill(-launcherPid, 'SIGKILL'); } catch {}
+  });
+  return { get guardian() { return guardian; }, announced: announced.promise, async drained() {
+    assert.ok(Number.isSafeInteger(launcherPid) && launcherPid>0, 'the owned launcher was announced');
+    const deadline=Date.now()+1500;
+    while(await isRunning(launcherPid) && Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,20));
+    assert.equal(await isRunning(launcherPid), false, 'the announced launcher is drained'); launcherPid=undefined;
+  } };
+}
+
+for (const boundary of ['running', 'before-launch']) test(`guardian death at ${boundary} cannot leave an unowned Pup attempt`, { timeout: 12000, skip: process.platform === 'win32' }, async t => {
+  const observed = await observeGuardian(t, boundary === 'before-launch');
+  const f = await executable(t, `const fs=require('node:fs');fs.writeFileSync(process.argv[2]+'.tmp',String(process.pid));fs.renameSync(process.argv[2]+'.tmp',process.argv[2]);setTimeout(()=>process.exit(0),8000);`);
+  const ready = join(f.directory, 'started'); let pupPid;
+  const running = runPup(f.path, [ready], { signal: new AbortController().signal, timeoutMs: 10000 });
+  if (boundary === 'running') {
+    const deadline = Date.now() + 4000;
+    while (!await access(ready).then(() => true, () => false)) {
+      if (Date.now() > deadline) throw new Error('Pup fixture did not start');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    pupPid = await processId(ready);
+  } else {
+    let timer;
+    try { await Promise.race([observed.announced, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Launcher ownership was not announced')), 4000); })]); }
+    finally { clearTimeout(timer); }
+    await assert.rejects(access(ready), { code: 'ENOENT' });
+  }
+  assert.ok(Number.isSafeInteger(observed.guardian?.pid) && observed.guardian.pid > 0);
+  observed.guardian.kill('SIGKILL');
+  assert.deepEqual(await running, { kind: 'failed', reason: 'pup-failed' });
+  await observed.drained();
+  if (boundary === 'before-launch') {
+    await new Promise(resolve=>setTimeout(resolve,100));
+    await assert.rejects(access(ready), { code: 'ENOENT' });
+  } else assert.equal(await isRunning(pupPid), false, 'the owned process group is drained before retry can be offered');
+});
+
+test('cancellation lets Pup finish its bounded graceful shutdown before escalation', {timeout:10000, skip:process.platform==='win32'},async t=>{
+  const observed=await observeGuardian(t), controller=new AbortController();
+  const f=await executable(t,`const fs=require('node:fs'),prefix=process.argv[2];
+    process.on('SIGTERM',()=>setTimeout(()=>{fs.writeFileSync(prefix+'.grace','finished');process.exit(0);},500));
+    fs.writeFileSync(prefix+'.ready',String(process.pid));setTimeout(()=>process.exit(0),8000);`);
+  const prefix=join(f.directory,'graceful');
+  const running=runPup(f.path,[prefix],{signal:controller.signal,timeoutMs:8000});
+  const deadline=Date.now()+4000;
+  while(!await access(prefix+'.ready').then(()=>true,()=>false)){assert.ok(Date.now()<deadline,'Pup started');await new Promise(resolve=>setTimeout(resolve,20));}
+  controller.abort();assert.deepEqual(await running,{kind:'failed',reason:'cancelled'});
+  assert.equal(await readFile(prefix+'.grace','utf8'),'finished');await observed.drained();
+});
+
+for(const boundary of ['deadline','cancel'])test(`the owner bounds a stopped guardian at ${boundary}`,{timeout:10000,skip:process.platform==='win32'},async t=>{
+  const observed=await observeGuardian(t),controller=new AbortController();
+  const f=await executable(t,`const fs=require('node:fs');fs.writeFileSync(process.argv[2]+'.tmp',String(process.pid));fs.renameSync(process.argv[2]+'.tmp',process.argv[2]);setTimeout(()=>process.exit(0),8000);`);
+  const ready=join(f.directory,'started');
+  const running=runPup(f.path,[ready],{signal:controller.signal,timeoutMs:boundary==='deadline'?1200:8000});
+  const deadline=Date.now()+4000;
+  while(!await access(ready).then(()=>true,()=>false)){assert.ok(Date.now()<deadline,'Pup started');await new Promise(resolve=>setTimeout(resolve,20));}
+  const pupPid=await processId(ready);assert.equal(observed.guardian.kill('SIGSTOP'),true,'the live guardian received the stop signal');if(boundary==='cancel')controller.abort();
+  let timer;
+  try{const outcome=await Promise.race([running,new Promise(resolve=>{timer=setTimeout(()=>resolve('unbounded'),4000);})]);
+    assert.deepEqual(outcome,{kind:'failed',reason:boundary==='deadline'?'pup-timeout':'cancelled'});
+  }finally{clearTimeout(timer);}
+  await observed.drained();
+  const stoppedBy=Date.now()+1500;
+  while(await isRunning(pupPid) && Date.now()<stoppedBy)await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(await isRunning(pupPid),false,'the stopped guardian cannot leave its Pup running');
+});
+
+test('a suspended authorized launcher cannot start Pup after its execution deadline', { timeout: 15000, skip: process.platform === 'win32' }, async t => {
+  const childProcess = (await import('node:child_process')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const f = await executable(t, "require('node:fs').writeFileSync(process.argv[2],'started');process.stdout.write('{}');");
+  const stopped = join(f.directory, 'launcher-stopped'), started = join(f.directory, 'unexpected-start');
+  const originalSpawn = childProcess.spawn;
+  let guardian, launcherPid, ownership = '';
+  const mock = t.mock.method(childProcess, 'spawn', (...args) => {
+    if (args[1]?.[0] === '-e' && args[1][1].includes('const failures')) {
+      const config = JSON.parse(args[1][2]);
+      config.launcher = config.launcher.replace('  started = true;', `  const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(stopped+'.tmp')},String(process.pid));fs.renameSync(${JSON.stringify(stopped+'.tmp')},${JSON.stringify(stopped)});process.kill(process.pid,'SIGSTOP');\n  started = true;`);
+      args[1] = [...args[1].slice(0, 2), JSON.stringify(config)];
+      guardian = originalSpawn(...args);
+      guardian.stdio[3].on('data', chunk => {
+        ownership += chunk.toString('ascii');
+        if (/^\d+\n$/.test(ownership) && Number.isSafeInteger(Number(ownership)) && Number(ownership) > 0) launcherPid = Number(ownership);
+      });
+      return guardian;
+    }
+    return originalSpawn(...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    mock.mock.restore(); syncBuiltinESMExports();
+    if (guardian && guardian.exitCode === null && guardian.signalCode === null) guardian.kill('SIGKILL');
+    if (launcherPid) try { process.kill(-launcherPid, 'SIGKILL'); } catch {}
+  });
+  const deadlineMs = Date.now() + 4000;
+  const running = runPup(f.path, [started], { signal: new AbortController().signal, deadlineMs });
+  const setupDeadline = Date.now() + 5000;
+  while (!await access(stopped).then(() => true, () => false)) {
+    assert.ok(Date.now() < setupDeadline, 'the authorized launcher reached its suspended start callback');
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.equal(await processId(stopped), launcherPid, 'the stopped process is the announced owned launcher');
+  assert.ok(Date.now() < deadlineMs, 'the launcher stopped before execution expired');
+  await new Promise(resolve => setTimeout(resolve, Math.max(0, deadlineMs + 150 - Date.now())));
+  assert.ok(Date.now() < deadlineMs + 1200, 'resume stays inside the bounded termination grace');
+  process.kill(launcherPid, 'SIGCONT');
+  assert.deepEqual(await running, { kind: 'failed', reason: 'pup-timeout' });
+  const until = Date.now() + 1500;
+  while (await isRunning(launcherPid) && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(await isRunning(launcherPid), false); launcherPid = undefined;
+  await assert.rejects(access(started), { code: 'ENOENT' });
 });

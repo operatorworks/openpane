@@ -110,7 +110,7 @@ interface BoundProvider {
   execute(original: ProviderCreation, fresh: boolean, beforeEffect: () => void): Promise<CreationObservation>;
   readPermissions(original: StoredCreation): Promise<ConversationPermissions>;
   captureCommand(original: StoredCreation, action: ProviderAction, operationId: string): ProviderTarget;
-  executeCommand(capture: ProviderCapture, fresh: boolean, beforeEffect: () => void): Promise<ProviderObservation>;
+  executeCommand(capture: ProviderCapture, fresh: boolean, beforeEffect: () => void, onEnter?: () => void): Promise<ProviderObservation>;
   observe(original: StoredCreation, store: ProviderStreamStore, freshSnapshot?: boolean): Promise<ProviderStream>;
   closure(original: StoredCreation, store: ProviderStreamStore): ConversationClosure | null;
   continuation(original: StoredCreation): ContinuationOutcome | null;
@@ -403,7 +403,7 @@ function bindProvider<M extends ProviderModel, I extends string>(id: string, bac
             choice: providerReference(action.choice, binding, original.installation, 'choice') });
       }
     },
-    async executeCommand(capture, fresh, beforeEffect) {
+    async executeCommand(capture, fresh, beforeEffect, onEnter) {
       const original = capture.target;
       let entered = false;
       const authorize = () => {
@@ -425,6 +425,7 @@ function bindProvider<M extends ProviderModel, I extends string>(id: string, bac
           beforeEffect();
           authorize();
           entered = true;
+          onEnter?.();
           const result = await (fresh ? manager.revoke(operation) : manager.reconcileRevoke(operation));
           authorize();
           return providerOutcome(result, capture, fresh);
@@ -448,6 +449,7 @@ function bindProvider<M extends ProviderModel, I extends string>(id: string, bac
         beforeEffect();
         authorize();
         entered = true;
+        onEnter?.();
         const result = await (fresh ? connected.submit(operation) : connected.reconcileCommand(operation));
         authorize();
         return providerOutcome(result, capture, fresh);
@@ -816,7 +818,7 @@ export function createProviderRegistry(extensions: readonly ProviderExtension[],
         return stream;
       });
     },
-    executeCommand(capture: MatchedProviderCommand, fresh: boolean, beforeEffect: () => void): Promise<ProviderObservation> {
+    executeCommand(capture: MatchedProviderCommand, fresh: boolean, beforeEffect: () => void, onEnter?: () => void): Promise<ProviderObservation> {
       return track(async () => {
         if (phase !== 'active') return fresh ? { kind: 'not-dispatched', reason: 'provider-local-refusal' } : { kind: 'outcome-unknown' };
         const original = capture.target;
@@ -825,7 +827,7 @@ export function createProviderRegistry(extensions: readonly ProviderExtension[],
         return binding.executeCommand(capture, fresh, () => {
           if (capture.command.version === 2 && phase !== 'active') throw new Error('Original AG-UI provider unavailable');
           beforeEffect();
-        });
+        }, onEnter);
       });
     },
     execute(original: ProviderCreation, fresh: boolean, beforeEffect: () => void): Promise<CreationObservation> {

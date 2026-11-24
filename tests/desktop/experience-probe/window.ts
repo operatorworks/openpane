@@ -28,31 +28,73 @@ async function run() {
     for (let slot = 0; slot < 8; slot++) opened.push(await command({ kind: 'open', slot }));
     const duplicate = await command({ kind: 'open', slot: 0 });
     await report('open-results', { opened, duplicate });
-    for (;;) {
-      const state = await (await fetch('/state')).json();
-      if (state.childrenReady === 8) break;
-      await sleep(100);
+    for (let slot = 0; slot < 8; slot++) {
+      const focused = await command({ kind: 'open', slot });
+      await report('startup-foreground', { slot, focused });
+      const deadline = performance.now() + 15000;
+      while (!(await (await fetch('/state')).json()).readyCounts[`probe-chat-${slot}`]) {
+        if (performance.now() >= deadline) throw new Error(`Foreground child ${slot} did not become ready`);
+        await sleep(100);
+      }
     }
+    const beforeRecovery = await (await fetch('/state')).json();
     await command({ kind: 'close', slot: 0 });
     await sleep(500);
     await command({ kind: 'open', slot: 0 });
+    const recoveryDeadline = performance.now() + 15000;
     for (;;) {
-      if ((await (await fetch('/state')).json()).recovered) break;
+      const recovered = await (await fetch('/state')).json();
+      if (recovered.readyCounts['probe-chat-0'] > beforeRecovery.readyCounts['probe-chat-0'] && recovered.recoveredCounts['probe-chat-0'] > (beforeRecovery.recoveredCounts['probe-chat-0'] ?? 0)) break;
+      if (performance.now() >= recoveryDeadline) throw new Error('Reopened foreground child did not recover its own saved draft');
       await sleep(100);
     }
     release(); await held;
     await command({ kind: 'minimize' });
-    await report('minimized', true);
+    const minimizeDeadline = performance.now() + 3000;
+    let minimized = await command<{ minimized: boolean; sampleAtMs: number }>({ kind: 'minimized' });
+    while (!minimized.minimized) {
+      if (performance.now() >= minimizeDeadline) throw new Error('Main window did not minimize');
+      await sleep(50);
+      minimized = await command<{ minimized: boolean; sampleAtMs: number }>({ kind: 'minimized' });
+    }
+    await report('minimized', minimized);
+    const checkMinimized = async () => {
+      const state = await command<{ minimized: boolean; sampleAtMs: number }>({ kind: 'minimized' });
+      await report('minimized-state', state);
+      if (!state.minimized) throw new Error('Main window was restored during the relay qualification');
+    };
+    await checkMinimized();
     const deadline = performance.now() + 310000;
-    for (let generation = 1; performance.now() < deadline; generation++) {
+    let generation = 0;
+    while (performance.now() < deadline) {
+      generation++;
+      await checkMinimized();
       const start = performance.now();
       await (await fetch(`/snapshot?generation=${generation}`)).json();
       await command({ kind: 'publish', generation });
       await report('relay', { generation, elapsedMs: performance.now() - start });
+      await checkMinimized();
       await sleep(2000);
     }
+    await checkMinimized();
+    await report('relay-frozen', { generation });
+    for (let slot = 0; slot < 8; slot++) {
+      await checkMinimized();
+      const focused = await command({ kind: 'open', slot });
+      await report('final-foreground', { slot, generation, focused });
+      await command({ kind: 'publish', generation });
+      const deadline = performance.now() + 15000;
+      for (;;) {
+        await checkMinimized();
+        const state = await (await fetch('/state')).json();
+        if (state.frozenGeneration === generation && state.finalPainted.includes(`probe-chat-${slot}`)) break;
+        if (performance.now() >= deadline) throw new Error(`Foreground child ${slot} did not paint frozen generation ${generation}`);
+        await sleep(100);
+      }
+    }
+    await checkMinimized();
     await report('main-complete', true);
-    output.textContent = 'Main relay completed while minimized.';
+    output.textContent = 'Main relay completed with minimized state checked at every relay.';
     database.close();
   } else {
     const unavailable = await navigator.locks.request('openpane-probe-conversation', { ifAvailable: true }, lock => lock === null);
@@ -70,15 +112,19 @@ async function run() {
       catch (error) { if (String(error).includes('Child accessed')) throw error; }
       try { await invoke('native_access', { command: { kind: 'connect' } }); throw new Error('Child accessed native broker'); }
       catch (error) { if (String(error).includes('Child accessed')) throw error; }
+      let readAttempt = 0;
       const read = async () => {
+        const attempt = ++readAttempt;
         const state = await command<{ generation: number; slot: number }>({ kind: 'read' });
         if (state.slot !== context.slot) throw new Error('Foreign scoped relay');
-        output.textContent = `View ${key}\n${await get(database, key)}\nPainted generation ${state.generation}`;
+        const draft = await get(database, key);
+        if (attempt !== readAttempt) return;
+        output.textContent = `View ${key}\n${draft}\nPainted generation ${state.generation}`;
         await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-        if (document.visibilityState !== 'visible') return;
+        if (attempt !== readAttempt || document.visibilityState !== 'visible') return;
         await report('paint', { ...context, generation: state.generation });
       };
-      await listen('probe-wakeup', () => { void read().catch(error => report('failure', String(error))); });
+      await listen('probe-wakeup', () => { void read().catch(error => report('failure', String(error))); }, { target: { kind: 'WebviewWindow', label: context.label } });
       await read();
       const controls = document.querySelector('section')!;
       for (const action of ['send', 'stop', 'approve']) {
