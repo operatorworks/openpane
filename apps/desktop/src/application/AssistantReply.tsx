@@ -18,10 +18,10 @@ function CodeBlock({ code }: { readonly code: string }) {
       setCopy({ kind: 'failed' });
     }
   }
-  return <div className="reply-code-block">
+  return <div className="reply-code-block" data-openpane-part="code-block">
     <div className="reply-code-actions">
-      <button type="button" disabled={copy.kind === 'pending'} onClick={() => void copyCode()}>Copy code</button>
-      <span role="status">{copy.kind === 'copied' ? 'Copied.' : copy.kind === 'failed' ? 'Copy unavailable. Select the code to copy.' : copy.kind === 'pending' ? 'Copying…' : ''}</span>
+      <button data-openpane-part="button" type="button" disabled={copy.kind === 'pending'} onClick={() => void copyCode()}>Copy code</button>
+      <span data-openpane-part="status" role="status">{copy.kind === 'copied' ? 'Copied.' : copy.kind === 'failed' ? 'Copy unavailable. Select the code to copy.' : copy.kind === 'pending' ? 'Copying…' : ''}</span>
     </div>
     <pre><code>{code}</code></pre>
   </div>;
@@ -45,5 +45,5 @@ const components = {
 } satisfies Components;
 
 export const AssistantReply = memo(function AssistantReply({ text }: { readonly text: string }) {
-  return <div className="assistant-reply"><Markdown components={components}>{text}</Markdown></div>;
+  return <div className="assistant-reply" data-openpane-part="message-text" data-openpane-state="remote"><Markdown components={components}>{text}</Markdown></div>;
 });

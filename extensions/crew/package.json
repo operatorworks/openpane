@@ -35,7 +35,7 @@
     "extension": {
       "namespace": "crew",
       "trust": "full",
-      "sdkVersion": "0.13.0",
+      "sdkVersion": "0.14.0",
       "entries": [
         {
           "kind": "server",

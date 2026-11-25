@@ -198,7 +198,7 @@ export function openLocalHost<E, P>(options: LocalHostOptions<E, P>): LocalHost<
     if (stored.observation?.kind === 'conclusive' && isQuarantined(stored)) return store.settle(scope, id, stored.observation, observations);
     if (stored.observation?.kind === 'conclusive' || stored.observation?.kind === 'not-dispatched') return stored.receipt;
     const observed = 'kind' in stored
-      ? await options.providers?.executeCommand(stored, false, () => { effectFence(stored, assertCallerAuthority); admitted(); }) ?? { kind: 'outcome-unknown' } as const
+      ? await options.providers?.executeCommand(stored, false, () => effectFence(stored, assertCallerAuthority), admitted) ?? { kind: 'outcome-unknown' } as const
       : await reconcileNative(stored, driverFor(stored.target.installation));
     if (observed.kind === 'outcome-unknown' && (isOffered(stored) || dispatching.has(commandKey(scope, id)))) {
       const current = store.command(scope, id);
@@ -208,22 +208,36 @@ export function openLocalHost<E, P>(options: LocalHostOptions<E, P>): LocalHost<
     return store.settle(scope, id, observed, observations);
   });
   type ReadOrigin = 'run-end' | 'caller';
-  interface StatusRead { readonly origin: ReadOrigin; readonly receipt: Promise<Receipt> }
+  interface StatusRead { readonly origin: ReadOrigin; readonly receipt: Promise<Receipt>; readonly admission: { kind: 'pending' | 'requester-refused' | 'entered' } }
   // Overlapping reads of one provider command share one status read. An observed run end is not settlement evidence; it
   // triggers one status read per command per host process. Only a run-end read the provider admitted spends that attempt,
   // so a run end seen while the provider is being replaced, or met by a caller read that may predate it, is read again.
   const statusReads = new Map<string, StatusRead>(), runEndReads = new Set<string>();
-  const reconcileStored = (stored: StoredCommand, origin: ReadOrigin, assertCallerAuthority: () => void): Promise<Receipt> => {
+  const reconcileStored = async (stored: StoredCommand, origin: ReadOrigin, assertCallerAuthority: () => void): Promise<Receipt> => {
     const settled = stored.receipt.state.kind === 'abandoned' || stored.observation?.kind === 'conclusive' || stored.observation?.kind === 'not-dispatched';
     if (!('kind' in stored) || settled) return readOnce(stored, assertCallerAuthority, () => {});
     const key = commandKey(stored.command.scope, stored.command.clientCommandId);
     const running = statusReads.get(key);
     if (running) {
-      try { effectFence(stored, assertCallerAuthority); } catch (error) { return Promise.reject(error); }
-      return running.receipt;
+      effectFence(stored, assertCallerAuthority);
+      const needsOwnRead = () => origin === 'caller' && (running.admission.kind === 'requester-refused' ||
+        running.origin === 'run-end' && running.admission.kind !== 'entered');
+      try {
+        const receipt = await running.receipt;
+        if (!needsOwnRead()) return receipt;
+      } catch (error) { if (!needsOwnRead()) throw error; }
+      const current = store.command(stored.command.scope, stored.command.clientCommandId);
+      if (!current) throw new Error('Unknown command');
+      effectFence(current, assertCallerAuthority);
+      return reconcileStored(current, origin, assertCallerAuthority);
     }
-    const receipt = readOnce(stored, assertCallerAuthority, origin === 'run-end' ? () => runEndReads.add(key) : () => {});
-    statusReads.set(key, { origin, receipt });
+    const admission: StatusRead['admission'] = { kind: 'pending' };
+    const assertRequester = () => {
+      try { assertCallerAuthority(); }
+      catch (error) { admission.kind = 'requester-refused'; throw error; }
+    };
+    const receipt = readOnce(stored, assertRequester, () => { admission.kind = 'entered'; if (origin === 'run-end') runEndReads.add(key); });
+    statusReads.set(key, { origin, receipt, admission });
     const forget = () => { if (statusReads.get(key)?.receipt === receipt) statusReads.delete(key); };
     void receipt.then(forget, forget);
     return receipt;

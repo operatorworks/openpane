@@ -37,9 +37,10 @@ function Workbench() {
           <Text variant="muted">Light and dark palettes, readable text, and keyboard focus are part of the default.</Text>
         </Surface>
         <section aria-label="Module override" className="override-example">
-          <ThemeScope colors={{ accent: '#6d28d9', onAccent: '#ffffff' }} data-testid="override">
+          <ThemeScope treatments={{ shadow: 'bevel' }} typography={{ body: { size: 13, lineHeight: 1.4 }, muted: { weight: 700 }, code: { weight: 700 } }} colors={{ accent: '#6d28d9', onAccent: '#ffffff' }} data-testid="override">
             <Surface><Text variant="label">A module can have its own accent.</Text><Text variant="muted">The surrounding conversation keeps its theme.</Text>
               <Button data-testid="module-button">Module action</Button>
+              <Text variant="muted" data-testid="weighted-muted">Weighted muted text</Text><Text variant="code" data-testid="weighted-code">Weighted code text</Text>
             </Surface>
           </ThemeScope>
         </section>

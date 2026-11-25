@@ -1,0 +1,25 @@
+import { useEffect, useSyncExternalStore } from 'react';
+import { BrowserApplication } from '../shell/BrowserApplication.js';
+import { ArtifactIdentity } from './ArtifactIdentity.js';
+import { ChatWindowApplication } from './ChatWindowApplication.js';
+import { ExperienceScope } from './ExperienceScope.js';
+import { PersonalizationProvider } from './use-personalization.js';
+import { DesktopCustomizationProvider } from './DesktopCustomizations.js';
+import { WindowRecoveryControls } from './WindowRecoveryControls.js';
+import type { WindowRuntime } from './window-runtime.js';
+
+export function WindowApplication({ runtime }: { readonly runtime: WindowRuntime }) {
+  const state = useSyncExternalStore(runtime.subscribe, runtime.getSnapshot, runtime.getSnapshot);
+  useEffect(() => {
+    runtime.start();
+    const close = () => runtime.close();
+    const resume = (event: PageTransitionEvent) => { if (event.persisted) window.location.reload(); };
+    window.addEventListener('pagehide', close); window.addEventListener('pageshow', resume);
+    return () => { window.removeEventListener('pagehide', close); window.removeEventListener('pageshow', resume); };
+  }, [runtime]);
+  const notice = state.placementNotice ?? state.capabilityNotice;
+  return <ExperienceScope connection={runtime.ui}><PersonalizationProvider><DesktopCustomizationProvider>
+    {runtime.context.role === 'chat' ? <ChatWindowApplication suspended={state.closing} controller={runtime.controller} notice={notice} recovery={<>{state.canRetryCreation && <button data-openpane-part="button" type="button" onClick={() => void runtime.retryAssignedCreation()}>Retry assigned creation</button>}<WindowRecoveryControls runtime={runtime} recovery={state.recovery} /></>} />
+      : <BrowserApplication suspended={state.closing} artifact={<ArtifactIdentity />} controller={runtime.controller} managedLifecycle windowRecovery={<WindowRecoveryControls runtime={runtime} recovery={state.recovery} />} catalogOnly={state.catalogOnly} placementNotice={notice} />}
+  </DesktopCustomizationProvider></PersonalizationProvider></ExperienceScope>;
+}

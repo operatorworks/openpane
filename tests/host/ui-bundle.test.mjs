@@ -1,0 +1,139 @@
+import { png } from './image-fixtures.mjs';
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { mkdtemp, writeFile, symlink, rm, mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createExperienceBundle, parseExperienceBundle, readExperienceDirectory, scopeExperienceCss, sha256 } from '../../apps/host/build/tsc/experience-bundle.js';
+const manifest = () => ({ schemaVersion: 2, id: 'test', label: 'Test experience', theme: { density: 'comfortable', mode: 'system', light: {}, dark: {} }, presentation: { home: { kind: 'stack', panes: ['conversations', 'conversation'] }, transcript: 'bubbles', navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } }, stylesheet: null, assets: [] });
+function bundle(css = '[data-openpane-part="button"] { color: #123456; border: 1px outset #ffffff; }') {
+  const value = manifest(); value.stylesheet = 'style.css'; value.assets.push({ name: 'style.css', mimeType: 'text/css', bytes: Buffer.byteLength(css), sha256: sha256(css) });
+  return createExperienceBundle(value, css, []);
+}
+test('immutable bundles bind exact stylesheet and inventory bytes to their digest', () => {
+  const value = bundle(); assert.deepEqual(parseExperienceBundle(value), value);
+  assert.notEqual(bundle('[data-openpane-part="button"] { color: #654321; }').digest, value.digest);
+  assert.throws(() => parseExperienceBundle({ ...value, digest: '0'.repeat(64) }), /digest/);
+  assert.throws(() => parseExperienceBundle({ ...value, stylesheet: value.stylesheet + '\n' }), /bytes mismatch/);
+  assert.throws(() => parseExperienceBundle({ ...value, assets: [{ name: 'undeclared.png', base64: '' }] }), /Undeclared/);
+  assert.throws(() => parseExperienceBundle({ ...value, manifest: { ...value.manifest, executable: 'script.js' } }));
+});
+test('CSS AST scopes every selector and recursively scopes allowed at-rules', () => {
+  const value = bundle('@media (prefers-color-scheme: dark) { @supports (color: #000000) { [data-openpane-part="button"]:hover, [data-openpane-part="header"] > [data-openpane-part="button"] { color: #abcdef; } } }');
+  const scoped = scopeExperienceCss(value.stylesheet, value.digest, new Set());
+  assert.equal((scoped.match(/data-openpane-experience/g) ?? []).length, 2);
+  assert.ok(scoped.includes(value.digest));
+  assert.doesNotThrow(() => bundle('[data-openpane-part="butto\\6e"] { color: #123456; }'));
+  for (const css of ['body { color: #000000; }', '[data-openpane-part="button"] { position: fixed; }',
+    '[data-openpane-part="button"] { display: none; }', '[data-openpane-part="button"] { opacity: 0; }', '[data-openpane-part="composer"] { filter: opacity(0); }', '[data-openpane-part="main"] { opacity: 0; }',
+    '[data-openpane-part="button"] { pointer-events: none; }', '[data-openpane-part="button"] { color: red !important; }',
+    '[data-openpane-part="button"] { padding: 65px; }', '[data-openpane-part="button"] { font-size: 9px; }',
+    '[data-openpane-part="button"] { background-image: url("https://example.com/a.png"); }',
+    '@import "remote.css";', '@keyframes fade { to { color: #ffffff; } }', '@font-face { font-family: remote; src: url("font.woff"); }',
+    '[data-openpane-part="header"] { & [data-openpane-part="button"] { color: #000000; } }',
+    '[data-openpane-part="main"] { @media (min-width: 1px) { [data-openpane-part="button"] { color: #000000; } } }',
+    '[data-openpane-part="main"] { @supports (color: #000000) { [data-openpane-part="button"] { color: #000000; } } }',
+    '[data-openpane-part="button"]:has(body) { color: #000000; }']) assert.throws(() => bundle(css), css);
+});
+test('directory ingestion copies immutable bytes and refuses escaping symlinks', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'op-bundle-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  const source = join(directory, 'source'); await mkdir(source);
+  const value = bundle(); await writeFile(join(source, 'experience.json'), JSON.stringify(value.manifest));
+  await writeFile(join(source, 'style.css'), value.stylesheet);
+  assert.deepEqual(await readExperienceDirectory(source), value);
+  await writeFile(join(source, 'style.css'), 'changed');
+  assert.throws(() => parseExperienceBundle({ ...value, stylesheet: 'changed' }));
+  assert.equal(value.stylesheet.includes('#123456'), true);
+  await rm(join(source, 'style.css')); await writeFile(join(directory, 'outside.css'), value.stylesheet);
+  await symlink(join(directory, 'outside.css'), join(source, 'style.css'));
+  await assert.rejects(readExperienceDirectory(source), /escapes/);
+});
+
+test('artwork must fully decode before selection, including CRC and bounded decoded dimensions', () => {
+  const artwork = bytes => {
+    const value = manifest(); value.assets.push({ name: 'frame.png', mimeType: 'image/png', bytes: bytes.length, sha256: sha256(bytes) });
+    return createExperienceBundle(value, null, [{ name: 'frame.png', base64: bytes.toString('base64') }]);
+  };
+  const valid = png(); assert.equal(artwork(valid).assets.length, 1);
+  const corrupt = Buffer.from(valid); corrupt[corrupt.length - 1] ^= 1;
+  assert.throws(() => artwork(corrupt), /damaged|Invalid PNG/);
+  assert.throws(() => artwork(valid.subarray(0, 33)), /damaged|Invalid PNG/);
+  assert.throws(() => artwork(png({ width: 2049, height: 1 })), /dimensions/);
+});
+
+test('bundle identity preserves authored token bytes including hexadecimal color case', () => {
+  const upper = manifest(); upper.theme.light = { colors: { accent: '#AABBCC' } };
+  const lower = manifest(); lower.theme.light = { colors: { accent: '#aabbcc' } };
+  const first = createExperienceBundle(upper, null, []), second = createExperienceBundle(lower, null, []);
+  assert.equal(first.manifest.theme.light.colors.accent, '#AABBCC');
+  assert.notEqual(first.digest, second.digest);
+});
+
+test('artwork bundle identity remains stable across process collations', () => {
+  const bytes = png(), names = ['aa.png', 'b.png'], value = manifest();
+  value.assets = names.map(name => ({ name, mimeType: 'image/png', bytes: bytes.length, sha256: sha256(bytes) }));
+  const original = String.prototype.localeCompare;
+  try {
+    const danish = new Intl.Collator('da-DK'), english = new Intl.Collator('en-US');
+    String.prototype.localeCompare = function(other) { return danish.compare(String(this), other); };
+    const authored = createExperienceBundle(value, null, names.map(name => ({ name, base64: bytes.toString('base64') })));
+    String.prototype.localeCompare = function(other) { return english.compare(String(this), other); };
+    assert.deepEqual(parseExperienceBundle(authored), authored);
+  } finally { String.prototype.localeCompare = original; }
+});
+
+test('directory ingestion preserves a UTF-8 stylesheet byte-order mark in its identity', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'op-bom-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  const value = bundle('\uFEFF[data-openpane-part="button"] { color: #123456; }');
+  await writeFile(join(directory, 'experience.json'), JSON.stringify(value.manifest)); await writeFile(join(directory, 'style.css'), value.stylesheet);
+  assert.deepEqual(await readExperienceDirectory(directory), value);
+});
+
+test('directory ingestion rejects a named pipe without waiting for a writer', { timeout: 5000 }, async t => {
+  const { execFile } = await import('node:child_process'), { promisify } = await import('node:util');
+  const directory = await mkdtemp(join(tmpdir(), 'op-fifo-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  await promisify(execFile)('mkfifo', [join(directory, 'experience.json')]);
+  const module = new URL('../../apps/host/build/tsc/experience-bundle.js', import.meta.url).href;
+  const source = `import { readExperienceDirectory } from ${JSON.stringify(module)}; try { await readExperienceDirectory(process.argv[1]); process.exitCode=1; } catch(error) { console.log(error.message); }`;
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', source, directory], { timeout: 1000, killSignal: 'SIGKILL' });
+  assert.match(stdout, /regular file/);
+});
+
+
+test('semantic CSS accepts only CSS hex lengths and valid local font lists',()=>{
+  for(const color of ['#abc','#abcd','#abcdef','#abcdef12'])assert.doesNotThrow(()=>bundle(`[data-openpane-part="button"] { color: ${color}; }`));
+  assert.doesNotThrow(() => bundle('[data-openpane-part="button"] { color: inherit; }'));
+  assert.throws(() => bundle('[data-openpane-part="header"] { background-image: linear-gradient(to right, inherit, #ffffff); }'));
+  assert.throws(() => bundle('[data-openpane-part="button"] { box-shadow: 1px 1px 0 inherit; }'));
+  for(const color of ['#ab','#abcde','#abcdef1','#abcdef123'])assert.throws(()=>bundle(`[data-openpane-part="button"] { color: ${color}; }`));
+  assert.doesNotThrow(()=>bundle('[data-openpane-part="button"] { font-family: "Segoe UI", sans-serif; }'));
+  assert.throws(()=>bundle('[data-openpane-part="button"] { font-family: Tahoma,,sans-serif; }'));
+});
+
+test('authored control states, gradients and bevels use bounded parsed values and applicable compounds', () => {
+  for (const css of [
+    '[data-openpane-part="header"] { background-image: linear-gradient(to right, #000080, var(--aui-color-accent) 100%); }',
+    '[data-openpane-part="button"][data-openpane-role="send"]:active { border-top-style: inset; box-shadow: inset 1px 1px 0 var(--aui-color-border), -1px -1px 0 #ffffff; }',
+    '[data-openpane-part="button"][data-openpane-role="navigation"][data-openpane-state="selected"] { color: #ffffff; }',
+    '[data-openpane-part="checkbox"]:checked { accent-color: var(--aui-color-accent); }',
+    '[data-openpane-part="message-author"][data-openpane-state="remote"] { font-style: italic; letter-spacing: 1px; }',
+  ]) assert.doesNotThrow(() => bundle(css), css);
+  for (const selector of ['[data-openpane-role="send"]', '[data-openpane-part="input"][data-openpane-role="send"]',
+    '[data-openpane-part="button"] [data-openpane-role="send"]', '[data-openpane-part="button"][data-openpane-state="remote"]',
+    '[data-openpane-part="button"][data-openpane-role^="send"]', '[data-openpane-part="button"][class="secret"]'])
+    assert.throws(() => bundle(`${selector} { color: #123456; }`), selector);
+  for (const value of ['linear-gradient(to right, #fff, url("remote.png"))', 'linear-gradient(to right, #fff, var(--secret))',
+    'linear-gradient(to right, #fff, var(--aui-color-text, url("remote.png")))', 'linear-gradient(to right, #fff 90%, #000 10%)',
+    'linear-gradient(12deg, #fff, #000)', 'linear-gradient(to right, #fff, #000), url("remote.png")', 'linear-gradient(to right, #fff, #000'])
+    assert.throws(() => bundle(`[data-openpane-part="header"] { background-image: ${value}; }`), value);
+  assert.throws(() => bundle('[data-openpane-part="button"] { box-shadow: ' + Array(5).fill('1px 1px 0 #ffffff').join(',') + '; }'));
+});
+
+
+test('interaction states cannot make authored foreground text transparent', () => {
+  for (const state of ['hover', 'active', 'focus', 'focus-visible', 'focus-within', 'checked', 'disabled', 'enabled']) {
+    for (const color of ['transparent', '#0000', '#00000001']) assert.throws(() => bundle(
+      `[data-openpane-part="button"][data-openpane-role="navigation"]:${state} { color: ${color}; }`), /interaction text/);
+    assert.doesNotThrow(() => bundle(`[data-openpane-part="button"][data-openpane-state="selected"]:${state} { color: var(--aui-color-text); }`));
+  }
+});

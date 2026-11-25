@@ -18,6 +18,8 @@ export class PersonalizationSession {
   private readonly listeners = new Set<() => void>();
   private started = false;
   private closed = false;
+  private startupSuperseded = false;
+  private enableCommit: RecoveryCommit | undefined;
   private startupTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly unsubscribe: () => void;
   private operation = 0;
@@ -57,7 +59,7 @@ export class PersonalizationSession {
     this.startupTimer = setTimeout(() => {
       this.startupTimer = undefined;
       if (this.snapshot.readiness !== 'loading') return;
-      this.storage.invalidateReads();
+      if (!this.startupSuperseded) this.storage.invalidateReads();
       this.update({ ...this.snapshot, readiness: 'blocked', diagnostic: 'Saved personalization did not load in time. Builtin appearance and views are active. Retry to resume saved settings.' });
     }, 2000);
     void this.storage.readSnapshot();
@@ -75,6 +77,7 @@ export class PersonalizationSession {
   async retry(): Promise<PersonalizationSnapshot> {
     this.start();
     const operation = ++this.operation;
+    this.startupSuperseded = true;
     const saved = await this.storage.readSnapshot();
     if (operation === this.operation && this.authorize(saved, 'all')) this.update({ ...this.snapshot, diagnostic: null });
     return saved;
@@ -85,7 +88,10 @@ export class PersonalizationSession {
     const viewRecovery = this.recoveryIntents.view;
     const outcome = await action();
     if (this.closed) return outcome;
-    if (outcome.kind === 'committed' && authorization === 'view' && viewRecovery === this.recoveryIntents.view) this.authorize(outcome.snapshot, 'view');
+    if (outcome.kind === 'committed' && authorization === 'view' && viewRecovery === this.recoveryIntents.view && outcome.epoch !== null && outcome.revision !== null) {
+      this.enableCommit = { intent: viewRecovery, operation, epoch: outcome.epoch, revision: outcome.revision };
+      this.update(this.snapshot);
+    }
     if (operation !== this.operation) return outcome;
     if (outcome.kind !== 'committed') this.update({ ...this.snapshot, diagnostic: outcome.diagnostic });
     else {
@@ -100,6 +106,7 @@ export class PersonalizationSession {
     return outcome;
   }
   patchPreferences(patch: PreferencePatch): Promise<PersonalizationOutcome> {
+    if (patch.kind === 'ui-enabled') { this.recoveryIntents.view++; this.enableCommit = undefined; }
     return this.run(() => this.storage.patchPreferences(patch), patch.kind === 'ui-enabled' && patch.enabled ? 'view' : 'none');
   }
   replacePreferences(input: { readonly expectedEpoch: number; readonly expectedRevision: number; readonly document: DesktopPreferencesV1 }): Promise<PersonalizationOutcome> {
@@ -110,7 +117,16 @@ export class PersonalizationSession {
   removePalette(key: IDBValidKey): Promise<PersonalizationOutcome> { return this.run(() => this.storage.removePalette(key)); }
   private settleRecoveries(snapshot: PersonalizationSessionSnapshot): PersonalizationSessionSnapshot {
     const current = snapshot.saved?.preferences;
-    let recovery = snapshot.recovery, diagnostic = snapshot.diagnostic;
+    let recovery = snapshot.recovery, diagnostic = snapshot.diagnostic, readiness = snapshot.readiness;
+    const enabling = this.enableCommit;
+    if (enabling) {
+      if (enabling.intent !== this.recoveryIntents.view) this.enableCommit = undefined;
+      else if (current?.kind === 'valid' && current.epoch === enabling.epoch && current.revision >= enabling.revision && current.document.ui.enabled) {
+        recovery = { ...recovery, view: 'none' };
+        readiness = 'ready';
+        this.enableCommit = undefined;
+      }
+    }
     for (const scope of ['appearance', 'view'] as const) {
       const commit = this.recoveryCommits[scope];
       if (!commit) continue;
@@ -122,7 +138,7 @@ export class PersonalizationSession {
       if (commit.operation === this.operation) diagnostic = `Default ${scope} saved.`;
       delete this.recoveryCommits[scope];
     }
-    return { ...snapshot, recovery, diagnostic };
+    return { ...snapshot, readiness, recovery, diagnostic };
   }
   private async recover(scope: RecoveryScope, write: () => Promise<PersonalizationOutcome>): Promise<PersonalizationOutcome> {
     const recovery = ++this.recoveryIntents[scope];

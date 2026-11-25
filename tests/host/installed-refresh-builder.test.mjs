@@ -154,9 +154,10 @@ for(const kind of ['ignore','late']) test(`${kind} cannot outlive duplicate clos
 for(const kind of ['probe-timeout','timeout']) test(`${kind} obeys its finite deadline`,async t=>{
   const f=await fixture(t);
   const original=globalThis.setTimeout;
-  t.mock.method(globalThis,'setTimeout',(handler,ms,...args)=>original(handler,ms===30000||ms===900000?250:ms,...args));
+  const deadline=kind==='probe-timeout'?30000:900000;
+  t.mock.method(globalThis,'setTimeout',(handler,ms,...args)=>original(handler,ms===deadline?250:ms,...args));
   if(kind==='probe-timeout') {await f.mode({kind});assert.equal((await f.open()).kind,'unavailable');}
-  else {const builder=await f.open();await f.mode({kind});assert.deepEqual(await builder.run(f.command(builder)),{kind:'failed',failure:'resource-limit'});}
+  else {const builder=await f.open();assert.equal(builder.kind,'ready');await f.mode({kind});assert.deepEqual(await builder.run(f.command(builder)),{kind:'failed',failure:'resource-limit'});}
 });
 
 test('attempt scratch cleanup preserves a sibling and rejects existing ownership',async t=>{

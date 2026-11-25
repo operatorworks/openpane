@@ -376,10 +376,11 @@ export class SqliteStore<E, P> implements ProviderStreamStore {
     const run = this.db.prepare("SELECT json_extract(document, '$.domain.currentRun.kind') AS kind, json_extract(document, '$.domain.currentRun.runId') AS id FROM conversations WHERE host=? AND conversation=?").get(...key(scope));
     if (run?.kind !== 'ended' || typeof run.id !== 'string') return null;
     // A bare json_extract aborts the statement on one malformed observation, so each row is guarded by json_valid.
-    // Only the run id is filtered here: a row that names the run must decode, or the selection fails closed.
-    const rows = this.db.prepare(`SELECT id FROM commands WHERE host=? AND conversation=?
+    // Completed historical commands cannot be blockers. A matching row with a malformed receipt still fails closed.
+    const rows = this.db.prepare(`SELECT id,receipt FROM commands WHERE host=? AND conversation=?
       AND CASE WHEN json_valid(observation) THEN json_extract(observation, '$.evidence.source.run.identity.runId') END = ? ORDER BY rowid`).all(...key(scope), run.id);
     for (const row of rows) {
+      if (parseReceipt(json(row.receipt)).state.kind !== 'accepted') continue;
       const stored = this.command(scope, nonempty(row.id));
       if (!stored || !('kind' in stored) || isOffered(stored) || stored.command.body.kind !== 'send' || stored.receipt.state.kind !== 'accepted' ||
         !stored.observation || !('evidence' in stored.observation)) continue;

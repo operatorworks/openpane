@@ -1,3 +1,4 @@
+import { useExperience } from './experience-state.js';
 import { createTheme, palettes, type Appearance, type ThemeColors } from '@openpane/theme';
 import { ThemeProvider, useTheme } from '@openpane/theme/react';
 import { toCssVariables } from '@openpane/ui-primitives/desktop';
@@ -19,6 +20,7 @@ import { CustomizationActivity, CustomizationTranscript, type ActivitySelection,
 import { CustomizationContent } from './CustomizationContent.js';
 import { ImageAttachmentCard, imageSize } from './ImageAttachmentCard.js';
 import { dragVerdict, intakeFile, type DropVerdict } from './image-intake.js';
+import { DisplayCards, NewCardNotice, useDisplayCards } from './DisplayCards.js';
 import { Composer } from './Composer.js';
 
 const OBSERVATION_NOTICE: Record<ObservationStopReason, string> = {
@@ -45,7 +47,7 @@ type DraftEditor =
 
 export function ConversationStatus({ active }: { readonly active: OpenConversation }) {
   const view = useConversation(active.store);
-  return <span role="status">Conversation {view.connection.kind}{'reason' in view.connection ? ` · ${view.connection.reason}` : ''}</span>;
+  return <span data-openpane-part="status" role="status">Conversation {view.connection.kind}{'reason' in view.connection ? ` · ${view.connection.reason}` : ''}</span>;
 }
 
 export function ConversationView({ contentPalette = palettes, actions, active, enabled, storageFailure, observation = null, continuation = null, permissionState, agent = 'recorded', composerControls, transcript = { kind: 'default' }, activity = { kind: 'default' }, contentLayout = { kind: 'default' }, modules = null, customizationNotices = false }: {
@@ -62,6 +64,8 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
   readonly customizationNotices?: boolean;
   readonly composerControls?: (canSwitch: boolean) => ReactNode;
 }) {
+  const cards = useDisplayCards(active.scope);
+  const hasCards = cards.view.kind !== 'none' && cards.view.publications.length > 0;
   const presentation = conversationPresentation(active.agent, agent);
   const view = useConversation(active.store);
   const [editor, setEditor] = useState<DraftEditor>({ kind: 'saved', text: view.draft });
@@ -71,9 +75,8 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
   const [approving, setApproving] = useState<ReadonlySet<string>>(new Set());
   const [stopPending, setStopPending] = useState<typeof stopGuard.current>(null);
   const imageInput = useRef<HTMLInputElement>(null);
-  const intaking = useRef<{ readonly store: OpenConversation['store'] } | null>(null);
+  const intaking = useRef<{ readonly store: OpenConversation['store']; readonly cancel: AbortController } | null>(null);
   const hoverExpiry = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const removals = useRef(0);
   const dragDepth = useRef(0);
   const [drop, setDrop] = useState<DropVerdict | null>(null);
   useEffect(() => {
@@ -164,19 +167,16 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
     if (intaking.current?.store === store) return refuse('Wait for the current image to finish.');
     const result = intakeFile(files);
     if (result.kind === 'reject') return refuse(result.reason);
-    const generation = removals.current;
-    // The guard covers only the local file read; once the store has the bytes, its own upload state takes over.
-    const token = { store };
+    // The store drains intake before close; this guard prevents another file choice while bytes are read.
+    const token = { store, cancel: new AbortController() };
     intaking.current = token;
     const release = () => { if (intaking.current === token) intaking.current = null; };
     void (async () => {
       try {
-        const bytes = new Uint8Array(await result.file.arrayBuffer());
-        release();
-        // Remove while reading wins: a late read must not bring the image back.
-        if (generation === removals.current) await store.selectImage({ name: result.file.name, bytes });
+        const bytes = result.file.arrayBuffer().then(value => { release(); return new Uint8Array(value); });
+        await store.selectImage({ name: result.file.name, bytes }, token.cancel.signal);
       } catch (error) {
-        refuse(error instanceof Error ? error.message : 'The image could not be changed.');
+        if (!token.cancel.signal.aborted) refuse(error instanceof Error ? error.message : 'The image could not be changed.');
       } finally {
         release();
       }
@@ -228,15 +228,16 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
     active.agent.availability.kind === 'ready' &&
     transcript.kind === 'default' && activity.kind === 'default' && contentLayout.kind === 'default' &&
     recovery.retained.length === 0 && recovery.uncertain.length === 0 && recovery.pending.length === 0 &&
-    !customizationNotices && !showPermissions;
+    !customizationNotices && !showPermissions && !hasCards;
 
+  const experience = useExperience();
   const conversationKey = `${active.viewId}/${active.scope.hostId}/${active.scope.conversationId}`;
   const context = { conversation: active.scope, activity: view.document, commands: actions.commands, permissions: actions.permissions };
   const nativeMessages = <>
       {view.document.domain.messages.length === 0 && !view.document.domain.activities?.length && !continuation?.boundary && <p className="conversation-greeting">A conversation that stays with you.</p>}
-      {view.document.domain.messages.map(message => <article className={`message message-${message.role}`} key={message.messageId}>
-        <strong>{message.role === 'user' ? 'You' : presentation.assistant}</strong>
-        {message.role === 'assistant' ? <AssistantReply text={message.text} /> : message.text && <p>{message.text}</p>}
+      {view.document.domain.messages.map(message => <article data-openpane-part="transcript-row" data-openpane-state={message.role === 'user' ? 'local' : 'remote'} className={`message message-${message.role}`} key={message.messageId}>
+        <strong data-openpane-part="message-author" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.role === 'user' ? 'You' : presentation.assistant}{experience?.manifest.presentation.transcript === 'lines' ? ': ' : ''}</strong>
+        <div data-openpane-part="message-body" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.role === 'assistant' ? <AssistantReply text={message.text} /> : message.text && <p data-openpane-part="message-text" data-openpane-state={message.role === 'user' ? 'local' : 'remote'}>{message.text}</p>}</div>
         {message.image && <ImageAttachmentCard attachment={message.image} read={actions.readImage} />}
         {!message.complete && <span className="progress-label">{concluded ? 'Did not finish' : paused ? 'Updates paused' : agent === 'recorded' ? 'Recorded response in progress…' : 'Responding…'}</span>}
       </article>)}
@@ -245,72 +246,73 @@ export function ConversationView({ contentPalette = palettes, actions, active, e
       <CommandActivity transcript={view.document.domain} connected={view.connection.kind === 'connected'} paused={paused} />
       <FileActivity transcript={view.document.domain} connected={view.connection.kind === 'connected'} paused={paused} />
     </>;
-  const nativeTranscript = <div className="transcript" aria-label="Messages" aria-live="polite">{nativeMessages}{nativeActivity}</div>;
-  const selectiveTranscript = <div className="transcript" aria-label="Messages" aria-live="polite">{nativeMessages}
+  const nativeTranscript = <div className="transcript" data-openpane-part="transcript" aria-label="Messages" aria-live="polite">{nativeMessages}{nativeActivity}</div>;
+  const selectiveTranscript = <div className="transcript" data-openpane-part="transcript" aria-label="Messages" aria-live="polite">{nativeMessages}
     <CustomizationActivity selection={activity} conversationKey={conversationKey} fallback={nativeActivity}
       context={{ ...context, updates: paused ? 'paused' : view.connection.kind === 'connected' ? 'connected' : 'reconnecting' }} />
   </div>;
 
   const inherited = useTheme();
-  const builtin = createTheme({ colors: palettes[inherited.appearance] }, inherited);
-  return <ThemeProvider colors={palettes[inherited.appearance]}><section style={toCssVariables(builtin)} className="aui-theme conversation-panel" data-appearance={builtin.appearance} data-reduced-motion={builtin.reducedMotion} aria-label="Conversation" data-empty={empty ? 'true' : undefined} {...dropHandlers}>
+  const builtin = createTheme({ colors: experience ? contentPalette[inherited.appearance] : palettes[inherited.appearance] }, inherited);
+  return <ThemeProvider colors={builtin.colors}><section style={toCssVariables(builtin)} className="aui-theme conversation-panel" data-openpane-part="chat-window" data-appearance={builtin.appearance} data-reduced-motion={builtin.reducedMotion} aria-label="Conversation" data-empty={empty ? 'true' : undefined} {...dropHandlers}>
     <header className="visually-hidden"><p className="eyebrow">{agent === 'recorded' ? 'RECORDED CONVERSATION' : 'CONVERSATION'}</p><h1>Your conversation</h1><p className="agent-label">{active.agent.label}</p><p className="scope-label">{active.scope.conversationId}</p></header>
-    {active.agent.availability.kind === 'unavailable' && <p role="status">{active.agent.availability.reason} Saved history remains available.</p>}
-    {observationStatus?.kind === 'unknown' && <p role="status">Observation status unavailable. Reconnect to check for updates.</p>}
-    {observationStatus?.kind === 'recovering' && <p role="status">Resuming provider updates…</p>}
-    {observationStatus?.kind === 'stopped' && <div role="status" className="observation-notice">
+    {active.agent.availability.kind === 'unavailable' && <p data-openpane-part="status" role="status">{active.agent.availability.reason} Saved history remains available.</p>}
+    {observationStatus?.kind === 'unknown' && <p data-openpane-part="status" role="status">Observation status unavailable. Reconnect to check for updates.</p>}
+    {observationStatus?.kind === 'recovering' && <p data-openpane-part="status" role="status">Resuming provider updates…</p>}
+    {observationStatus?.kind === 'stopped' && <div data-openpane-part="status" role="status" className="observation-notice">
       <p>Updates paused. {OBSERVATION_NOTICE[observationStatus.reason]} Saved messages and your draft remain available.{run && run.kind !== 'ended' ? ' The provider may still be running.' : ''}</p>
       {canRetryObservation(observationStatus) && <>
         <p>Checking for updates does not restart this request or resend commands.</p>
-        <button type="button" disabled={!enabled || observation?.retrying}
+        <button data-openpane-part="button" type="button" disabled={!enabled || observation?.retrying}
           onClick={() => void actions.retryObservation()}>{observation?.retrying ? 'Checking for updates…' : 'Check for updates'}</button>
       </>}
     </div>}
-    {observationStatus?.kind === 'concluded' && <div role="status" className="observation-notice">
+    {observationStatus?.kind === 'concluded' && <div data-openpane-part="status" role="status" className="observation-notice">
       <p>This conversation ended: {CLOSURE_NOTICE[observationStatus.cause]}. Earlier messages and your draft stay available.</p>
       {continuation && <ContinuationChoices continuation={continuation} actions={actions} enabled={enabled && available} />}
     </div>}
     <CustomizationContent contentPalette={contentPalette} before={continuation && <ContinuationHistory continuation={continuation} actions={actions} enabled={enabled} assistant={presentation.assistant} />}
-      selection={contentLayout} conversationKey={conversationKey} modules={modules} nativeTranscript={nativeTranscript}
+      after={<DisplayCards cards={cards} />} selection={contentLayout} conversationKey={conversationKey} modules={modules} nativeTranscript={nativeTranscript}
       transcript={<CustomizationTranscript selection={transcript} conversationKey={conversationKey}
         context={context}
         fallback={transcript.kind === 'claimed' ? nativeTranscript : selectiveTranscript}
         appendix={sentImages.length > 0 && <section className="sent-images" aria-label="Sent images">
           <h2>Sent images</h2>{sentImages.map(sent => <ImageAttachmentCard key={sent.messageId} attachment={sent.image} read={actions.readImage} />)}
         </section>} />} />
-    {Object.values(view.document.decisions).map(decision => <section className="decision-card" key={decision.pendingId} aria-label="Approval required">
-      <h2>Approval required</h2><p>{decision.prompt}</p><div className="action-row">
-        {decision.choices.map(choice => <button key={choice} disabled={!connected || !active.agent.commands.includes('approve') || decision.reserved || approving.has(decision.pendingId)} onClick={() => approve(decision.pendingId, choice)}>{decision.choiceLabels?.[choice] ?? (agent === 'codex' && choice === 'accept' ? 'Allow' : agent === 'codex' && choice === 'decline' ? 'Deny' : choice)}</button>)}
+    {Object.keys(view.document.decisions).length > 0 && <div className="conversation-approvals" role="region" aria-label="Pending approvals">{Object.values(view.document.decisions).map(decision => <section className="decision-card" data-openpane-part="approval-panel" key={decision.pendingId} aria-label="Approval required">
+      <h2>Approval required</h2><p tabIndex={0} role="region" aria-label="Approval request details">{decision.prompt}</p><div className="action-row">
+        {decision.choices.map(choice => <button data-openpane-essential="approval" data-openpane-part="button" data-openpane-role="approval" key={choice} disabled={!connected || !active.agent.commands.includes('approve') || decision.reserved || approving.has(decision.pendingId)} onClick={() => approve(decision.pendingId, choice)}>{decision.choiceLabels?.[choice] ?? (agent === 'codex' && choice === 'accept' ? 'Allow' : agent === 'codex' && choice === 'decline' ? 'Deny' : choice)}</button>)}
       </div>
-    </section>)}
+    </section>)}</div>}
     {permissionState && showPermissions && <ConversationPermissions retained={recovery.retained} state={permissionState} actions={actions} enabled={connected} />}
     <Composer id="message" text={editor.text} onText={value => void edit(value)} placeholder={presentation.placeholder} readOnly={Boolean(storageFailure)}
       canSend={canSend} onSend={() => void actions.submit(() => active.store.send())} textareaRef={composer} centred={empty} drop={drop?.kind}
       above={<>
+        <NewCardNotice cards={cards} />
         {drop && <p className="composer-drop-hint" aria-hidden="true">{drop.kind === 'reject' ? drop.reason : image ? `Drop to replace ${image.name}` : 'Drop to attach image'}</p>}
         {image && <div className="composer-image" aria-label="Attached image">
           <span>{image.name} · {imageSize(image.byteLength)}</span>
-          <span role="status">{image.status === 'uploading' ? 'Uploading…' : image.status === 'ready' ? 'Ready' : image.status === 'interrupted' ? 'Upload interrupted' : image.reason}</span>
-          {(image.status === 'failed' || image.status === 'interrupted') && <button type="button" disabled={!enabled}
+          <span data-openpane-part="status" role="status">{image.status === 'uploading' ? 'Uploading…' : image.status === 'ready' ? 'Ready' : image.status === 'interrupted' ? 'Upload interrupted' : image.reason}</span>
+          {(image.status === 'failed' || image.status === 'interrupted') && <button data-openpane-part="button" type="button" disabled={!enabled}
             onClick={() => imageAction(() => active.store.retryImage())}>Retry</button>}
-          <button type="button" className="composer-image-remove" aria-label="Remove" title="Remove image" disabled={Boolean(storageFailure)}
-            onClick={() => { removals.current++; intaking.current = null; imageAction(() => active.store.removeImage()); }}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" /></svg></button>
+          <button data-openpane-part="button" type="button" className="composer-image-remove" aria-label="Remove" title="Remove image" disabled={Boolean(storageFailure)}
+            onClick={() => { if (intaking.current?.store === active.store) { intaking.current.cancel.abort(); intaking.current = null; } imageAction(() => active.store.removeImage()); }}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" /></svg></button>
         </div>}
         {image && !acceptsImages && <p className="composer-note">{active.agent.imageInput.kind === 'unsupported' ? active.agent.imageInput.reason : 'This agent cannot receive images.'} Remove the image to send.</p>}
         {imageError?.store === active.store && <p className="composer-note" role="alert">{imageError.message}</p>}
       </>}
       below={editor.kind === 'failed' && <p role={storageFailure ? 'note' : 'alert'}>Draft not saved. {storageFailure ? 'Copy your text before reloading.' : editor.message}</p>}
       leading={acceptsImages && <>
-        <input ref={imageInput} type="file" accept="image/png,image/jpeg" aria-label="Image file" hidden onChange={event => {
+        <input data-openpane-part="input" ref={imageInput} type="file" accept="image/png,image/jpeg" aria-label="Image file" hidden onChange={event => {
           const file = event.target.files?.[0];
           event.target.value = '';
           if (file) attach([file]);
         }} />
-        <button type="button" className="composer-setting composer-add" aria-label={image ? 'Replace image' : 'Add image'} title={blocked ?? 'Add image, or drop a PNG or JPEG'}
+        <button data-openpane-part="button" type="button" className="composer-setting composer-add" aria-label={image ? 'Replace image' : 'Add image'} title={blocked ?? 'Add image, or drop a PNG or JPEG'}
           disabled={Boolean(blocked)} onClick={() => imageInput.current?.click()}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg></button>
       </>}
       controls={composerControls?.(enabled && editor.kind === 'saved' && !responding)}
-      actions={run && run.kind !== 'ended' && !concluded && <button type="button" className="composer-setting" disabled={!connected || !active.agent.commands.includes('cancel') || stopping} onClick={stop}>{stopping ? 'Stopping…' : 'Stop'}</button>} />
+      actions={run && run.kind !== 'ended' && !concluded && <button data-openpane-part="button" data-openpane-role="stop" type="button" className="composer-setting" disabled={!connected || !active.agent.commands.includes('cancel') || stopping} onClick={stop}>{stopping ? 'Stopping…' : 'Stop'}</button>} />
     <CommandRecovery view={view} actions={actions} enabled={enabled} canRetry={available} retry={id => active.store.retry(id)} />
   </section></ThemeProvider>;
 }

@@ -399,7 +399,14 @@ test('packaged SDK facade and host use one emitted runtime module graph', async 
   const owner = Object.entries(graph.outputs).filter(([, output]) => Object.keys(output.inputs).includes('packages/sdk/dist/extensions.js'));
   assert.equal(owner.length, 1);
   const [path] = owner[0];
-  assert.ok(graph.outputs['apps/host/dist/main.js'].imports.some(value => value.path === path));
+  const seen = new Set();
+  const reaches = current => {
+    if (current === path) return true;
+    if (seen.has(current)) return false;
+    seen.add(current);
+    return graph.outputs[current]?.imports.some(value => !value.external && reaches(value.path)) ?? false;
+  };
+  assert.ok(reaches('apps/host/dist/main.js'));
   assert.ok(graph.outputs['apps/host/dist/sdk.js'].imports.some(value => value.path === path));
 });
 

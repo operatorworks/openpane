@@ -1,3 +1,4 @@
+import { parseExtensionManifest } from '@openpane/sdk';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { cp, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
@@ -39,7 +40,7 @@ for (const [label, mutate] of [
   ['external graph', metadata => { metadata.openpane.extensions = [{ repository: '/tmp/other', commit: 'a'.repeat(40) }]; }],
   ['wrong SDK', metadata => { metadata.openpane.extension.sdkVersion = '0.1.0'; }],
   ['no desktop', metadata => { metadata.openpane.extension.entries[0].kind = 'ios'; }],
-  ['unknown metadata', metadata => { metadata.openpane.unknown = true; }],
+    ['unknown metadata', metadata => { metadata.openpane.unknown = true; }],
 ]) test(`development rejects ${label}`, async t => {
   const f = await fixture(t), file = join(f.source, 'package.json'), metadata = JSON.parse(await readFile(file, 'utf8'));
   mutate(metadata); await writeFile(file, JSON.stringify(metadata));
@@ -56,3 +57,13 @@ for (const value of ['https://127.0.0.1:7140', 'http://localhost:7140', 'http://
   'http://user@127.0.0.1:7140', 'http://127.0.0.1:7140/?query', 'http://127.0.0.1:7140/#hash', 'http://example.com:7140', 'http://2130706433:7140', 'http://127.0.0.1:0', 'http://127.0.0.1:99999', 'http://127.0.0.1:7140/./'])
   test(`host rejects ${value}`, () => assert.throws(() => previewHost(value), /loopback|127\.0\.0\.1/));
 test('host accepts only the selected loopback origin', () => assert.equal(previewHost('http://127.0.0.1:7140'), 'http://127.0.0.1:7140'));
+
+test('development rejects two distinct desktop sources at manifest admission', async t => {
+  const f = await fixture(t), file = join(f.source, 'package.json'), metadata = JSON.parse(await readFile(file, 'utf8'));
+  await writeFile(join(f.source, 'desktop/second.tsx'), 'export default {};');
+  metadata.openpane.extension.entries.push({ kind: 'desktop', module: './dist/second.js' });
+  metadata.openpane.sources['./dist/second.js'] = './desktop/second.tsx';
+  await writeFile(file, JSON.stringify(metadata));
+  assert.throws(() => parseExtensionManifest(metadata.openpane.extension), /Duplicate extension entry kind/);
+  await assert.rejects(developmentPlan(f.source), /Invalid committed customization package/);
+});

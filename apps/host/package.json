@@ -10,11 +10,15 @@
   "dependencies": {
     "@openpane/contracts": "0.0.0",
     "@openpane/host": "0.0.0",
+    "@openpane/protocol": "0.0.0",
     "@openpane/sdk": "0.0.0",
     "@opentelemetry/api": "1.9.0",
     "@opentelemetry/core": "2.12.0",
     "@opentelemetry/otlp-transformer": "0.223.0",
     "@opentelemetry/resources": "2.12.0",
-    "@opentelemetry/sdk-trace": "2.12.0"
+    "@opentelemetry/sdk-trace": "2.12.0",
+    "postcss": "8.5.33",
+    "postcss-selector-parser": "7.1.8",
+    "postcss-value-parser": "4.2.0"
   }
 }

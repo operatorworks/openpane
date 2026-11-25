@@ -125,7 +125,7 @@ test('the template workspace uses a namespaced conformance provider and leaves h
   await workspace.getByRole('button', { name: 'Approve', exact: true }).click();
   await wait(() => service.answers()[0] === 'approve', 'ordinary host approval');
   service.reply('Unresolved decision: should we ship?');
-  await workspace.getByRole('heading', { name: 'Unresolved decisions' }).waitFor();
+  await workspace.getByRole('heading', { name: 'Review notes' }).waitFor();
   await workspace.getByRole('listitem').filter({ hasText: 'Unresolved decision: should we ship?' }).waitFor();
   await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Chats', exact: true }).click();
   assert.equal(await page.locator('#message').count(), 1);
@@ -187,7 +187,7 @@ test('preview source policy rejects ambient imports and escaping links without r
   const running = await preview(t, directory, host);
   const entry = join(running.source, 'desktop/index.tsx');
   await writeFile(entry, `import { value } from 'contained-dependency';
-    export default { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+    export default { kind: 'desktop', sdkVersion: '0.14.0', activate() {
       return { modules: [{ id: 'dependency', label: 'Contained dependency', component() { return 'Contained dependency ' + value; } }], dispose() {} };
     } };`);
   const page = await previewPage(host, running);
@@ -203,7 +203,7 @@ test('preview source policy rejects ambient imports and escaping links without r
   await sourceDiagnostic(running);
   await writeFile(entry, 'export default { broken source');
   await sourceDiagnostic(running);
-  await writeFile(entry, "export default { kind: 'desktop', sdkVersion: '0.13.0', activate() { return { modules: [{ id: 'fixed', label: 'Fixed source', component() { return 'Corrected working source'; } }], dispose() {} }; } };");
+  await writeFile(entry, "export default { kind: 'desktop', sdkVersion: '0.14.0', activate() { return { modules: [{ id: 'fixed', label: 'Fixed source', component() { return 'Corrected working source'; } }], dispose() {} }; } };");
   await page.reload(); await connected(page); await tools(page);
   await page.getByText('Corrected working source', { exact: true }).waitFor();
 });
@@ -253,8 +253,8 @@ test('a truncated upstream response terminates promptly and the proxy serves the
     const abort = new AbortController();
     const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' };
     let deadline;
-    const response = await fetch('/api/v1', { ...options, signal: abort.signal });
-    const outcome = await Promise.race([response.text().then(() => 'completed', () => 'rejected'),
+    const response = fetch('/api/v1', { ...options, signal: abort.signal }).then(value => value.text());
+    const outcome = await Promise.race([response.then(() => 'completed', () => 'rejected'),
       new Promise(resolve => { deadline = setTimeout(() => resolve('hung'), 1000); })]);
     clearTimeout(deadline); abort.abort();
     const next = await (await fetch('/api/v1', options)).json();
@@ -265,16 +265,16 @@ test('a truncated upstream response terminates promptly and the proxy serves the
 
 test('an unopened lazy module stays with its document snapshot until explicit reload', { timeout: 90_000 }, async t => {
   const host = await fixture(t), directory = await source(t);
-  const helper = join(directory, 'desktop/lazy.tsx'), css = join(directory, 'desktop/review.css');
+  const helper = join(directory, 'desktop/lazy@2x.tsx'), css = join(directory, 'desktop/review.css');
   await writeFile(css, '#root .preview-lazy-button { border-top: 1px solid red; }');
   await writeFile(helper, "export default function Lazy() { return <p data-preview-lazy>Committed lazy label</p>; }");
   await writeFile(join(directory, 'desktop/index.tsx'), `import { lazy, Suspense, useState } from 'react';
     import { createFrontendToolGeneration, pinFrontendTools } from '@openpane/sdk/tools';
     import './review.css';
-    const Lazy = lazy(() => import('./lazy.tsx'));
+    const Lazy = lazy(() => import('./lazy@2x.tsx'));
     function Module() { const [open, setOpen] = useState(false); return <><button className="preview-lazy-button" onClick={() => setOpen(true)}>Open lazy content</button>
       {open && <Suspense fallback={<p>Loading lazy module</p>}><Lazy /></Suspense>}</>; }
-    export default { kind: 'desktop', sdkVersion: '0.13.0', async activate() {
+    export default { kind: 'desktop', sdkVersion: '0.14.0', async activate() {
       window.previewActivations = (window.previewActivations || 0) + 1;
       const { generation } = await createFrontendToolGeneration({ namespace: 'personal', generation: 'preview-pin', platform: 'desktop',
         activate({ frontendTools }) { frontendTools.add({ definition: { name: 'hold', description: 'Hold work during preview edits' },
@@ -349,7 +349,7 @@ for (const kind of ['CSS URL', 'literal asset URL']) test(`working ${kind} canno
   const running = await preview(t, directory, { origin: `http://127.0.0.1:${await unusedPort()}` });
   const entry = join(running.source, 'desktop/index.tsx'), css = join(running.source, 'desktop/review.css');
   if (kind === 'CSS URL') await writeFile(css, '.test { background-image: url("./escape.json"); }');
-  else await writeFile(entry, 'export const asset = new URL("./escape.json", import.meta.url); export default { kind: "desktop", sdkVersion: "0.13.0", activate() { return { modules: [], dispose() {} }; } };');
+  else await writeFile(entry, 'export const asset = new URL("./escape.json", import.meta.url); export default { kind: "desktop", sdkVersion: "0.14.0", activate() { return { modules: [], dispose() {} }; } };');
   await sourceDiagnostic(running);
 });
 
@@ -387,6 +387,18 @@ test('template workspace keeps composer, Stop and approval reachable with many r
           const x = bounds.left + bounds.width / 2, y = (Math.max(0, bounds.top) + Math.min(innerHeight - 60, bounds.bottom)) / 2;
           if (!point && ['auto', 'scroll'].includes(overflow) && bounds.top < innerHeight - 60 && bounds.bottom > 0 && ancestor.contains(document.elementFromPoint(x, y))) point = { x, y };
           if (ancestor.classList.contains('review-workspace')) break;
+        }
+        const workspace = node.closest('.review-workspace'), panel = node.closest('.conversation-panel');
+        if (workspace && panel) {
+          const outer = workspace.getBoundingClientRect(), inner = panel.getBoundingClientRect();
+          const outerTop = Math.max(0, outer.top), outerBottom = Math.min(innerHeight, outer.bottom);
+          const room = Math.min(inner.bottom, outerBottom) - Math.max(inner.top, outerTop);
+          if (room < box.height + 2) {
+            const down = inner.top >= outerTop;
+            const y = down ? (outerTop + Math.min(inner.top, outerBottom)) / 2 : (Math.max(inner.bottom, outerTop) + outerBottom) / 2;
+            const x = (outer.left + outer.right) / 2;
+            if (workspace.contains(document.elementFromPoint(x, y))) return { visible: false, delta: down ? 80 : -80, point: { x, y } };
+          }
         }
         return { visible: box.top >= top && box.bottom <= bottom && node.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)),
           delta: Math.max(-80, Math.min(80, box.top < top ? box.top - top - 8 : box.bottom - bottom + 8)), point };
@@ -439,7 +451,7 @@ test('reloading refuses a selected entry replaced with an outside symlink', { ti
   const entry = join(running.source, 'desktop/index.tsx'), original = await readFile(entry, 'utf8');
   const outside = await mkdtemp(join(tmpdir(), 'openpane-preview-entry-swap-'));
   t.after(() => rm(outside, { recursive: true, force: true }));
-  await writeFile(join(outside, 'entry.js'), `export default { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+  await writeFile(join(outside, 'entry.js'), `export default { kind: 'desktop', sdkVersion: '0.14.0', activate() {
     return { modules: [{ id: 'escaped', label: 'Escaped entry', component() { return 'Outside entry executed'; } }], dispose() {} };
   } };`);
   assert.equal((await fetch(running.url)).status, 200);
@@ -487,7 +499,7 @@ test('contained HTML data assets load without exposing another document bootstra
   const host = await fixture(t), directory = await source(t);
   await writeFile(join(directory, 'desktop/help.html'), '<p>Contained HTML help marker</p>');
   await writeFile(join(directory, 'desktop/index.tsx'), `import help from './help.html?url';
-    export default { kind: 'desktop', sdkVersion: '0.13.0', async activate() {
+    export default { kind: 'desktop', sdkVersion: '0.14.0', async activate() {
       const response = await fetch(help); const text = await response.text();
       window.previewHelp = { status: response.status, type: response.headers.get('content-type'), text };
       return { modules: [{ id: 'help', label: 'HTML help', component() { return text; } }], dispose() {} };
@@ -499,4 +511,21 @@ test('contained HTML data assets load without exposing another document bootstra
   assert.deepEqual(observed, { status: 200, type: 'application/octet-stream', text: '<p>Contained HTML help marker</p>' });
   await page.getByText('<p>Contained HTML help marker</p>', { exact: true }).waitFor();
   for (const path of ['/', '/index.html', '/browser.html', '/provider-setup.html']) assert.equal((await fetch(running.origin + path)).status, 404);
+});
+
+
+test('snapshot documents omit the dev client and retained assets require the printed host', { timeout: 30000 }, async t => {
+  const directory = await source(t), running = await preview(t, directory, { origin: 'http://127.0.0.1:12345' });
+  const document = await (await fetch(running.url)).text();
+  assert.doesNotMatch(document, /@vite\/client/);
+  const asset = /src="([^"]+)"/.exec(document)[1];
+  const { request } = await import('node:http');
+  const status = await new Promise((resolve, reject) => {
+    const call = request(running.origin + asset, { headers: { Host: 'elsewhere.test' } }, response => { response.resume(); resolve(response.statusCode); });
+    call.on('error', reject); call.end();
+  });
+  assert.equal(status, 403);
+  await writeFile(join(directory, 'desktop/index.tsx'), 'not valid javascript');
+  const head = await fetch(running.url, { method: 'HEAD' });
+  assert.equal(head.status, 200, 'a header probe does not compile or retain another document');
 });

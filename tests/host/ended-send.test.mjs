@@ -51,3 +51,16 @@ test('ended send throws on a row that names the run but cannot decode, and does 
   earlier('corrupt', { intent: "'not json'" });
   assert.throws(() => store.endedSend(scope), SyntaxError);
 });
+
+test('ended send ignores a damaged target on a historical completed command', async t => {
+  const { scope, store } = await ended(t);
+  assert.equal(offeredRunId(store), run);
+  store.db.prepare("UPDATE commands SET target='{}' WHERE id='offered'").run();
+  assert.equal(store.endedSend(scope)?.command.clientCommandId, 'send');
+});
+
+for (const receipt of ['not json', JSON.stringify({state:{kind:'unknown'}})]) test(`ended send fails closed on a matching malformed receipt: ${receipt}`, async t => {
+  const {scope,store}=await ended(t);
+  store.db.prepare("UPDATE commands SET receipt=? WHERE id='send'").run(receipt);
+  assert.throws(()=>store.endedSend(scope));
+});

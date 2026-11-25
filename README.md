@@ -1,6 +1,6 @@
 # OpenPane
 
-See the [customization guide](docs/extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview.
+See the [customization guide](docs/extensions/customization-guide.md) for preferences, palette exchange, executable UI and local preview. The [agent experience guide](docs/customization/agent-experiences.md) covers live appearance edits, native chat windows and saved Datadog metrics cards.
 
 OpenPane is a conversation client for existing agent installations, with React customization for Tauri desktop and a separate React Native iOS client.
 

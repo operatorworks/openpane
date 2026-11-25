@@ -142,7 +142,7 @@ test('chat workspace separates the icon rail and chat list and opens settings wi
   assert.equal(await chats.getAttribute('aria-pressed'), 'true');
   assert.equal(await page.locator('.recovery-menu summary').isVisible(), true);
   const rail = await page.getByRole('navigation', { name: 'Workspace views' }).boundingBox();
-  const sidebar = await page.locator('.application-controls').boundingBox();
+  const sidebar = await page.locator('[data-home-pane="conversations"]').boundingBox();
   assert.ok(rail.x + rail.width <= sidebar.x, 'icon rail is a separate pane beside the chat list');
   await settings.click();
   await page.getByRole('heading', { name: 'Settings', level: 1, exact: true }).waitFor();
@@ -177,7 +177,7 @@ test('the rail lists Chats, Extensions and Settings in order and Extensions togg
   await extensions.click();
   assert.equal(await extensions.getAttribute('aria-pressed'), 'true');
   assert.equal(await rail.getByRole('button', { name: 'Chats', exact: true }).getAttribute('aria-pressed'), 'false');
-  await page.getByRole('heading', { name: 'Extensions', level: 2, exact: true }).waitFor();
+  assert.equal(await page.locator('[data-home-pane=extensions]').isVisible(), false);
   await page.getByRole('heading', { name: 'Extensions', level: 1, exact: true }).waitFor();
   await page.setViewportSize({ width: 360, height: 480 });
   for (const name of ['Chats', 'Extensions', 'Settings']) assert.equal(await rail.getByRole('button', { name, exact: true }).isVisible(), true, name);

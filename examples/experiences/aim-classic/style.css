@@ -1,0 +1,41 @@
+[data-openpane-part="main"] { font-family: Tahoma, Verdana, sans-serif; font-size: 12px; background-color: #d4d0c8; }
+[data-openpane-part="header"] { background-image: linear-gradient(to right, #000080, #1084d0); background-color: #000080; color: #ffffff; padding: 4px 8px; border-bottom: 2px solid #808080; }
+[data-openpane-part="caption-title"] { color: #ffffff; font-size: 12px; font-weight: 700; }
+[data-openpane-part="page-header"] { background-image: linear-gradient(to right, #000080, #1084d0); color: #ffffff; padding: 4px 8px; }
+[data-openpane-part="page-rail"] { background-color: #d4d0c8; border-right: 2px solid #808080; padding: 4px; }
+[data-openpane-part="home"] { background-color: #d4d0c8; padding: 4px; gap: 4px; }
+[data-openpane-part="pane"] { background-color: #ffffff; border: 2px inset #808080; border-radius: 0px; }
+[data-openpane-part="pane-heading"] { font-size: 11px; color: #111111; background-color: #d4d0c8; border-bottom: 1px solid #808080; padding: 3px 6px; }
+[data-openpane-part="button"] { font-size: 11px; line-height: 1.4; font-weight: 400; color: #111111; background-color: #d4d0c8; border: 2px outset #d4d0c8; border-radius: 0px; padding: 2px 6px; box-shadow: inset 1px 1px 0 #ffffff, inset -1px -1px 0 #808080; }
+[data-openpane-part="button"]:hover { background-color: #e6e3dc; }
+[data-openpane-part="button"]:active { border-style: inset; box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #ffffff; }
+[data-openpane-part="button"]:disabled { color: #505050; background-color: #d4d0c8; }
+[data-openpane-part="button"][data-openpane-role="navigation"][data-openpane-state="selected"] { color: #ffffff; background-color: #000080; border-style: inset; box-shadow: none; }
+[data-openpane-part="button"][data-openpane-role="agent-row"] { color: #111111; background-color: #ffffff; border: 0px solid #ffffff; padding: 2px 4px; box-shadow: none; }
+[data-openpane-part="button"][data-openpane-role="agent-row"]:hover { color: #ffffff; background-color: #000080; }
+[data-openpane-part="button"][data-openpane-role="directory-row"] { color: #111111; background-color: #ffffff; border: 0px solid #ffffff; padding: 2px 4px; box-shadow: none; }
+[data-openpane-part="button"][data-openpane-role="directory-row"][data-openpane-state="selected"] { color: #ffffff; background-color: #000080; }
+[data-openpane-part="status"] { font-size: 10px; color: #505050; }
+[data-openpane-part="input"], [data-openpane-part="textarea"], [data-openpane-part="select"] { font-size: 12px; font-family: Tahoma, Verdana, sans-serif; color: #111111; background-color: #ffffff; border: 2px inset #808080; border-radius: 0px; padding: 3px 4px; }
+[data-openpane-part="checkbox"], [data-openpane-part="radio"] { color: #111111; background-color: #ffffff; border: 2px inset #808080; accent-color: #000080; }
+[data-openpane-part="field-label"] { font-size: 11px; color: #111111; }
+[data-openpane-part="chat-window"] { background-color: #d4d0c8; border-radius: 0px; padding: 4px; }
+[data-openpane-part="transcript-surface"] { background-color: #ffffff; border: 2px inset #808080; padding: 6px; }
+[data-openpane-part="transcript"] { background-color: #ffffff; border: 0px solid #ffffff; padding: 0px; gap: 4px; }
+[data-openpane-part="transcript-row"] { background-color: #ffffff; border-radius: 0px; padding: 0px; }
+[data-openpane-part="message-author"] { font-family: "Times New Roman", Times, serif; font-size: 14px; font-weight: 700; }
+[data-openpane-part="message-author"][data-openpane-state="local"] { color: #b00000; }
+[data-openpane-part="message-author"][data-openpane-state="remote"] { color: #0000a0; }
+[data-openpane-part="message-body"], [data-openpane-part="message-text"] { font-family: "Times New Roman", Times, serif; font-size: 14px; line-height: 1.4; color: #111111; }
+[data-openpane-part="code-block"] { font-family: Consolas, Monaco, monospace; font-size: 12px; border: 1px solid #808080; border-radius: 0px; background-color: #f4f4f4; }
+[data-openpane-part="composer"] { border: 2px inset #808080; border-radius: 0px; padding: 4px; background-color: #d4d0c8; gap: 4px; }
+[data-openpane-part="toolbar"] { padding: 2px; background-color: #d4d0c8; }
+[data-openpane-part="button"][data-openpane-role="send"] { font-weight: 700; padding: 3px 12px; }
+[data-openpane-part="approval-panel"] { border: 2px inset #808080; border-radius: 0px; background-color: #ffffff; padding: 6px; }
+[data-openpane-part="card"] { border: 2px outset #d4d0c8; border-radius: 0px; background-color: #d4d0c8; box-shadow: inset 1px 1px 0 #ffffff, inset -1px -1px 0 #808080; }
+[data-openpane-part="card-title"] { color: #ffffff; background-image: linear-gradient(to right, #000080, #1084d0); font-size: 12px; padding: 4px 6px; }
+[data-openpane-part="card-toolbar"] { background-color: #d4d0c8; padding: 4px; }
+[data-openpane-part="card-summary"] { color: #111111; font-size: 11px; }
+[data-openpane-part="plot-frame"] { background-color: #ffffff; border: 2px inset #808080; border-radius: 0px; padding: 4px; }
+[data-openpane-part="plot-axis"], [data-openpane-part="plot-legend"] { color: #111111; font-family: Tahoma, Verdana, sans-serif; font-size: 10px; }
+[data-openpane-part="data-table"] { font-family: Tahoma, Verdana, sans-serif; font-size: 11px; background-color: #ffffff; }

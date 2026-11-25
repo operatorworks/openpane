@@ -10,12 +10,12 @@ import { budgets as defaultHostBudgets } from '../../packages/host/dist/durable-
 import { command, scope, other, until } from './fixture.mjs';
 
 const longText = '🙂汉"\\\n\u0000'.repeat(8_000);
-function fixture(t, mode, rejectAppend = () => false) {
+function fixture(t, mode, rejectAppend = () => false, options = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'openpane-codex-streaming-'));
   const logPath = join(dir, 'rpc.jsonl');
   const outputs = [];
   let host;
-  const createDriver = () => createCodexDriver({ cwd: dir, version: '0.167.2', executable: process.execPath,
+  const createDriver = () => createCodexDriver({ ...options, cwd: dir, version: '0.167.2', executable: process.execPath,
     args: [fileURLToPath(new URL('./fixtures/codex-streaming-agent.mjs', import.meta.url)), logPath, mode],
     append: (conversation, output) => {
       if (rejectAppend(conversation, output)) throw new Error('Fixture storage failure');
@@ -404,3 +404,39 @@ for (const rejectLate of [false, true]) {
     assert.deepEqual(f.document().domain, domain);
   });
 }
+
+
+test('UI integration text follows each exact scope through concurrent threads and resume without entering canonical messages', { timeout: 10000 }, async t => {
+  const f = fixture(t, 'ordinary', () => false, { uiContext: current => '<openpane-ui version="1">' + JSON.stringify(current) + '</openpane-ui>' });
+  const first = command('context-a', { kind: 'send', text: 'Question A' });
+  const second = command('context-b', { kind: 'send', text: 'Question B' }, other);
+  await Promise.all([f.port.submit(first), f.host.conversation(other).submit(second)]);
+  await until(() => f.messages().some(message => message.complete) && f.messages(other).some(message => message.complete));
+  const starts = f.log().filter(message => message.method === 'turn/start');
+  assert.equal(starts.length, 2);
+  for (const [text, expected] of [['Question A', scope], ['Question B', other]]) {
+    const input = starts.find(message => message.params.input.some(item => item.text === text)).params.input;
+    assert.deepEqual(input.map(item => item.text), ['<openpane-ui version="1">' + JSON.stringify(expected) + '</openpane-ui>', text]);
+    const canonical = f.document(expected).domain.messages.filter(message => message.role === 'user');
+    assert.deepEqual(canonical.map(message => message.text), [text]);
+  }
+  await f.reopen(true);
+  await f.port.submit(command('context-resume', { kind: 'send', text: 'Follow up A' }));
+  await until(() => f.log().filter(message => message.method === 'turn/start').length === 3);
+  const resumed = f.log().filter(message => message.method === 'turn/start').at(-1);
+  assert.equal(resumed.params.input[0].text, '<openpane-ui version="1">' + JSON.stringify(scope) + '</openpane-ui>');
+  assert.ok(f.log().some(message => message.method === 'thread/resume'));
+});
+
+test('UI context failure is a known non-dispatch outcome without leaking callback text', async t => {
+  let broken = true;
+  const f = fixture(t, 'ordinary', () => false, { uiContext() { if (broken) throw new Error('PRIVATE_CONTEXT_MARKER'); return 'context recovered'; } });
+  const result = await f.port.submit(command('context-failed'));
+  assert.deepEqual(result.receipt.state, { kind: 'not-dispatched', reason: 'UI context could not be prepared. Try again with a new command.' });
+  assert.equal(f.log().filter(message => message.method === 'turn/start').length, 0);
+  assert.deepEqual(f.document().domain.messages, []);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_CONTEXT_MARKER/);
+  broken = false;
+  assert.equal((await f.port.submit(command('context-recovered'))).receipt.state.kind, 'completed');
+  assert.equal(f.log().filter(message => message.method === 'turn/start').length, 1);
+});

@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { conversationLabel } from '@openpane/contracts/conversation';
-import type { ConversationScope } from '@openpane/contracts';
+import type { ConversationScope, ConversationOpenResult } from '@openpane/contracts';
 import { SERVICE_SEARCH_QUERY_LENGTH } from '@openpane/contracts/service';
 import type { ConversationSearchEntry } from '@openpane/contracts/service';
 import type { ApplicationController } from './application-controller.js';
@@ -10,12 +10,13 @@ type SearchResult = { readonly query: string; readonly items: readonly Conversat
   | { readonly kind: 'failed'; readonly error: string }
 );
 
-export function ConversationSearch({ controller, connectionKey, enabled, active, children }: {
+export function ConversationSearch({ controller, connectionKey, enabled, active, children, onOpen }: {
   readonly controller: ApplicationController;
   readonly connectionKey: string | null;
   readonly enabled: boolean;
   readonly active: ConversationScope | null;
   readonly children: ReactNode;
+  readonly onOpen?: (scope: ConversationScope) => Promise<ConversationOpenResult>;
 }) {
   const [input, setInput] = useState('');
   const [result, setResult] = useState<SearchResult>({ query: '', kind: 'ready', items: [] });
@@ -56,8 +57,8 @@ export function ConversationSearch({ controller, connectionKey, enabled, active,
   const items = current?.items ?? [];
   const selectedIndex = items.findIndex(entry => entry.scope.conversationId === selected);
   return <section className="chat-search" aria-label="Saved chat search">
-    <label htmlFor={`${listId}-input`}>Search chats</label>
-    <input id={`${listId}-input`} type="search" role="combobox" autoComplete="off" maxLength={SERVICE_SEARCH_QUERY_LENGTH}
+    <label data-openpane-part="field-label" htmlFor={`${listId}-input`}>Search chats</label>
+    <input data-openpane-part="input" id={`${listId}-input`} type="search" role="combobox" autoComplete="off" maxLength={SERVICE_SEARCH_QUERY_LENGTH}
       placeholder="Search messages and chats" value={input} disabled={connectionKey === null}
       aria-controls={listId} aria-expanded={Boolean(query)} aria-autocomplete="list"
       aria-activedescendant={selectedIndex < 0 ? undefined : `${listId}-${selectedIndex}`}
@@ -74,22 +75,22 @@ export function ConversationSearch({ controller, connectionKey, enabled, active,
         }
         if (event.key === 'Enter' && enabled) {
           const entry = items[selectedIndex < 0 ? 0 : selectedIndex];
-          if (entry) { event.preventDefault(); void controller.open(entry.scope); }
+          if (entry) { event.preventDefault(); void (onOpen ?? (scope => controller.open(scope)))(entry.scope); }
         }
       }} />
-    {input && <button type="button" onClick={() => change('')}>Clear search</button>}
+    {input && <button data-openpane-part="button" type="button" onClick={() => change('')}>Clear search</button>}
     {query && <>
-      <p role="status" className="search-status">{connectionKey === null ? 'Connect to the host to search saved chats.'
+      <p data-openpane-part="status" role="status" className="search-status">{connectionKey === null ? 'Connect to the host to search saved chats.'
         : current?.kind === 'failed' ? 'Search incomplete.'
           : current?.kind !== 'ready' ? `Searching saved chats… ${items.length} found.`
             : items.length === 0 ? 'No matching chats.' : `${items.length} matching ${items.length === 1 ? 'chat' : 'chats'}.`}</p>
       {current?.kind === 'failed' && <div role="alert"><p>{current.error}</p>
-        <button type="button" onClick={() => { setResult({ query, kind: 'loading', items: [] }); setRetry(value => value + 1); }}>Retry search</button></div>}
+        <button data-openpane-part="button" type="button" onClick={() => { setResult({ query, kind: 'loading', items: [] }); setRetry(value => value + 1); }}>Retry search</button></div>}
     </>}
     <div id={listId} role="listbox" aria-label="Search results" hidden={!query}>
-      {items.map((entry, index) => <button type="button" role="option" id={`${listId}-${index}`} key={entry.scope.conversationId}
+      {items.map((entry, index) => <button data-openpane-part="button" type="button" role="option" id={`${listId}-${index}`} key={entry.scope.conversationId}
         disabled={!enabled} aria-selected={selectedIndex === index} aria-current={entry.scope.conversationId === active?.conversationId ? 'page' : undefined}
-        onFocus={() => setSelected(entry.scope.conversationId)} onClick={() => void controller.open(entry.scope)}>
+        onFocus={() => setSelected(entry.scope.conversationId)} onClick={() => void (onOpen ?? (scope => controller.open(scope)))(entry.scope)}>
         <span>{conversationLabel(entry)}</span>{entry.excerpt && <small>{entry.excerpt}</small>}
       </button>)}
     </div>

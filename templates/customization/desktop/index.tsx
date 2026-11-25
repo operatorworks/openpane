@@ -12,9 +12,9 @@ function decisions({ activity }: ConversationModuleProps) {
 function ReviewTranscript(props: ConversationModuleProps) {
   const unresolved = decisions(props);
   return <section aria-label="Review transcript">
-    <Surface className="review-decisions"><Text as="h2">Unresolved decisions</Text>
+    <Surface className="review-decisions"><Text as="h2">Review notes</Text>
       {unresolved.length ? <ul>{unresolved.map((line, index) => <li key={index}>{line}</li>)}</ul>
-        : <Text>No unresolved decisions identified. Ask the agent to review the plan.</Text>}
+        : <Text>No review notes identified. Ask the agent to review the plan.</Text>}
     </Surface>
     {props.activity.domain.messages.length === 0 ? <Text>This review has no messages yet.</Text>
       : props.activity.domain.messages.map(message => <article key={message.messageId}>
@@ -23,15 +23,21 @@ function ReviewTranscript(props: ConversationModuleProps) {
   </section>;
 }
 function ReviewWorkspace(props: WorkspaceViewProps) {
-  const [busy, setBusy] = useState(false), [error, setError] = useState(false);
-  async function perform(action: () => Promise<void>) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  async function perform(action: () => ReturnType<WorkspaceViewProps['open']> | Promise<void>) {
     if (busy) return;
-    setBusy(true); setError(false);
-    try { await action(); } catch { setError(true); } finally { setBusy(false); }
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const result = await action();
+      if (result?.kind === 'refused') setError(result.reason);
+      else if (result?.kind === 'detached') setNotice('Review opened in its own window.');
+      else if (result?.kind === 'pending') setNotice(result.reason);
+    } catch { setError('Could not open this review. Retry, or check the host status above.'); } finally { setBusy(false); }
   }
   return <section aria-label="Plan review workspace" className="review-workspace">
     <header><Text as="h1">Plan review workspace</Text><p>Review decisions with your agent. Send, approvals, Stop and recovery stay in the host conversation.</p></header>
-    {error && <p role="alert">Could not open this review. Retry, or check the host status above.</p>}
+    {error && <p role="alert">{error}</p>}
+    {notice && <p role="status">{notice}</p>}
     {props.conversations.loading && <p role="status">Loading reviews…</p>}
     <nav aria-label="Review conversations">
       {props.agents.map(agent => <button key={agent.id} disabled={busy || agent.availability.kind !== 'ready'}
@@ -49,7 +55,7 @@ function ReviewPlan(props: ConversationModuleProps) {
   return createElement(Surface, { className: 'review-plan' },
     createElement(Text, { as: 'h2' }, 'Plan review'),
     createElement(Text, null, 'Ask the current agent to review the plan and suggest a next step.'),
-    createElement(Text, null, `${unresolved.length} possible unresolved decisions in this conversation.`));
+    createElement(Text, null, `${unresolved.length} review notes in this conversation.`));
 }
 function ReviewGuidance() {
   return createElement(Surface, null,

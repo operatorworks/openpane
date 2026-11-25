@@ -17,7 +17,7 @@ function run(command, args, cwd) {
 test('packed SDK supports isolated platform-neutral provider authors through public exports', async () => {
   const temporary = await mkdtemp(join(tmpdir(), 'openpane-provider-consumer-'));
   try {
-    const packs = JSON.parse(run('npm', ['pack', './packages/sdk', './packages/contracts', './packages/protocol', './node_modules/@cfworker/json-schema', './node_modules/@ag-ui/core', '--json', '--ignore-scripts', '--pack-destination', temporary], root));
+    const packs = JSON.parse(run('npm', ['pack', './packages/sdk', './packages/contracts', './packages/protocol', './node_modules/@cfworker/json-schema', './node_modules/@ag-ui/core', './node_modules/zod', '--json', '--ignore-scripts', '--pack-destination', temporary], root));
     const sdk = join(temporary, 'node_modules', '@openpane/sdk');
     const protocol = join(sdk, 'node_modules', '@openpane/protocol');
     const destinationFor = name => name === '@openpane/sdk' ? sdk : name === '@openpane/contracts' ? join(temporary, 'node_modules', name) : join(name === '@ag-ui/core' ? protocol : sdk, 'node_modules', name);

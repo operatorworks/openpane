@@ -1,3 +1,5 @@
+import { useTheme } from '@openpane/theme/react';
+import { useExperience } from './experience-state.js';
 import { useEffect, useLayoutEffect, useRef, type FormEvent, type ReactNode, type RefObject } from 'react';
 
 /**
@@ -28,6 +30,7 @@ export function Composer({ id, label = 'Message', text, onText, placeholder, rea
   /** Before Send: Stop. */
   readonly actions?: ReactNode;
 }) {
+  const theme = useTheme(), experience = useExperience();
   const own = useRef<HTMLTextAreaElement>(null);
   const field = textareaRef ?? own;
   const form = useRef<HTMLFormElement>(null);
@@ -36,10 +39,10 @@ export function Composer({ id, label = 'Message', text, onText, placeholder, rea
     const node = field.current;
     if (!node) return;
     node.style.height = 'auto';
-    if (node.scrollHeight > 0) node.style.height = `${node.scrollHeight}px`;
+    if (node.scrollHeight > 0) node.style.height = `${node.scrollHeight + node.offsetHeight - node.clientHeight}px`;
     else node.style.height = '';
   }
-  useLayoutEffect(fit, [text]);
+  useLayoutEffect(fit, [text, theme, experience]);
   useEffect(() => {
     const node = field.current;
     if (!node || typeof ResizeObserver === 'undefined') return;
@@ -73,17 +76,17 @@ export function Composer({ id, label = 'Message', text, onText, placeholder, rea
     event.preventDefault();
     if (canSend) onSend();
   }
-  return <form ref={form} className="composer" data-drop={drop} onSubmit={submit}>
+  return <form ref={form} className="composer" data-openpane-part="composer" data-drop={drop} onSubmit={submit}>
     {above}
-    <label htmlFor={id}>{label}</label>
-    <textarea ref={field} id={id} value={text} onChange={event => onText(event.target.value)} readOnly={readOnly} placeholder={placeholder} rows={1} />
+    <label data-openpane-part="field-label" htmlFor={id}>{label}</label>
+    <textarea data-openpane-part="textarea" data-openpane-essential="composer" ref={field} id={id} value={text} onChange={event => onText(event.target.value)} readOnly={readOnly} placeholder={placeholder} rows={1} />
     {below}
-    <div className="composer-footer">
+    <div className="composer-footer" data-openpane-part="toolbar">
       {leading}
       {controls}
       <div className="composer-send-actions">
         {actions}
-        <button className="composer-send" aria-label="Send" title="Send" disabled={!canSend}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg></button>
+        <button data-openpane-part="button" data-openpane-role="send" data-openpane-essential="send" className="composer-send" aria-label="Send" title="Send" disabled={!canSend}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" /></svg><span className="composer-send-label">Send</span></button>
       </div>
     </div>
   </form>;

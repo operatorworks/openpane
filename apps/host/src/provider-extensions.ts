@@ -8,7 +8,7 @@ import type { ExtensionManifest, ServerExtensionEntry } from '@openpane/sdk';
 import type { AccessDatabase } from './access-database.js';
 import { createProviderAuthority, normalizeProviderInstallations } from './provider-credentials.js';
 import type { ProviderInstallation } from './provider-credentials.js';
-import { serverArtifactExpectation, serverArtifactSdk } from './server-artifact-runtime.js';
+import { serverArtifactExpectation } from './server-artifact-runtime.js';
 
 export type BrowserProviderExtension = (
   | { readonly kind?: never; readonly manifest: ExtensionManifest; readonly entry: ServerExtensionEntry }
@@ -85,7 +85,7 @@ export async function verifyArtifactPins(pins: readonly ArtifactPin[], grants: r
   return prepared.artifacts;
 }
 
-export function providerExtensionSource(database: AccessDatabase, selected: ProviderExtensionSelection): ServerExtensionSource {
+export function providerExtensionSource(database: AccessDatabase, selected: ProviderExtensionSelection, sdkUrl: string | null): ServerExtensionSource {
   return { namespaces: () => selectedNamespaces(selected), async prepare() {
     const loaded: { readonly loaded: LoadedServerEntry; readonly installations: readonly ProviderInstallation[] }[] = [];
     const extensions: ProviderExtension[] = [];
@@ -98,7 +98,7 @@ export function providerExtensionSource(database: AccessDatabase, selected: Prov
     if (prepared.kind === 'failed') return prepared;
     try {
       for (const item of prepared.entries) {
-        const entries = item.kind === 'artifact' ? await loadServerArtifact(item.verified, serverArtifactSdk())
+        const entries = item.kind === 'artifact' ? await loadServerArtifact(item.verified, sdkUrl ?? (() => { throw new Error('Packaged SDK location unavailable'); })())
           : item.kind === 'installed' ? [await loadServerExtension(item)] : [{ manifest: item.manifest, entry: item.entry }];
         loaded.push(...entries.map(entry => ({ loaded: entry, installations: item.installations.filter(grant => grant.instance.namespace === entry.manifest.namespace) })));
       }

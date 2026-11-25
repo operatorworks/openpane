@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ConversationScope } from '@openpane/contracts';
 import type { WorkspaceAgent, WorkspaceViewProps } from '@openpane/sdk/react';
 import { useTheme } from '@openpane/theme/react';
@@ -51,14 +51,12 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   const filter = filtered.installationId === installationId ? filtered.coworkerId : null;
   const setFilter = (coworkerId: string | null) => setFiltered({ installationId, coworkerId });
   const [narrowPane, setNarrowPane] = useState<'list' | 'conversation'>('list');
-  // The narrow layout moves to the conversation only once `selected` changes: open and create resolve without one on failure.
-  // Navigating elsewhere drops the wait, so a later unrelated selection does not move the pane.
-  const [awaiting, setAwaiting] = useState<{ readonly before: string | null } | null>(null);
   const [notice, setNotice] = useState('');
+  const waiting = useRef<object | null>(null);
+  const inFlight = useRef<object | null>(null);
+  const [opening, setOpening] = useState(false);
+  function stopAwaiting() { waiting.current = null; }
   const selectedKey = props.selected ? `${props.selected.hostId}/${props.selected.conversationId}` : null;
-  useEffect(() => {
-    if (awaiting && selectedKey !== null && selectedKey !== awaiting.before) { setAwaiting(null); setNarrowPane('conversation'); }
-  }, [awaiting, selectedKey]);
   const key = coworkers.map(item => item.providerAgentId).join(',');
   useEffect(() => {
     if (!available || !installationId) return;
@@ -103,13 +101,22 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   const detail = shown ? details.get(shown.providerAgentId) : undefined;
   const chats = entries.filter(entry => !filter || entry.provider.providerAgentId === filter);
   /** Opens or creates a chat. A rejection is shown here; any other failure is in the host status strip. */
-  async function attempt(action: () => Promise<void>) {
-    setNotice(''); setAwaiting({ before: selectedKey });
-    try { await action(); }
-    catch { setAwaiting(null); setNotice('That chat could not be opened. Refresh the list and try again.'); }
+  async function attempt(action: () => ReturnType<WorkspaceViewProps['open']>) {
+    if (inFlight.current) return;
+    const attempt = {}; inFlight.current = attempt; waiting.current = attempt; setOpening(true);
+    setNotice('');
+    try {
+      const result = await action();
+      if (waiting.current !== attempt) return;
+      stopAwaiting();
+      if (result.kind === 'inline') setNarrowPane('conversation');
+      else { setNarrowPane('list'); setNotice(result.kind === 'detached' ? 'Chat opened in its own window.' : result.reason); }
+    }
+    catch { if (waiting.current !== attempt) return; stopAwaiting(); setNotice('That chat could not be opened. Refresh the list and try again.'); }
+    finally { if (inFlight.current === attempt) { inFlight.current = null; setOpening(false); } }
   }
   function openChat(scope: ConversationScope) {
-    if (selectedKey === `${scope.hostId}/${scope.conversationId}`) { setNarrowPane('conversation'); return; }
+    if (selectedKey === `${scope.hostId}/${scope.conversationId}`) { stopAwaiting(); setNotice(''); setNarrowPane('conversation'); return; }
     void attempt(() => props.open(scope));
   }
   function chatWith(coworker: Coworker) {
@@ -122,12 +129,12 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
     }
     void attempt(() => props.create(coworker.id));
   }
-  const target = current ?? (filter ? byId.get(filter) : coworkers[0]);
+  const target = filter ? byId.get(filter) : current ?? coworkers[0];
   return <ThemeScope className="coworkers-workspace" colors={PALETTE[theme.appearance]} data-pane={narrowPane}>
     <nav className="coworkers-app-bar" aria-label="Coworkers app bar">
       <div role="group" aria-label="Coworkers sections" className="coworkers-sections">
-        <button type="button" aria-pressed={tab === 'chat'} onClick={() => { setAwaiting(null); setTab('chat'); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>Chat</button>
-        <button type="button" aria-pressed={tab === 'coworkers'} onClick={() => { setAwaiting(null); setTab('coworkers'); }}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c0-3.3 2.7-5 6-5s6 1.7 6 5M14 19c0-2 1.5-3.5 4-3.5s3 1 3 3.5"/></svg>Coworkers</button>
+        <button type="button" aria-pressed={tab === 'chat'} onClick={() => { stopAwaiting(); setTab('chat'); }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>Chat</button>
+        <button type="button" aria-pressed={tab === 'coworkers'} onClick={() => { stopAwaiting(); setTab('coworkers'); }}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c0-3.3 2.7-5 6-5s6 1.7 6 5M14 19c0-2 1.5-3.5 4-3.5s3 1 3 3.5"/></svg>Coworkers</button>
       </div>
     </nav>
     {tab === 'coworkers' ? <section className="coworkers-directory" aria-label="Coworker directory">
@@ -149,7 +156,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
               {info?.slack && <span className="coworkers-badge">Slack</span>}
             </div>
             <div className="coworkers-card-actions">
-              <button type="button" disabled={item.availability.kind !== 'ready'} aria-label={`Chat with ${item.label}`} onClick={() => chatWith(item)}>Chat</button>
+              <button type="button" disabled={opening || item.availability.kind !== 'ready'} aria-label={`Chat with ${item.label}`} onClick={() => chatWith(item)}>Chat</button>
               <button type="button" disabled={!management} title={management ? undefined : NEWER}>Edit</button>
               <button type="button" disabled={!management} title={management ? undefined : NEWER}>Delete</button>
             </div>
@@ -160,11 +167,11 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
       <section className="coworkers-chat-list" aria-label="Chats">
         <header className="coworkers-chat-list-header">
           <h2>Chats</h2>
-          {target && <button type="button" onClick={() => void attempt(() => props.create(target.id))}>New chat</button>}
+          {target && <button type="button" disabled={opening} onClick={() => void attempt(() => props.create(target.id))}>New chat</button>}
         </header>
         {notice && <p role="alert" className="coworkers-notice">{notice}</p>}
         {listError && <p role="status" className="coworkers-notice">{listError} <button type="button" onClick={() => setListAttempt(attempt => attempt + 1)}>Retry</button></p>}
-        {filter && <button type="button" className="coworkers-filter" onClick={() => { setAwaiting(null); setFilter(null); }}>Showing {byId.get(filter)?.label ?? filter} · Show all</button>}
+        {filter && <button type="button" className="coworkers-filter" onClick={() => { stopAwaiting(); setFilter(null); }}>Showing {byId.get(filter)?.label ?? filter} · Show all</button>}
         {chats.length === 0 && <p className="coworkers-empty">{props.conversations.hasMore
           ? 'No matching chats on the loaded pages. Load more chats to keep looking.'
           : 'No chats yet. Open the Coworkers tab and choose Chat.'}</p>}
@@ -173,7 +180,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
             const who = byId.get(entry.provider.providerAgentId);
             const name = who?.label ?? entry.provider.providerAgentId;
             return <li key={entry.scope.conversationId}>
-              <button type="button" className="coworkers-chat-card" aria-current={props.selected?.conversationId === entry.scope.conversationId ? 'page' : undefined}
+              <button type="button" disabled={opening && selectedKey !== `${entry.scope.hostId}/${entry.scope.conversationId}`} className="coworkers-chat-card" aria-current={props.selected?.conversationId === entry.scope.conversationId ? 'page' : undefined}
                 onClick={() => openChat(entry.scope)}>
                 <span className="coworkers-avatar" aria-hidden="true">{initials(name)}</span>
                 <span className="coworkers-chat-text"><strong>{name}</strong><span>{entry.preview ?? 'New chat'}</span></span>
@@ -186,7 +193,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
       <section className="coworkers-main" aria-label="Coworker conversation">
         {shown ? <>
           <header className="coworkers-header">
-            <button type="button" className="coworkers-back" onClick={() => { setAwaiting(null); setNarrowPane('list'); }}>Chats</button>
+            <button type="button" className="coworkers-back" onClick={() => { stopAwaiting(); setNarrowPane('list'); }}>Chats</button>
             <span className="coworkers-avatar" aria-hidden="true">{initials(shown.label)}</span>
             <div className="coworkers-header-text"><h2>{shown.label}</h2>{detail && <span className="coworkers-role">{detail.role}</span>}</div>
             <div className="coworkers-pills" role="group" aria-label="Conversation views">
@@ -203,7 +210,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
             </dl> : selectedEntry && props.conversation
               ? <CoworkerContext.Provider value={{ name: shown.label }}>{props.conversation}</CoworkerContext.Provider>
               : <div className="coworkers-empty-state"><p>No chat with {shown.label} is open.</p>
-                  {current && <button type="button" onClick={() => void attempt(() => props.create(current.id))}>Start a chat</button>}</div>}
+                  {current && <button type="button" disabled={opening} onClick={() => void attempt(() => props.create(current.id))}>Start a chat</button>}</div>}
           </div>
         </> : <div className="coworkers-empty-state"><p>Choose a chat, or open the Coworkers tab to start one.</p></div>}
       </section>

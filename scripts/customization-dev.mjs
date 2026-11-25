@@ -13,12 +13,14 @@ import { developmentPlan, previewHost, previewPort } from './lib/customization-d
 const root = fileURLToPath(new URL('../', import.meta.url));
 const assetTypes = { '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.woff': 'font/woff', '.woff2': 'font/woff2' };
+const assetPath = file => new URL(file, 'http://preview.local/').pathname;
 const html = '<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>OpenPane local preview</title></head><body><div id="root"></div></body></html>';
 
 function previewRoutes(host, origin, plan) {
   // A document's full import graph is compiled together, including modules it has not requested yet.
-  // Retaining hashed outputs lets older documents finish lazy imports after another tab reloads.
+  // Retain immutable snapshots for open documents; refuse new snapshots before the cache exceeds its budget.
   const assets = new Map();
+  let assetBytes = 0;
   async function snapshot() {
     const config = desktopConfig('browser', plan, { development: true });
     const result = await build({ ...config, configFile: false, root: join(root, 'apps/desktop'), mode: 'browser', logLevel: 'error',
@@ -27,17 +29,22 @@ function previewRoutes(host, origin, plan) {
           output: { ...config.build.rollupOptions.output, entryFileNames: 'assets/preview-[hash].js' } } } });
     const outputs = (Array.isArray(result) ? result : [result]).flatMap(item => item.output);
     const entry = outputs.find(item => item.type === 'chunk' && item.isEntry);
-    for (const output of outputs) assets.set('/' + output.fileName, output.type === 'chunk' ? output.code : output.source);
-    const css = [...(entry.viteMetadata?.importedCss ?? [])].map(file => `<link rel="stylesheet" href="/${file}">`).join('');
-    return html.replace('</head>', css + '</head>').replace('</body>', `<script type="module" src="/${entry.fileName}"></script></body>`);
+    const additions = outputs.filter(output => !assets.has(assetPath(output.fileName)));
+    const bytes = additions.reduce((total, output) => total + Buffer.byteLength(output.type === 'chunk' ? output.code : output.source), 0);
+    if (assetBytes + bytes > 128 * 1024 * 1024 || assets.size + additions.length > 4096) throw new Error('Preview snapshot capacity reached. Restart the preview command to release earlier snapshots.');
+    for (const output of additions) assets.set(assetPath(output.fileName), output.type === 'chunk' ? output.code : output.source);
+    assetBytes += bytes;
+    const css = [...(entry.viteMetadata?.importedCss ?? [])].map(file => `<link rel="stylesheet" href="${assetPath(file)}">`).join('');
+    return html.replace('</head>', css + '</head>').replace('</body>', `<script type="module" src="${assetPath(entry.fileName)}"></script></body>`);
   }
-  return { name: 'openpane-local-preview', closeBundle() { assets.clear(); }, configureServer(server) {
+  return { name: 'openpane-local-preview', closeBundle() { assets.clear(); assetBytes = 0; }, configureServer(server) {
     server.middlewares.use((req, res, next) => {
       const path = new URL(req.url ?? '/', origin).pathname;
       const refuse = (status, message) => { res.statusCode = status; res.end(message); };
+      if (req.headers.host !== new URL(origin).host) return refuse(403, 'Preview requires its printed loopback address.');
       if (path.startsWith('/api/')) {
         if (!['/api/v1', '/api/v1/images'].includes(req.url)) return refuse(404, 'Unknown preview API path.');
-        if (req.headers.host !== new URL(origin).host || req.headers.origin !== origin) return refuse(403, 'Preview API requires its own origin.');
+        if (req.headers.origin !== origin) return refuse(403, 'Preview API requires its own origin.');
         if (req.method !== 'POST') return refuse(405, 'Preview API requires POST.');
         if (req.headers['content-type'] !== 'application/json') return refuse(415, 'Preview API requires JSON.');
         const target = new URL(req.url, host);
@@ -53,11 +60,12 @@ function previewRoutes(host, origin, plan) {
         return;
       }
       if (path === '/preview.html') {
-        if (req.headers.host !== new URL(origin).host) return refuse(403, 'Preview requires its printed loopback address.');
         if (req.method !== 'GET' && req.method !== 'HEAD') return refuse(405, 'Preview document requires GET.');
         res.setHeader('Cache-Control', 'no-store');
-        void snapshot().then(body => server.transformIndexHtml('/preview.html', body)).then(body => {
-          res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(req.method === 'HEAD' ? '' : body);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        if (req.method === 'HEAD') { res.end(); return; }
+        void snapshot().then(body => {
+          res.end(body);
         }).catch(error => {
           server.config.logger.error(error.message);
           refuse(500, 'Could not load preview. Check the source diagnostic in the terminal, correct the entry, then reload.');

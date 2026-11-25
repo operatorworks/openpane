@@ -1,13 +1,14 @@
+import type { ExperienceV2 } from '@openpane/contracts';
 import { Component, useState, type ReactNode } from 'react';
 import { Button, Surface, Text, ThemeScope } from '@openpane/ui-primitives/desktop';
 
-import { palettes, type Appearance } from '@openpane/theme';
+import { palettes, type Appearance, type ThemeColors } from '@openpane/theme';
 
 type ContentState = { readonly kind: 'ready' } | { readonly kind: 'failed' };
 
 type ContentBoundaryProps = { readonly children: ReactNode; readonly revision: number };
 
-class ContentBoundary extends Component<ContentBoundaryProps, ContentState> {
+export class ContentBoundary extends Component<ContentBoundaryProps, ContentState> {
   override state: ContentState = { kind: 'ready' };
 
   static getDerivedStateFromError(): ContentState {
@@ -55,7 +56,9 @@ function DefaultView() {
   </div>;
 }
 
-export function DesktopShell({ appearance, onRestoreAppearance, children, defaultView, settingsView, extensionsView, workspaceOpen = false, protectedContent, navigation, activeView, onRestore, restoreMode = 'remount', status, buildLabel }: {
+export function DesktopShell({ experience, contentPalette, appearance, onRestoreAppearance, children, defaultView, settingsView, extensionsView, workspaceOpen = false, composed = false, protectedContent, navigation, activeView, onRestore, restoreMode = 'remount', status, buildLabel }: {
+  readonly experience?: ExperienceV2 | undefined;
+  readonly contentPalette?: Readonly<Record<Appearance, ThemeColors>> | undefined;
   readonly appearance?: Appearance | undefined;
   readonly onRestoreAppearance?: () => void;
   readonly children?: ReactNode;
@@ -64,9 +67,10 @@ export function DesktopShell({ appearance, onRestoreAppearance, children, defaul
   readonly extensionsView?: ReactNode;
   /** An extension workspace owns the area right of the rail, so the sidebar column collapses. */
   readonly workspaceOpen?: boolean;
+  readonly composed?: boolean;
   readonly protectedContent?: ReactNode;
   readonly navigation?: ReactNode;
-  readonly activeView?: 'chats' | 'extensions' | 'settings';
+  readonly activeView?: 'home' | 'chats' | 'extensions' | 'settings';
   readonly onRestore?: () => void;
   readonly restoreMode?: 'remount' | 'managed';
   readonly status?: ReactNode;
@@ -77,9 +81,9 @@ export function DesktopShell({ appearance, onRestoreAppearance, children, defaul
   const revision = view.kind === 'initial' ? 0 : view.revision;
   const showSettings = settingsView !== undefined && activeView === 'settings';
   const showExtensions = extensionsView !== undefined && activeView === 'extensions';
-  return <ThemeScope appearance={appearance} className="desktop-shell" data-workspace-view={activeView} data-workspace-open={showExtensions && workspaceOpen ? 'true' : undefined}>
-    <header className="shell-header">
-      <div className="brand"><span className="brand-mark" aria-hidden="true">a</span><strong>OpenPane</strong><span className="platform-label">Desktop</span></div>
+  return <ThemeScope density={experience?.theme.density ?? 'comfortable'} variants={experience?.theme} appearance={appearance} className={`desktop-shell${composed ? ' composed-shell' : ''}`} data-openpane-part="main" data-workspace-view={activeView} data-workspace-open={showExtensions && workspaceOpen ? 'true' : undefined}>
+    <header className="shell-header" data-openpane-part="header">
+      <div className="brand" data-openpane-part="caption"><span className="brand-mark" aria-hidden="true">a</span><strong data-openpane-part="caption-title">OpenPane</strong><span className="platform-label">Desktop</span></div>
       <details className="recovery-menu"><summary>View options</summary><nav aria-label="Recovery controls">
         <Button tone="secondary" onClick={() => { onRestore?.(); setView((current) => ({ kind: 'default', revision: current.kind === 'default' ? current.revision + 1 : 1 })); }}>Restore default view</Button>
         {onRestoreAppearance && <Button tone="secondary" onClick={onRestoreAppearance}>Restore default appearance</Button>}
@@ -89,15 +93,15 @@ export function DesktopShell({ appearance, onRestoreAppearance, children, defaul
     {navigation}
     {protectedContent}
     <main id="main-content">
-      <div className="shell-view" hidden={showSettings || showExtensions}>
+      <div className="shell-view" data-shell-destination="home" hidden={showSettings || showExtensions}>
         <ContentBoundary key={boundaryKey} revision={revision}>
-          <ThemeScope palette={palettes} className="content-theme">{view.kind === 'initial' ? children ?? defaultView ?? <DefaultView /> : defaultView ?? <DefaultView />}</ThemeScope>
+          <ThemeScope palette={contentPalette ?? palettes} className="content-theme">{view.kind === 'initial' ? children ?? defaultView ?? <DefaultView /> : defaultView ?? <DefaultView />}</ThemeScope>
         </ContentBoundary>
       </div>
-      {settingsView !== undefined && <div className="shell-view" hidden={!showSettings}>
+      {settingsView !== undefined && <div className="shell-view" data-shell-destination="settings" hidden={!showSettings}>
         <ContentBoundary key={`settings-${boundaryKey}`} revision={revision}>{settingsView}</ContentBoundary>
       </div>}
-      {extensionsView !== undefined && <div className="shell-view" hidden={!showExtensions}>
+      {extensionsView !== undefined && <div className="shell-view" data-shell-destination="extensions" hidden={!showExtensions}>
         <ContentBoundary key={`extensions-${boundaryKey}`} revision={revision}>{extensionsView}</ContentBoundary>
       </div>}
     </main>

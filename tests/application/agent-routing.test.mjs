@@ -191,12 +191,14 @@ test('authorized agent API and browser route two recorded agents and retain unav
   assert.equal(await page.getByRole('button', { name: `Start new chat with ${sonnet.label}`, exact: true }).isEnabled(), true);
   assert.match(await page.locator('.shell-footer').textContent(), /Local Codex · Approvals required for changes/);
   assert.equal(await message.inputValue(), 'Draft for Codex');
-  let loseCreate = true, dropCreate = false, droppedScope;
+  let loseCreate = true, dropCreate = false;
+  const droppedCreateAborted = Promise.withResolvers();
   const createRequests = [], recoveryResponses = [];
   await page.route('**/api/v1', async route => {
     if (route.request().postDataJSON().op === 'create') createRequests.push(route.request().postDataJSON());
     if (dropCreate && route.request().postDataJSON().op === 'create') {
-      dropCreate = false; droppedScope = route.request().postDataJSON().scope; await route.abort();
+      dropCreate = false; const scope = route.request().postDataJSON().scope;
+      await route.abort(); droppedCreateAborted.resolve(scope);
     } else if (loseCreate && route.request().postDataJSON().op === 'create') {
       loseCreate = false; await route.fetch(); await route.abort();
     } else await route.continue();
@@ -238,22 +240,26 @@ test('authorized agent API and browser route two recorded agents and retain unav
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const db = request.result, transaction = db.transaction('records', 'readwrite');
-      transaction.objectStore('records').put({ version: 1, route: { hostId, conversationId: 'a' },
-        pendingCreation: { hostId, conversationId: 'legacy-absent' } }, ['view', sessionStorage.getItem('openpane.viewId'), hostId]);
+      transaction.objectStore('records').put({ version: 1, route: null,
+        pendingCreation: { hostId, conversationId: 'legacy-absent' } }, ['view', 'legacy-agent-routing', hostId]);
       transaction.oncomplete = () => { db.close(); resolve(); };
     };
   }), access.hostId);
   await page.reload();
+  await page.getByRole('button', { name: 'Reopen saved view legacy-agent-routing', exact: true }).click();
   await page.getByRole('button', { name: 'Recover creation', exact: true }).click();
   await page.getByText(/Choose an agent explicitly/).waitFor();
   assert.equal(host.installation({ ...scopeA, conversationId: 'legacy-absent' }), null);
   await page.getByRole('combobox', { name: 'Agent for pending creation', exact: true }).selectOption(sonnet.id);
   await page.getByRole('button', { name: 'Recover creation', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.scope-label')?.textContent === 'legacy-absent');
+  await page.waitForFunction(() => document.querySelector('.scope-label')?.textContent === 'legacy-absent').catch(async error => {
+    throw new Error(`Recovery notices: ${JSON.stringify(await page.getByRole('alert').allTextContents())}`, { cause: error });
+  });
   assert.deepEqual(host.installation({ ...scopeA, conversationId: 'legacy-absent' }), b);
   await open('a');
   dropCreate = true;
   await page.getByRole('button', { name: 'New conversation', exact: true }).click();
+  const droppedScope = await droppedCreateAborted.promise;
   await page.getByRole('button', { name: 'Recover creation', exact: true }).waitFor();
   assert.equal(host.installation(droppedScope), null);
   host.close(); await host.drained;

@@ -1,3 +1,4 @@
+import { qualifyCardRestyle } from '../../../tests/application/metrics-card-support.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -41,7 +42,7 @@ async function audit(page, label) {
 for (const colorScheme of ['light', 'dark']) {
   test(`the Crew workspace (${colorScheme}) lists members, creates one, chats with it and refuses an unknown profile`, { timeout: 90_000 }, async t => {
     const f = await open(t, { colorScheme });
-    const row = f.page.locator('[data-extension="crew"]');
+    const row = f.page.locator('[data-extension="crew"]:visible');
     await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Ready', 'Crew ready');
     await f.page.getByRole('button', { name: 'Open Crew' }).click();
     const sidebar = f.page.getByRole('navigation', { name: 'Crew members' });
@@ -89,7 +90,7 @@ for (const colorScheme of ['light', 'dark']) {
 
 test('after an unknown outcome the member form locks its fields and retries the same request, creating one member', { timeout: 90_000 }, async t => {
   const f = await open(t, { operationDeadlineMs: 1_500 });
-  const row = f.page.locator('[data-extension="crew"]');
+  const row = f.page.locator('[data-extension="crew"]:visible');
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Ready', 'Crew ready');
   await f.page.getByRole('button', { name: 'Open Crew' }).click();
   const sidebar = f.page.getByRole('navigation', { name: 'Crew members' });
@@ -120,7 +121,7 @@ test('after an unknown outcome the member form locks its fields and retries the 
 
 test('a member request the host refused before it reached Crew unlocks the form instead of asking for a retry', { timeout: 90_000 }, async t => {
   const f = await open(t);
-  const row = f.page.locator('[data-extension="crew"]');
+  const row = f.page.locator('[data-extension="crew"]:visible');
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Ready', 'Crew ready');
   await f.page.getByRole('button', { name: 'Open Crew' }).click();
   const sidebar = f.page.getByRole('navigation', { name: 'Crew members' });
@@ -143,7 +144,7 @@ test('a member request the host refused before it reached Crew unlocks the form 
 
 test('a retry the host refused before it reached Crew keeps the original request and the locked fields', { timeout: 90_000 }, async t => {
   const f = await open(t);
-  const row = f.page.locator('[data-extension="crew"]');
+  const row = f.page.locator('[data-extension="crew"]:visible');
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Ready', 'Crew ready');
   await f.page.getByRole('button', { name: 'Open Crew' }).click();
   const sidebar = f.page.getByRole('navigation', { name: 'Crew members' });
@@ -183,7 +184,7 @@ test('a retry the host refused before it reached Crew keeps the original request
 
 test('a create request that settles after Cancel neither closes a newly opened member form nor changes the selection', { timeout: 90_000 }, async t => {
   const f = await open(t);
-  const row = f.page.locator('[data-extension="crew"]');
+  const row = f.page.locator('[data-extension="crew"]:visible');
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Ready', 'Crew ready');
   await f.page.getByRole('button', { name: 'Open Crew' }).click();
   const sidebar = f.page.getByRole('navigation', { name: 'Crew members' });
@@ -217,7 +218,7 @@ test('a create request that settles after Cancel neither closes a newly opened m
 
 test('a conversation started from the composer agent control shows its member even after another member was clicked', { timeout: 90_000 }, async t => {
   const f = await open(t);
-  const row = f.page.locator('[data-extension="crew"]');
+  const row = f.page.locator('[data-extension="crew"]:visible');
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Ready', 'Crew ready');
   await f.page.getByRole('button', { name: 'Open Crew' }).click();
   const workspace = f.page.locator('[data-extension-workspace="crew"]');
@@ -256,7 +257,7 @@ async function twoInstallations(t, { shared = false, prepare, state = 'Ready' } 
   await prepare?.(page);
   await page.goto(`${host.origin}/browser.html`);
   await page.getByRole('navigation', { name: 'Workspace views' }).getByRole('button', { name: 'Extensions', exact: true }).click();
-  const row = page.locator('[data-extension="crew"]');
+  const row = page.locator('[data-extension="crew"]:visible');
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === state, `Crew ${state}`);
   // Both installations' agents are in the namespace; wait for both before checking that only one is shown.
   await wait(async () => (await page.evaluate(() => fetch('/api/v1', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'metadata' }) })
@@ -358,7 +359,7 @@ test('with every Crew installation unavailable the workspace shows the shown ins
 
 test('a chosen member that is not listed yet falls back to the first member instead of claiming there are none', { timeout: 90_000 }, async t => {
   const f = await open(t);
-  const row = f.page.locator('[data-extension="crew"]');
+  const row = f.page.locator('[data-extension="crew"]:visible');
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Ready', 'Crew ready');
   await f.page.getByRole('button', { name: 'Open Crew' }).click();
   const sidebar = f.page.getByRole('navigation', { name: 'Crew members' });
@@ -386,7 +387,7 @@ test('a chosen member that is not listed yet falls back to the first member inst
 
 test('without a Crew installation the workspace shows setup guidance and calls nothing but the host', { timeout: 60_000 }, async t => {
   const f = await open(t, { configured: false });
-  const row = f.page.locator('[data-extension="crew"]');
+  const row = f.page.locator('[data-extension="crew"]:visible');
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Not configured', 'Crew not configured');
   await f.page.getByRole('button', { name: 'Open Crew' }).click();
   const setup = f.page.getByRole('region', { name: 'Crew setup' });
@@ -395,4 +396,14 @@ test('without a Crew installation the workspace shows setup guidance and calls n
   assert.equal(await setup.locator('input').count(), 0, 'no token entry field');
   assert.deepEqual(f.requests.filter(url => !url.startsWith(f.host.origin)), []);
   assert.deepEqual(f.violations, []);
+});
+
+ test('Crew transcript replacement keeps one app-owned metrics card through restyle', { timeout: 60000 }, async t => {
+  const f = await open(t), row = f.page.locator('[data-extension="crew"]:visible');
+  await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Ready', 'Crew ready');
+  await f.page.getByRole('button', { name: 'Open Crew' }).click();
+  await f.page.getByRole('navigation', { name: 'Crew members' }).getByText('codex · test').waitFor();
+  await f.page.getByRole('button', { name: 'Start conversation' }).click();
+  await f.page.locator('[data-extension-workspace="crew"] #message').waitFor();
+  await qualifyCardRestyle(f.host, f.page);
 });

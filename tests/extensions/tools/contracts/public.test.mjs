@@ -26,6 +26,7 @@ test('packed tools consumer resolves its dependency and types without DOM', asyn
           './packages/protocol',
           './node_modules/@cfworker/json-schema',
           './node_modules/@ag-ui/core',
+          './node_modules/zod',
           '--json',
           '--ignore-scripts',
           '--pack-destination',

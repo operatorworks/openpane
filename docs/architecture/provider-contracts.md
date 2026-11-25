@@ -121,7 +121,7 @@ Pending and accepted evidence survives weaker lookup outcomes. A changed run ref
 Accepted and completed send effects persist their scoped provider run reference atomically with the receipt in the same database.
 These effects contain no transcript output and do not establish a terminal run outcome.
 Provider observation supplies transcript output independently of command acceptance. Approval and cancellation capture the scoped references retained by observation.
-The current integration uses wire version 16, SDK compatibility 0.13.0, package versions 0.0 and transcript projection 4.
+The current integration uses wire version 16, SDK compatibility 0.14.0, package versions 0.0 and transcript projection 4.
 It does not qualify a complete provider conversation or upgrade an existing Mac installation.
 
 ## Captured frontend offers
@@ -262,7 +262,7 @@ A recovery snapshot that changes a reserved or closed decision is a validation e
 Shutdown or provider retirement during recovery waits for the pending snapshot and prevents its late result from committing or opening a replacement feed.
 The SDK has no snapshot cancellation operation, so a provider that does not settle its snapshot can delay shutdown or retirement.
 Automatic reconnect after `disconnected`, projection migration and generation replacement remain open work.
-The current integration uses wire version 16, transcript projection 4, SDK compatibility 0.13.0 and package versions 0.0. It does not upgrade the installed Mac app or qualify the full provider lifecycle.
+The current integration uses wire version 16, transcript projection 4, SDK compatibility 0.14.0 and package versions 0.0. It does not upgrade the installed Mac app or qualify the full provider lifecycle.
 
 ## Durable approval and Stop
 
@@ -412,7 +412,7 @@ The existing outbox and command store retain the original creation, provider gen
 `reconcileRevoke` resolves the original acknowledgement only when the provider has matching evidence.
 A later empty permission listing leaves an uncertain receipt unresolved. Retry of the same command ID preserves the saved intent without dispatching again.
 
-SDK compatibility 0.13.0 and wire 16 require rebuilt extensions and matching host and client releases.
+SDK compatibility 0.14.0 and wire 16 require rebuilt extensions and matching host and client releases.
 The host advances SQLite format 2 to 3 transactionally while preserving existing rows. Earlier hosts refuse format 3.
 Conversation modules receive a bound `permissions.read()` service and `commands.revokePermission(permissionId, scope)`.
 
@@ -478,9 +478,9 @@ SDK compatibility 0.11.0, core DB 9, transcript projection 4 and backend provide
 
 ### Desktop
 
-Opening any segment, from the catalog, a search hit or a saved route, reads `continuation` and follows each confirmed successor to the newest segment. The saved route moves with it. A walk that reaches a segment it already visited stops with an error. When following moved past the requested segment, its unsent draft moves once into the newest segment's composer if that composer is empty, and is never sent.
+Opening any segment, from the catalog, a search hit or a saved route, reads `continuation` and follows each confirmed successor to the newest segment. The saved route moves with it. A walk that reaches a segment it already visited stops with an error. When following moved past the requested segment, its unsent draft moves once into the newest segment's composer if that composer is empty, and is never sent. If the newest composer already contains other text, the earlier draft remains available in read-only recovery for copying. Its saved images and queued commands remain in the original view.
 
-A concluded conversation shows its closure notice, then what Continue does, then **Continue** and **Start a new chat**. Nothing starts until one is clicked. Continue sends `start`. While the answer or the read view is `starting`, the notice reads "Continuing…" and the desktop polls `read` with backoff, from 0.5 to 4 seconds, until the view settles. A `start` that times out or fails with anything but `invalid` is followed by a `read`, and is not reported as a failure when that read shows `starting` or `confirmed`. A confirmed successor opens in place of the closed conversation. `pending` offers **Check again** and **Start a new chat**; `unconfirmed` offers **Check again**, which sends `check`, and **Try again**, which sends `start`. A refusal shows its own text: `busy` offers **Try again**, `limit` offers **Try again** and **Start a new chat**, because provider limits reset and a refused handoff wrote nothing at the provider, and `unavailable` and `continued-elsewhere` offer **Start a new chat**. **Start a new chat** uses the ordinary create flow with the same agent, so it makes an unrelated conversation and sends nothing from the closed one. In both moves the unsent draft goes to the new composer and is never sent. The draft is read after the new chat opens, so text typed during the move is kept. Focus then moves to the new composer.
+A concluded conversation shows its closure notice, then what Continue does, then **Continue** and **Start a new chat**. Nothing starts until one is clicked. Continue sends `start`. While the answer or the read view is `starting`, the notice reads "Continuing…" and the desktop polls `read` with backoff, from 0.5 to 4 seconds, until the view settles. A `start` that times out or fails with anything but `invalid` is followed by a `read`, and is not reported as a failure when that read shows `starting` or `confirmed`. With inline placement, a confirmed successor opens in place of the closed conversation. With separate native placement, main opens or focuses the successor in its assigned window and the predecessor window keeps its scope. `pending` offers **Check again** and **Start a new chat**; `unconfirmed` offers **Check again**, which sends `check`, and **Try again**, which sends `start`. A refusal shows its own text: `busy` offers **Try again**, `limit` offers **Try again** and **Start a new chat**, because provider limits reset and a refused handoff wrote nothing at the provider, and `unavailable` and `continued-elsewhere` offer **Start a new chat**. **Start a new chat** uses the ordinary create flow with the same agent, so it makes an unrelated conversation and sends nothing from the closed one. In both moves the unsent draft goes to the new composer and is never sent. For inline moves, the draft is read after the new chat opens. Native moves capture its saved text before placement; later edits remain in the source chat and are not cleared by that transfer. After inline placement, focus moves to the new composer. Separate placement reports whether the target opened, is still pending, or was refused.
 
 Background reads stop after six consecutive failures, and moves to a confirmed successor stop after three failures; a successful read does not reset the move count. The notice then reads "OpenPane could not confirm this continuation yet." and offers **Check again**, which resets both counts and sends one `check`, and **Start a new chat**. A closed conversation whose first reads all fail ends in the same state. A polite live region outside the conversation view announces "Continuing…", the other state lines, and the boundary after Continue opens the new chat.
 

@@ -1,9 +1,10 @@
 import type { ComponentType, ReactNode } from 'react';
-import type { ConversationDocument, ConversationPermissions, ConversationScope, Json, PermissionScope, SubmitResult } from '@openpane/contracts';
+import type { ConversationOpenResult, ConversationDocument, ConversationPermissions, ConversationScope, Json, PermissionScope, SubmitResult } from '@openpane/contracts';
 import type { AgentDescriptor, ConversationProvider, ExtensionCallValue, ExtensionInstallationStatus } from '@openpane/contracts/service';
 import type { Transcript } from '@openpane/contracts/conversation';
 import { nonempty } from '@openpane/contracts/decode';
 import type { UiExtensionContext } from './tool-contracts.js';
+export type { ConversationOpenResult } from '@openpane/contracts';
 export type { FrontendToolContribution, FrontendToolContributions, UiExtensionContext } from './tool-contracts.js';
 import { behaviour } from './extensions.js';
 import type { EXTENSION_SDK_VERSION, ExtensionLifetime, FrontendPlatform } from './extensions.js';
@@ -71,25 +72,14 @@ export interface WorkspaceViewProps {
     readonly loading: boolean;
     more(): void;
   };
-  /** The application's single active conversation when it belongs to this namespace. */
+  /** The inline editor when it belongs to this namespace. Detached chats do not change selected. */
   readonly selected: ConversationScope | null;
   /** The host-rendered conversation, composer and approvals for `selected`; `null` when nothing is selected. Render it once. */
   readonly conversation: ReactNode;
-  /**
-   * Opens a conversation from this namespace's list. It becomes the application's active conversation.
-   * Rejects only for a scope outside this namespace. Otherwise it resolves once the attempt ends, also when the attempt
-   * did not open the conversation, and `selected` stays unchanged. A host refusal is shown in the host status strip. While
-   * the application is busy with another operation the attempt is ignored and nothing is shown, so disable or retry the
-   * control yourself. Watch `selected`, not the promise, to learn what opened.
-   */
-  open(scope: ConversationScope): Promise<void>;
-  /**
-   * Creates a conversation with one of this namespace's agents and makes it the active conversation.
-   * Rejects only for an agent outside this namespace. Like `open`, it resolves when the attempt ends, also without a new
-   * conversation (busy, pending creation to recover, agent unavailable, host refusal); `selected` changes only on success.
-   * As with `open`, a busy application ignores the attempt without a notice; the other reasons appear in the status strip.
-   */
-  create(agentId: string): Promise<void>;
+  /** Opens a loaded or selected conversation in this namespace and reports its actual placement. Other scopes reject. */
+  open(scope: ConversationScope): Promise<ConversationOpenResult>;
+  /** Creates with this namespace's agent. Detached and pending outcomes do not select an inline editor. */
+  create(agentId: string): Promise<ConversationOpenResult>;
   /** Calls one of this extension's server operations. It never rejects: transport failures resolve as `unavailable`. */
   call(installationId: string, operation: string, input: Json): Promise<ExtensionCallValue>;
   /** Re-reads host metadata and this namespace's conversation list. */

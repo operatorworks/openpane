@@ -23,14 +23,14 @@ async function hookFixture(t) {
       const names = captured?.offer.tools.map(tool => tool.definition.name) ?? []; captured?.release(); return names;
     };
     window.admission = () => source.snapshot().kind;
-    const manifest = { namespace: 'alpha', sdkVersion: '0.13.0', entries: [{ kind: 'desktop', module: './desktop.js' }] };
+    const manifest = { namespace: 'alpha', sdkVersion: '0.14.0', entries: [{ kind: 'desktop', module: './desktop.js' }] };
     function GlobalTranscript() { React.useLayoutEffect(() => { window.events.globalMounts++; }, []); return <p>Withdrawn global transcript</p>; }
-    const alpha = { manifest, load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate({ frontendTools }) {
+    const alpha = { manifest, load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate({ frontendTools }) {
       window.events.activations++;
       frontendTools.add({ definition: { name: 'echo', description: 'Echo' }, decodeInput: value => value, execute: async () => 'original' });
       return { modules: [], overrides: { transcript: GlobalTranscript }, dispose() { window.events.disposals++; } };
     } } }) };
-    const beta = { manifest: { ...manifest, namespace: 'beta' }, load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0',
+    const beta = { manifest: { ...manifest, namespace: 'beta' }, load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0',
       activate() { return new Promise(resolve => { window.finishBeta = () => resolve({ modules: [], dispose() {} }); }); }
     } }) };
     const initial = [alpha], withBeta = [alpha, beta];

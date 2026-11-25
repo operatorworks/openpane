@@ -1,0 +1,53 @@
+{
+  "from_date": 1795374001000,
+  "to_date": 1795374061000,
+  "group_by": [],
+  "message": "",
+  "query": "avg:system.cpu.user{*}",
+  "res_type": "time_series",
+  "resp_version": 1,
+  "series": [
+    {
+      "aggr": "avg",
+      "attributes": {},
+      "display_name": "CPU user example",
+      "start": 1795374000000,
+      "end": 1795374059999,
+      "expression": "avg:system.cpu.user{*}",
+      "interval": 20,
+      "length": 3,
+      "metric": "system.cpu.user",
+      "pointlist": [
+        [
+          1795374000000,
+          1.25
+        ],
+        [
+          1795374020000,
+          null
+        ],
+        [
+          1795374040000,
+          3.25
+        ]
+      ],
+      "query_index": 0,
+      "scope": "*",
+      "tag_set": [],
+      "unit": [
+        {
+          "family": "percentage",
+          "id": 17,
+          "name": "percent",
+          "plural": "percent",
+          "scale_factor": 1,
+          "short_name": "%"
+        },
+        null
+      ]
+    }
+  ],
+  "status": "ok",
+  "times": [],
+  "values": []
+}

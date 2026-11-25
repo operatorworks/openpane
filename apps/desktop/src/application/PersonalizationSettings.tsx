@@ -4,6 +4,7 @@ import { ThemeScope } from '@openpane/ui-primitives/desktop';
 import { parseDesktopPreferences, parseNamespace, type GlobalSlot, type SlotPreference } from './personalization.js';
 import { MAX_PALETTE_BYTES, PALETTE_SIZE_DIAGNOSTIC, type PersonalizationOutcome } from './personalization-storage.js';
 import type { usePersonalization } from './use-personalization.js';
+import { useExperience, useUiActions } from './experience-state.js';
 import type { DesktopCustomization, NamespaceActivation } from './DesktopCustomizations.js';
 
 type State = ReturnType<typeof usePersonalization>;
@@ -13,7 +14,7 @@ function PreferenceCheckbox({ checked, onChange, children }: {
   readonly checked: boolean; readonly onChange: (checked: boolean) => Promise<unknown>; readonly children: ReactNode;
 }) {
   const [pending, setPending] = useState<boolean | null>(null);
-  return <label><input type="checkbox" checked={pending ?? checked} disabled={pending !== null} onChange={event => {
+  return <label data-openpane-part="field-label"><input data-openpane-part="checkbox" type="checkbox" checked={pending ?? checked} disabled={pending !== null} onChange={event => {
     const next = event.target.checked;
     setPending(next);
     void onChange(next).finally(() => setPending(null));
@@ -23,12 +24,15 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
   readonly state: State; readonly customizations: readonly DesktopCustomization[]; readonly namespaces: readonly NamespaceActivation[];
 }) {
   const { session, document, saved } = state;
+  const experience = useExperience(), uiActions = useUiActions();
   const [message, setMessage] = useState('');
   const [paletteText, setPaletteText] = useState('');
   const [preview, setPreview] = useState<PaletteDocumentV1 | null>(null);
   const [exported, setExported] = useState('');
   const [editor, setEditor] = useState<{ id: number; text: string; epoch: number; revision: number } | null>(null);
   const nextEditorId = useRef(0);
+  const fileIntents = useRef({ palette: 0, preferences: 0 });
+  const palettesUnavailable = saved?.preferences.kind === 'unavailable';
   const feedbackRequest = useRef(0);
   function report(message: string) { feedbackRequest.current++; setMessage(message); }
   async function perform(operation: Promise<PersonalizationOutcome>) {
@@ -48,15 +52,17 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
     const file = event.target.files?.[0];
     if (!file) return;
     event.target.value = '';
+    const intent = ++fileIntents.current[kind];
     if (kind === 'palette' && file.size > MAX_PALETTE_BYTES) { report(PALETTE_SIZE_DIAGNOSTIC); return; }
     try {
       const text = await file.text();
+      if (intent !== fileIntents.current[kind]) return;
       if (kind === 'palette') { setPaletteText(text); setPreview(null); }
       else if (saved && (saved.preferences.kind === 'valid' || saved.preferences.kind === 'invalid') && saved.preferences.revision !== null) {
         setEditor({ id: ++nextEditorId.current, text, epoch: saved.preferences.epoch, revision: saved.preferences.revision });
         report('Review the imported preferences, then save JSON to replace your choices.');
       } else report('Reset or retry saved preferences before importing JSON.');
-    } catch { report('Could not read this file.'); }
+    } catch { if (intent === fileIntents.current[kind]) report('Could not read this file.'); }
   }
   const nativeExport = location.protocol === 'tauri:' || '__TAURI_INTERNALS__' in window;
   function download() {
@@ -69,14 +75,20 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
   return <>
     <section className="settings-section" aria-label="Appearance"><h2>Appearance</h2>
       <p>Saved for this origin and browser profile. The Mac app, other workspaces and ports can have separate choices. Export/import moves choices manually.</p>
-      <label>Appearance mode <select aria-label="Appearance mode" value={document.appearance} onChange={event => {
+      <label data-openpane-part="field-label">Appearance mode <select data-openpane-part="select" aria-label="Appearance mode" value={document.appearance} onChange={event => {
         const appearance = event.target.value;
         if (appearance === 'system' || appearance === 'light' || appearance === 'dark') void perform(session.patchPreferences({ kind: 'appearance', appearance }));
       }}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       <div className="personalization-controls">
-        <button onClick={() => void perform(session.selectPalette(null))}>Use builtin palette</button>
-        <button onClick={() => setExported(canonicalPaletteText(starterPalette()))}>Export starter palette</button>
-        <button onClick={() => void perform(session.resetAppearance())}>Restore default appearance</button>
+        <button data-openpane-part="button" onClick={() => void perform(session.selectPalette(null))}>Use builtin palette</button>
+        <button data-openpane-part="button" onClick={() => setExported(canonicalPaletteText(starterPalette()))}>Export starter palette</button>
+        <button data-openpane-part="button" onClick={() => {
+          if (experience && uiActions) {
+            const request = ++feedbackRequest.current;
+            void uiActions.restore().then(() => { if (request === feedbackRequest.current) setMessage('Appearance restore requested.'); }, () => { if (request === feedbackRequest.current) setMessage('Could not restore the appearance. Retry with the protected restore control.'); });
+          }
+          else void perform(session.resetAppearance());
+        }}>{experience && uiActions ? 'Restore OpenPane appearance' : 'Restore default appearance'}</button>
       </div>
       <p>Imported namespace/name are declared metadata, not verified publisher identity. Palettes contain colors only and never enable code.</p>
       {document.palette.kind === 'imported' && <p>Selected palette: {document.palette.digest}</p>}
@@ -84,18 +96,18 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
         {resource.kind === 'ready' ? <>
           <strong>{resource.document.label}</strong> · {resource.document.namespace}/{resource.document.name} · {resource.digest.slice(0, 12)}
           <div className="personalization-controls">
-            <button aria-label={`Select ${resource.document.label} ${resource.digest.slice(0, 12)}`} onClick={() => void perform(session.selectPalette(resource.digest))}>Select</button>
-            <button aria-label={`Export ${resource.document.label} ${resource.digest.slice(0, 12)}`} onClick={() => setExported(resource.text)}>Export palette</button>
+            <button data-openpane-part="button" aria-label={`Select ${resource.document.label} ${resource.digest.slice(0, 12)}`} disabled={palettesUnavailable} onClick={() => void perform(session.selectPalette(resource.digest))}>Select</button>
+            <button data-openpane-part="button" aria-label={`Export ${resource.document.label} ${resource.digest.slice(0, 12)}`} onClick={() => setExported(resource.text)}>Export palette</button>
           </div>
         </> : <p role="alert">{resource.digest.slice(0, 12)}: {resource.diagnostic}</p>}
-        <button aria-label={resource.kind === 'ready' ? `Remove palette ${resource.digest.slice(0, 12)}` : `Remove unavailable palette ${index + 1} ${resource.digest.slice(0, 12)}`} onClick={() => void perform(session.removePalette(resource.key))}>Remove</button>
+        <button data-openpane-part="button" aria-label={resource.kind === 'ready' ? `Remove palette ${resource.digest.slice(0, 12)}` : `Remove unavailable palette ${index + 1} ${resource.digest.slice(0, 12)}`} disabled={palettesUnavailable} onClick={() => void perform(session.removePalette(resource.key))}>Remove</button>
       </li>)}</ul>
-      <label>Palette JSON<textarea aria-label="Palette JSON" className="personalization-json" value={paletteText} onChange={event => { setPaletteText(event.target.value); setPreview(null); }} /></label>
-      <label>Import palette file<input type="file" accept="application/json,.json" onChange={event => void readFile(event, 'palette')} /></label>
-      <button onClick={previewPalette}>Preview palette</button>
+      <label data-openpane-part="field-label">Palette JSON<textarea data-openpane-part="textarea" aria-label="Palette JSON" className="personalization-json" value={paletteText} onChange={event => { fileIntents.current.palette++; setPaletteText(event.target.value); setPreview(null); }} /></label>
+      <label data-openpane-part="field-label">Import palette file<input data-openpane-part="input" type="file" accept="application/json,.json" onChange={event => void readFile(event, 'palette')} /></label>
+      <button data-openpane-part="button" onClick={previewPalette}>Preview palette</button>
       {preview && <>
-        <ThemeScope palette={preview.colors} className="palette-preview" aria-label="Palette preview"><h3>{preview.label}</h3><p>Example conversation text.</p><p style={{ color: 'var(--aui-color-muted)' }}>Muted text</p><button>Example control</button><p style={{ color: 'var(--aui-color-danger)' }}>Example error</p></ThemeScope>
-        <button onClick={() => void perform(session.importPalette(canonicalPaletteText(preview)))}>Import palette</button>
+        <ThemeScope palette={preview.colors} className="palette-preview" aria-label="Palette preview"><h3>{preview.label}</h3><p>Example conversation text.</p><p style={{ color: 'var(--aui-color-muted)' }}>Muted text</p><button data-openpane-part="button">Example control</button><p style={{ color: 'var(--aui-color-danger)' }}>Example error</p></ThemeScope>
+        <button data-openpane-part="button" disabled={palettesUnavailable} onClick={() => void perform(session.importPalette(canonicalPaletteText(preview)))}>Import palette</button>
       </>}
     </section>
     <section className="settings-section" aria-label="Executable UI"><h2>Executable UI</h2>
@@ -106,7 +118,7 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
         const choice = document.ui.slots[slot];
         const available = namespaces.filter(owner => owner.kind === 'ready' && owner.presentation[slot] !== undefined).map(owner => owner.namespace);
         const selected = choice.kind === 'extension' ? `extension:${choice.namespace}` : choice.kind;
-        return <label key={slot}>{labels[slot]} owner <select aria-label={`${labels[slot]} owner`} value={selected} onChange={event => {
+        return <label data-openpane-part="field-label" key={slot}>{labels[slot]} owner <select data-openpane-part="select" aria-label={`${labels[slot]} owner`} value={selected} onChange={event => {
           const value = event.target.value;
           const selection: SlotPreference = value === 'automatic' || value === 'builtin' ? { kind: value } : { kind: 'extension', namespace: parseNamespace(value.slice('extension:'.length)) };
           void perform(session.patchPreferences({ kind: 'slot', slot, selection }));
@@ -118,20 +130,21 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
     </section>
     <section className="settings-section" aria-label="Preferences JSON"><h2>Preferences JSON</h2>
       <div className="personalization-controls">
-        <button onClick={() => {
+        <button data-openpane-part="button" onClick={() => {
+          fileIntents.current.preferences++;
           const preferences = saved?.preferences;
           if (preferences?.kind === 'valid') setEditor({ id: ++nextEditorId.current, text: JSON.stringify(preferences.document, null, 2), epoch: preferences.epoch, revision: preferences.revision });
           else if (preferences?.kind === 'invalid' && preferences.revision !== null) setEditor({ id: ++nextEditorId.current, text: JSON.stringify(document, null, 2), epoch: preferences.epoch, revision: preferences.revision });
           else report('Reset or retry saved preferences before editing JSON.');
         }}>Edit preferences JSON</button>
-        <button onClick={() => {
+        <button data-openpane-part="button" onClick={() => {
           if (saved?.preferences.kind === 'valid') setExported(JSON.stringify(saved.preferences.document, null, 2));
           else report('Saved preferences are unavailable.');
         }}>Export preferences</button>
-        <label>Import preferences file<input type="file" accept="application/json,.json" onChange={event => void readFile(event, 'preferences')} /></label>
+        <label data-openpane-part="field-label">Import preferences file<input data-openpane-part="input" type="file" accept="application/json,.json" onChange={event => void readFile(event, 'preferences')} /></label>
       </div>
-      {editor && <><label>Preferences JSON<textarea aria-label="Preferences JSON" className="personalization-json" value={editor.text} onChange={event => setEditor({ ...editor, text: event.target.value })} /></label>
-        <button onClick={() => {
+      {editor && <><label data-openpane-part="field-label">Preferences JSON<textarea data-openpane-part="textarea" aria-label="Preferences JSON" className="personalization-json" value={editor.text} onChange={event => { fileIntents.current.preferences++; setEditor({ ...editor, text: event.target.value }); }} /></label>
+        <button data-openpane-part="button" onClick={() => {
           try { void perform(session.replacePreferences({ expectedEpoch: editor.epoch, expectedRevision: editor.revision, document: parseDesktopPreferences(JSON.parse(editor.text)) })).then(result => {
             if (result.kind === 'committed' && result.epoch !== null && result.revision !== null) {
               const revision = result.revision, epoch = result.epoch;
@@ -139,13 +152,13 @@ export function PersonalizationSettings({ state, customizations, namespaces }: {
             }
           }); }
           catch (error) { report(error instanceof Error ? error.message : 'Invalid preferences JSON.'); }
-        }}>Save JSON</button><button onClick={() => setEditor(null)}>Close editor</button></>}
-      <button onClick={() => void session.retry().then(() => report('Saved preferences checked.'))}>Retry saved preferences</button>
-      <button disabled={saved?.preferences.kind === 'unavailable'} onClick={() => void perform(session.resetPersonalization())}>Reset saved preferences</button>
+        }}>Save JSON</button><button data-openpane-part="button" onClick={() => { fileIntents.current.preferences++; setEditor(null); }}>Close editor</button></>}
+      <button data-openpane-part="button" onClick={() => void session.retry().then(() => report('Saved preferences checked.'))}>Retry saved preferences</button>
+      <button data-openpane-part="button" disabled={saved?.preferences.kind === 'unavailable'} onClick={() => void perform(session.resetPersonalization())}>Reset saved preferences</button>
       <p>Reset keeps palettes, conversations and drafts, and saves executable UI disabled.</p>
     </section>
-    {message && <p role="status">{message}</p>}
-    {exported && <section aria-label="JSON export"><label>Exported JSON<textarea aria-label="Exported JSON" className="personalization-json" readOnly value={exported} /></label>{nativeExport ? <p>Select and copy the JSON to save it in a text file. File downloads are available in a browser.</p> : <button onClick={download}>Download JSON</button>}<button onClick={() => {
+    {message && <p data-openpane-part="status" role="status">{message}</p>}
+    {exported && <section aria-label="JSON export"><label data-openpane-part="field-label">Exported JSON<textarea data-openpane-part="textarea" aria-label="Exported JSON" className="personalization-json" readOnly value={exported} /></label>{nativeExport ? <p>Select and copy the JSON to save it in a text file. File downloads are available in a browser.</p> : <button data-openpane-part="button" onClick={download}>Download JSON</button>}<button data-openpane-part="button" onClick={() => {
       if (!navigator.clipboard) { report('Select and copy the exported JSON.'); return; }
       void navigator.clipboard.writeText(exported).then(() => report('Copied JSON.'), () => report('Select and copy the exported JSON.'));
     }}>Copy JSON</button></section>}

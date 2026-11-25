@@ -41,11 +41,18 @@ export interface DraftImageChange {
   readonly put?: { readonly selectionId: string; readonly bytes: Uint8Array };
   readonly remove?: readonly string[];
 }
+export type DraftTransfer = { readonly source: ConversationScope; readonly requestId: string; readonly kind: 'receive' | 'release' }
+  | { readonly kind: 'receive-copy'; readonly source: ConversationScope }
+  | { readonly kind: 'release-copy'; readonly target: ConversationScope; readonly targetViewId: string };
+export type DraftTransferCommit = { readonly source: ConversationScope; readonly requestId: string; readonly outcome: 'received' | 'cleared' | 'changed' }
+  | { readonly outcome: 'copy-received'; readonly source: ConversationScope }
+  | { readonly outcome: 'copy-cleared'; readonly target: ConversationScope; readonly targetViewId: string; readonly text: string };
 /** Image bytes are stored once beside the records and must change in the same transaction as them. */
 export interface DraftStoragePort {
   /** Use one port per store: loading claims the conversation, and saves from a port replaced by a later loader reject without writing. */
   load(scope: ConversationScope): Promise<unknown>;
   save(records: LocalRecords, image?: DraftImageChange): Promise<void>;
+  commitTransfer?(records: LocalRecords, transfer: DraftTransferCommit): Promise<boolean>;
   loadImage(scope: ConversationScope, selectionId: string): Promise<Uint8Array | null>;
 }
 export interface ComposerImage {
@@ -78,8 +85,15 @@ export interface ConversationStore<P> {
   getSnapshot(): ClientView<P>;
   subscribe(listener: () => void): () => void;
   setDraft(text: string): Promise<void>;
+  captureDraft(): Promise<{ readonly text: string; readonly revision: number }>;
+  replaceDraft(expected: { readonly text: string; readonly revision: number }, text: string): Promise<boolean>;
+  transferDraft(expected: { readonly text: string; readonly revision: number }, text: string, transfer: DraftTransfer): Promise<'committed' | 'changed' | 'cancelled'>;
   /** Upload failures are reported through the view's image status, not by rejecting. */
-  selectImage(file: { readonly name: string; readonly bytes: Uint8Array }): Promise<void>;
+  selectImage(file: { readonly name: string; readonly bytes: Uint8Array | Promise<Uint8Array> }, signal?: {
+    readonly aborted: boolean;
+    addEventListener(type: 'abort', listener: () => void, options: { readonly once: true }): void;
+    removeEventListener(type: 'abort', listener: () => void): void;
+  }): Promise<void>;
   retryImage(): Promise<void>;
   removeImage(): Promise<void>;
   send(text?: string): Promise<SubmitResult>;

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { preview } from 'vite';
 import { repository, buildCustom } from '../customization/build/support.mjs';
-import { root, wait, fixture, connected, draft, revealRecovery, customRuntime, tools, chats } from './browser-support.mjs';
+import { root, wait, fixture, connected, draft, revealRecovery, customRuntime, tools, chats, activeViewId } from './browser-support.mjs';
 
 test('desktop connection action opens the host app directly and keeps conversations on return', { timeout: 45_000 }, async t => {
   const host = await fixture(t);
@@ -192,19 +192,22 @@ test('duplicate tabs acquire separate writable views and uncertain creation is e
   await connected(page);
   assert.equal(await page.locator('.scope-label').textContent(), originalScope.conversationId);
   await draft(page, 'Original tab draft');
-  const viewId = await page.evaluate(() => sessionStorage.getItem('openpane.viewId'));
+  const viewId = await activeViewId(page), catalogId = await page.evaluate(() => sessionStorage.getItem('openpane.catalogViewId'));
   const popupPromise = page.waitForEvent('popup');
   await page.evaluate(() => window.open('/browser.html', '_blank'));
   const duplicate = await popupPromise;
   await duplicate.getByRole('button', { name: 'New recorded conversation' }).waitFor();
-  await wait(async () => await duplicate.evaluate(() => sessionStorage.getItem('openpane.viewId')) !== viewId, 'exclusive duplicate view');
+  await wait(async () => await duplicate.evaluate(() => sessionStorage.getItem('openpane.catalogViewId')) !== catalogId, 'exclusive duplicate catalog');
   await duplicate.getByRole('button', { name: new RegExp(`Open conversation ${originalScope.conversationId}$`) }).click();
+  await duplicate.getByRole('alert').filter({ hasText: 'already owned' }).waitFor();
+  assert.equal(await duplicate.locator('.scope-label').count(), 0);
+  await duplicate.getByRole('button', { name: 'New recorded conversation' }).click();
   await connected(duplicate);
   assert.equal(await duplicate.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), '');
   await draft(duplicate, 'Duplicate tab draft');
   assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Original tab draft');
   await duplicate.getByRole('button', { name: `Reopen saved view ${viewId}`, exact: true }).click();
-  await duplicate.getByRole('alert').filter({ hasText: 'already open in another tab' }).waitFor();
+  await duplicate.getByRole('alert').filter({ hasText: 'already has an editor in this browser profile' }).waitFor();
   assert.equal(await duplicate.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Duplicate tab draft');
   const context = page.context();
   await page.close();
@@ -213,7 +216,7 @@ test('duplicate tabs acquire separate writable views and uncertain creation is e
   await reopened.getByRole('button', { name: `Reopen saved view ${viewId}`, exact: true }).click();
   await connected(reopened);
   assert.equal(await reopened.getByRole('textbox', { name: 'Message', exact: true }).inputValue(), 'Original tab draft');
-  assert.equal(await reopened.evaluate(() => sessionStorage.getItem('openpane.viewId')), viewId);
+  assert.equal(await activeViewId(reopened), viewId);
 });
 
 test('custom content failure keeps host controls and restores the same connected store', { timeout: 45_000 }, async t => {
@@ -604,7 +607,7 @@ test('a prepared graph renders both hook modules and shares SDK generation state
   second.write('package.json', JSON.stringify(child));
   second.write('desktop/index.tsx', `import React from 'react'; import {pinFrontendTools} from '@openpane/sdk/tools';
     function View(){const [value] = React.useState('Second graph hook'); return <p>{value}</p>}
-    export default {kind:'desktop',sdkVersion:'0.13.0',async activate(){
+    export default {kind:'desktop',sdkVersion:'0.14.0',async activate(){
       while (!window.graphGeneration) await new Promise(resolve => setTimeout(resolve, 0));
       const generation = await window.graphGeneration;
       const run = {conversation:{hostId:'host',conversationId:'conversation'},runId:'run',authority:{kind:'openpane-host',hostId:'host',binding:{namespace:'fixture',installationId:'i',opaqueSessionId:'s'}}};
@@ -618,7 +621,7 @@ test('a prepared graph renders both hook modules and shares SDK generation state
   first.write('desktop/index.tsx', `import React from 'react'; import {createFrontendToolGeneration} from '@openpane/sdk/tools';
     function View(){const [value] = React.useState('First graph hook'); return <p>{value}</p>}
     window.graphGeneration = createFrontendToolGeneration({namespace:'fixture',generation:'one',platform:'desktop',activate(){return {dispose(){}}},capture(){return undefined}}).then(value=>value.generation);
-    export default {kind:'desktop',sdkVersion:'0.13.0',activate(){return {modules:[{id:'module',label:'First',component:View}],dispose(){window.firstDisposed = true}}}};`);
+    export default {kind:'desktop',sdkVersion:'0.14.0',activate(){return {modules:[{id:'module',label:'First',component:View}],dispose(){window.firstDisposed = true}}}};`);
   buildCustom(first);
   const host = await fixture(t, join(first.directory, 'browser')), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation' }).click();
@@ -639,7 +642,7 @@ test('a failed customization leaves its hook-using sibling active and restore di
   await connected(page);
   const failure = "load: async () => { throw new Error('First failed'); }";
   const sibling = `, { manifest: { ...manifest, namespace: 'sibling' }, load: async () => ({ default: {
-    kind: 'desktop', sdkVersion: '0.13.0', activate() { return { modules: [{ id: 'same', label: 'Sibling',
+    kind: 'desktop', sdkVersion: '0.14.0', activate() { return { modules: [{ id: 'same', label: 'Sibling',
       component() { const [value] = React.useState('Sibling hook works'); return <p>{value}</p>; } }],
       dispose() { window.siblingDisposals = (window.siblingDisposals || 0) + 1; } }; } } }) }`;
   await customRuntime(page, host, failure, false, sibling);
@@ -653,11 +656,11 @@ test('a failed customization leaves its hook-using sibling active and restore di
 
 for (const [label, body, disposed] of [
   ['import', "load: async () => { throw new Error('Import failed'); }", 0],
-  ['activation', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { throw new Error('Activation failed'); } } })", 0],
+  ['activation', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() { throw new Error('Activation failed'); } } })", 0],
   ['compatibility', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.2.0', activate() {} } })", 0],
-  ['invalid contributions', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { return { dispose() { window.disposals = (window.disposals || 0) + 1; }, modules: null }; } } })", 1],
-  ['invalid actions', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { return { dispose() { window.disposals = (window.disposals || 0) + 1; }, modules: [{ id: 'x', label: 'X', component() { return null; }, actions: [{ id: 'bad', label: 'Bad', run: null }] }] }; } } })", 1],
-  ['render', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { return { dispose() { window.disposals = (window.disposals || 0) + 1; }, modules: [{ id: 'x', label: 'X', component() { throw new Error('Render failed'); } }] }; } } })", 1],
+  ['invalid contributions', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() { return { dispose() { window.disposals = (window.disposals || 0) + 1; }, modules: null }; } } })", 1],
+  ['invalid actions', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() { return { dispose() { window.disposals = (window.disposals || 0) + 1; }, modules: [{ id: 'x', label: 'X', component() { return null; }, actions: [{ id: 'bad', label: 'Bad', run: null }] }] }; } } })", 1],
+  ['render', "load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() { return { dispose() { window.disposals = (window.disposals || 0) + 1; }, modules: [{ id: 'x', label: 'X', component() { throw new Error('Render failed'); } }] }; } } })", 1],
 ]) test(`custom ${label} failure stays local and disposes its lifetime`, { timeout: 45_000 }, async t => {
   const host = await fixture(t), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation' }).click();
@@ -678,7 +681,7 @@ test('restoring during activation disposes a late lifetime once and catches clea
   const host = await fixture(t), page = await host.page();
   await page.getByRole('button', { name: 'New recorded conversation' }).click();
   await connected(page);
-  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() {
     return new Promise(resolve => { window.finishActivation = () => resolve({ modules: [], dispose() { window.disposals = (window.disposals || 0) + 1; return Promise.reject(new Error('Cleanup rejected')); } }); });
   } } })`);
   await wait(() => page.evaluate(() => typeof window.finishActivation === 'function'), 'pending activation');
@@ -699,7 +702,7 @@ test('activation survives navigation and healthy restore disposes once while kee
   await page.getByRole('button', { name: 'New recorded conversation' }).click();
   await connected(page);
   const first = await page.locator('.scope-label').textContent();
-  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+  await customRuntime(page, host, `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() {
     window.activations = (window.activations || 0) + 1;
     return { modules: [{ id: 'working', label: 'Working', component({ conversation }) {
       const [count, setCount] = React.useState(0);

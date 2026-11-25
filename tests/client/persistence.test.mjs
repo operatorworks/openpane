@@ -544,3 +544,59 @@ test('an unconfirmed selection reloads as interrupted and retry re-uploads its s
   assert.equal(store.getSnapshot().image.status, 'ready');
   assert.deepEqual(drafts.imageWrites, []);
 });
+
+
+test('draft capture observes an edit already submitted without awaiting its save', async () => {
+  const { store } = fixture();
+  await store.ready;
+  const writing = store.setDraft('latest submitted edit');
+  const capture = await store.captureDraft();
+  await writing;
+  assert.deepEqual(capture, { text: 'latest submitted edit', revision: 1 });
+  await store.dispose();
+});
+
+
+test('a send captures the current draft before a following synchronous edit', async () => {
+  const { store, port } = fixture();
+  await store.setDraft('first');
+  port.submit = async command => { port.submitted.push(structuredClone(command)); return { kind: 'receipt', receipt: receipt(command, 'accepted') }; };
+  const sending = store.send(), editing = store.setDraft('next');
+  await Promise.all([sending, editing]);
+  assert.equal(port.submitted[0].body.text, 'first');
+  assert.equal(store.getSnapshot().draft, 'next');
+});
+
+test('Remove after image selection starts wins even while its durable save and upload are delayed', async () => {
+  const images = uploads({ auto: false }), { store, drafts, port } = fixture({ images }); await store.ready;
+  const entered = deferred(), release = deferred(), save = drafts.save.bind(drafts); let held = false;
+  drafts.save = async (records, image) => { if (records.image && !held) { held = true; entered.resolve(); await release.promise; } await save(records, image); };
+  const selecting = store.selectImage({ name: 'remove-me.png', bytes: png(1) }); await entered.promise;
+  const removing = store.removeImage(); release.resolve(); await removing;
+  assert.equal(store.getSnapshot().image, null); images.calls[0].reply.resolve(images.calls[0].attachment); await selecting;
+  assert.equal(store.getSnapshot().image, null); await store.send('Text after removal');
+  assert.deepEqual(port.submitted[0].body, { kind: 'send', text: 'Text after removal' }); await store.dispose();
+});
+
+test('Remove followed by Send in the same turn excludes the removed attachment', async () => {
+  const { store, port } = fixture({ images: uploads() }); await store.selectImage({ name: 'removed.png', bytes: png(1) }); await store.setDraft('Caption');
+  await Promise.all([store.removeImage(), store.send()]); assert.deepEqual(port.submitted[0].body, { kind: 'send', text: 'Caption' }); await store.dispose();
+});
+
+test('selecting a replacement image followed by Send in the same turn observes the new upload', async () => {
+  const images = uploads({ auto: false }), { store, port } = fixture({ images }); await store.setDraft('Caption');
+  const first = store.selectImage({ name: 'first.png', bytes: png(1) }); await new Promise(resolve => setImmediate(resolve)); images.calls[0].reply.resolve(images.calls[0].attachment); await first;
+  const replacement = store.selectImage({ name: 'replacement.png', bytes: png(2) }), sending = store.send();
+  try { await assert.rejects(sending, /Wait for the image to finish uploading/); assert.equal(port.submitted.length, 0); }
+  finally { await new Promise(resolve => setImmediate(resolve)); images.calls[1].reply.resolve(images.calls[1].attachment); await replacement; await store.dispose(); }
+});
+
+test('failed Remove prevents a same-turn Send from submitting the retained attachment', async () => {
+  const { store, port, drafts } = fixture({ images: uploads() }); await store.selectImage({ name: 'retained.png', bytes: png(1) }); await store.setDraft('Caption');
+  const save = drafts.save.bind(drafts); let fail = true;
+  drafts.save = async (records, image) => { if (fail && records.image === null) { fail = false; throw new Error('Image removal save failed'); } await save(records, image); };
+  const removing = store.removeImage(), editing = store.setDraft('Updated caption'), sending = store.send(), alsoQueued = store.send();
+  await Promise.all([editing, assert.rejects(removing, /Image removal save failed/), assert.rejects(sending, /Image removal save failed/), assert.rejects(alsoQueued, /Image removal save failed/)]);
+  assert.equal(store.getSnapshot().image.status, 'ready'); assert.equal(drafts.images.size, 1); assert.deepEqual(port.submitted, []);
+  await store.removeImage(); await store.send(); assert.deepEqual(port.submitted[0].body, { kind: 'send', text: 'Updated caption' }); await store.dispose();
+});

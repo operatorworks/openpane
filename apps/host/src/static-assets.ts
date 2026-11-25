@@ -3,7 +3,7 @@ import { extname } from 'node:path';
 
 const TYPES: Readonly<Record<string, string>> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
 // Image previews render host bytes through blob: URLs.
-export const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+export const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 export function serveAsset(files: ReadonlyMap<string, Buffer>, request: IncomingMessage, response: ServerResponse, origin: string): void {
   if (request.method !== 'GET' && request.method !== 'HEAD') throw new Error('Unsupported method');
   const pathname = decodeURIComponent(new URL(request.url ?? '/', origin).pathname);

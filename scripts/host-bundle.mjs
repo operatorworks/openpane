@@ -47,7 +47,14 @@ export async function buildHostBundle({ abi, entryPoint = 'apps/host/src/main.ts
   const shared = sdkOwners[0][0];
   for (const entry of [entryPoint, 'packages/sdk/dist/index.js']) {
     const output = outputs.find(value => value.entryPoint === entry);
-    if (!output?.imports.some(value => value.path === shared)) throw new Error(`Host bundle entry must import the shared SDK runtime: ${entry}`);
+    const visited = new Set();
+    function reaches(path) {
+      if (path === shared) return true;
+      if (visited.has(path)) return false;
+      visited.add(path);
+      return result.metafile.outputs[path]?.imports.some(value => !value.external && reaches(value.path)) ?? false;
+    }
+    if (!output?.imports.some(value => !value.external && reaches(value.path))) throw new Error(`Host bundle entry must reach the shared SDK runtime: ${entry}`);
   }
   return result;
 }

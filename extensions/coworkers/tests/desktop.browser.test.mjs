@@ -1,3 +1,4 @@
+import { qualifyCardRestyle } from '../../../tests/application/metrics-card-support.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -28,7 +29,7 @@ async function page(t, host, colorScheme = 'light', viewport = { width: 1280, he
 }
 async function openWorkspace(view, label) {
   await view.rail.getByRole('button', { name: 'Extensions', exact: true }).click();
-  const row = view.page.locator(`[data-extension="${label.toLowerCase()}"]`);
+  const row = view.page.locator(`[data-extension="${label.toLowerCase()}"]:visible`);
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Ready', `${label} ready`);
   await view.page.getByRole('button', { name: `Open ${label}` }).click();
 }
@@ -143,8 +144,7 @@ const narrowNavigations = [
     const release = remote.holdConversations();
     await workspace.getByRole('button', { name: 'New chat', exact: true }).click();
     await wait(() => remote.calls.some(call => call.method === 'POST' && call.path === '/v1/conversations'), 'create held');
-    // A second attempt while the app is busy resolves at once without changing the selection.
-    await workspace.getByRole('button', { name: 'New chat', exact: true }).click();
+    assert.equal(await workspace.getByRole('button', { name: 'New chat', exact: true }).isDisabled(), true, 'another chat cannot start until this operation settles');
     return release;
   }, async leave(workspace) {
     const sections = workspace.getByRole('group', { name: 'Coworkers sections' });
@@ -326,7 +326,7 @@ test('without a Coworkers installation the workspace names the configuration and
   const host = await extensionFixture(t, { extensions: [] });
   const view = await page(t, host);
   await view.rail.getByRole('button', { name: 'Extensions', exact: true }).click();
-  const row = view.page.locator('[data-extension="coworkers"]');
+  const row = view.page.locator('[data-extension="coworkers"]:visible');
   await wait(async () => (await row.locator('.extension-state').textContent().catch(() => '')) === 'Not configured', 'not configured');
   await view.page.getByRole('button', { name: 'Open Coworkers' }).click();
   const setup = view.page.getByRole('region', { name: 'Coworkers setup' });
@@ -394,4 +394,14 @@ test('with both extensions each workspace renders its own transcript style and C
   assert.equal(await chatsComposer(), before, 'the Chats composer looks the same with both extensions loaded');
   assert.equal(await view.page.locator('#message').count(), 1);
   assert.deepEqual(view.violations, []);
+});
+
+ test('Coworkers transcript replacement keeps one app-owned metrics card through restyle', { timeout: 60000 }, async t => {
+  const remote = await coworkersService(t), host = await extensionFixture(t, { extensions: [await coworkersEntry(remote)] }), view = await page(t, host);
+  await openWorkspace(view, 'Coworkers');
+  const workspace = view.page.locator('[data-extension-workspace="coworkers"]');
+  await workspace.getByRole('button', { name: 'Coworkers', exact: true }).click();
+  await workspace.getByRole('button', { name: 'Chat with Ada' }).click();
+  await workspace.locator('#message').waitFor();
+  await qualifyCardRestyle(host, view.page);
 });

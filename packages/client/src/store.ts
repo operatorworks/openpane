@@ -100,6 +100,14 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
     publish();
   }).catch(() => undefined);
   let saves: Promise<void> = ready;
+  // Snapshot pending edits at Send, so a failed edit cannot silently restore removed content.
+  const composerEdits = new Set<Promise<unknown>>();
+  function editComposer<T>(operation: () => Promise<T>): Promise<T> {
+    const result = enqueue(operation);
+    composerEdits.add(result);
+    void result.then(() => composerEdits.delete(result), () => composerEdits.delete(result));
+    return result;
+  }
   function enqueue<T>(operation: () => Promise<T>): Promise<T> {
     if (closed) return Promise.reject(new Error('This conversation store has closed.'));
     const result = saves.then(async () => {
@@ -213,8 +221,11 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
     } finally { inFlight.delete(id); publish(); }
   }
   async function submit(body: CommandBody | null): Promise<SubmitResult> {
-    await ready;
+    if (closed) await ready;
+    const edits = body === null ? Promise.all(composerEdits) : null;
+    void edits?.catch(() => {});
     const entry = await enqueue(async () => {
+      await edits;
       requireCompatible();
       const id = createCommandId(), intent = body ?? composerBody();
       if (local.outbox.some(value => value.command.clientCommandId === id) || local.frontendSends.some(value => value.command.clientCommandId === id) || Object.hasOwn(view.document.receipts, id)) throw new Error('Command ID generator reused an existing ID');
@@ -252,25 +263,60 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
     },
     getSnapshot: () => view,
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    async setDraft(text) {
-      await ready;
-      await enqueue(async () => {
+    setDraft(text) {
+      return editComposer(async () => {
         await persist(revised({ draft: text }));
         publish();
       });
     },
-    async selectImage(file) {
-      await ready;
-      const bytes = file.bytes.slice();
-      if (!bytes.byteLength) throw new Error('This image file is empty.');
-      if (bytes.byteLength > IMAGE_MAX_BYTES) throw new Error('Choose an image of at most 4 MB.');
-      if (!imageType(bytes)) throw new Error('Choose a PNG or JPEG image.');
-      const name = imageName(file.name);
-      const started = await enqueue(async () => {
+    captureDraft: () => enqueue(async () => ({ text: local.draft, revision: local.draftRevision })),
+    replaceDraft: (expected, text) => enqueue(async () => {
+      if (local.draft !== expected.text || local.draftRevision !== expected.revision) return false;
+      await persist(revised({ draft: text })); publish(); return true;
+    }),
+    transferDraft: (expected, text, transfer) => enqueue(async () => {
+      const matches = local.draft === expected.text && local.draftRevision === expected.revision;
+      if (!matches && (transfer.kind !== 'release')) return 'changed';
+      if (!drafts.commitTransfer) throw new Error('This storage cannot atomically transfer a draft');
+      const next = matches && text !== local.draft ? revised({ draft: text }) : local;
+      if (transfer.kind === 'receive-copy') {
+        if (!await drafts.commitTransfer(next, { outcome: 'copy-received', source: transfer.source })) return 'cancelled';
+        local = next; publish(); return 'committed';
+      }
+      if (transfer.kind === 'release-copy') {
+        if (!await drafts.commitTransfer(next, { outcome: 'copy-cleared', target: transfer.target, targetViewId: transfer.targetViewId, text: expected.text })) return 'cancelled';
+        local = next; publish(); return 'committed';
+      }
+      const outcome = transfer.kind === 'receive' ? 'received' : matches ? 'cleared' : 'changed';
+      if (!await drafts.commitTransfer(next, { source: transfer.source, requestId: transfer.requestId, outcome })) return 'cancelled';
+      local = next; publish(); return matches ? 'committed' : 'changed';
+    }),
+    async selectImage(file, signal) {
+      if (closed) await ready;
+      const incoming = file.bytes instanceof Uint8Array ? file.bytes.slice() : file.bytes.then(bytes => bytes.slice());
+      void Promise.resolve(incoming).catch(() => {});
+      // Close and placement drain the admitted read until it completes or the user cancels it.
+      const started = await editComposer(async () => {
+        let bytes: Uint8Array, name: string;
+        let cancel = () => {};
+        try {
+          const cancelled = new Promise<null>(resolve => { cancel = () => resolve(null); });
+          signal?.addEventListener('abort', cancel, { once: true });
+          if (signal?.aborted) cancel();
+          const read = await Promise.race([incoming, cancelled]);
+          if (read === null || signal?.aborted) return { done: Promise.resolve() };
+          bytes = read;
+          if (!bytes.byteLength) throw new Error('This image file is empty.');
+          if (bytes.byteLength > IMAGE_MAX_BYTES) throw new Error('Choose an image of at most 4 MB.');
+          if (!imageType(bytes)) throw new Error('Choose a PNG or JPEG image.');
+          name = imageName(file.name);
+        } catch (error) { if (signal?.aborted) return { done: Promise.resolve() }; if (local.image) throw error; return { error }; }
+        finally { signal?.removeEventListener('abort', cancel); }
         const image: ComposerImageRecord = immutable({ selectionId: createImageId(), uploadId: parseUploadId(createImageId()), name, byteLength: bytes.byteLength, attachment: null });
         await persist(revised({ image }), { selectionId: image.selectionId, bytes });
-        return { done: upload(image, bytes) };
+        return { done: closed ? Promise.resolve() : upload(image, bytes) };
       });
+      if ('error' in started) throw started.error;
       await started.done;
     },
     async retryImage() {
@@ -296,8 +342,8 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
       return upload(image, bytes);
     },
     async removeImage() {
-      await ready;
-      await enqueue(async () => {
+      if (closed) await ready;
+      await editComposer(async () => {
         if (!local.image) return;
         await persist(revised({ image: null }));
         publish();

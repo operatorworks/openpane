@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fixture, connected, tools, chats, draft, revealRecovery, customRuntime, wait } from './browser-support.mjs';
 
-const entry = body => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.13.0', activate() { ${body} } } })`;
+const entry = body => `load: async () => ({ default: { kind: 'desktop', sdkVersion: '0.14.0', activate() { ${body} } } })`;
 const outcome = kind => ({ kind: 'receipt', receipt: { scope: { hostId: 'test', conversationId: 'test' }, clientCommandId: 'test', hostOperationId: 'test', sequence: 1,
   state: ['rejected', 'not-dispatched', 'uncertain'].includes(kind) ? { kind, reason: 'Exact receipt reason' } : { kind } } });
 const status = (page, label) => page.getByRole('status', { name: `${label} status`, exact: true });
@@ -175,7 +175,7 @@ test('choosing another namespace layout preserves an unresolved module action ac
   await page.getByRole('button', { name: 'New recorded conversation' }).click(); await connected(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByLabel('Content layout owner', { exact: true }).selectOption({ label: 'Builtin' }); await chats(page);
-  await customRuntime(page, host, `load: async () => { await new Promise(resolve => setTimeout(resolve, 25)); return { default: { kind: 'desktop', sdkVersion: '0.13.0', activate() {
+  await customRuntime(page, host, `load: async () => { await new Promise(resolve => setTimeout(resolve, 25)); return { default: { kind: 'desktop', sdkVersion: '0.14.0', activate() {
     window.calls ??= 0; window.activations ??= {}; window.activations.module = (window.activations.module ?? 0) + 1; window.disposals ??= 0;
     return { modules: [{ id: 'parent', label: 'Parent', component() { return null; }, children: [{ id: 'child', label: 'Child', component() { return null; },
       actions: [{ id: 'run', label: 'Deferred module action', run() { window.calls++; return new Promise(resolve => { window.finishAction = resolve; }); } }] }] }],

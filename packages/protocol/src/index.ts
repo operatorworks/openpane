@@ -6,3 +6,5 @@ export type BackendAvailability =
   | { readonly kind: 'supported' }
   | { readonly kind: 'unsupported'; readonly reason: string }
   | { readonly kind: 'unavailable'; readonly reason: string };
+
+export { EventSchema } from './event-schema.mjs';

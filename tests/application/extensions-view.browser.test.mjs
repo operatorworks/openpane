@@ -50,7 +50,7 @@ async function open(t) {
   const rail = page.getByRole('navigation', { name: 'Workspace views' });
   return { ledger, host, page, rail };
 }
-const row = (page, namespace) => page.locator(`[data-extension="${namespace}"]`);
+const row = (page, namespace) => page.locator(`[data-extension="${namespace}"]:visible`);
 async function openWorkspace(f) {
   await f.rail.getByRole('button', { name: 'Extensions', exact: true }).click();
   await f.page.getByRole('button', { name: 'Open Ledger workspace' }).click();
@@ -81,7 +81,7 @@ test('the Extensions view lists namespaces, opens a workspace, creates, chats an
   const recordedId = await f.page.evaluate(() => fetch('/api/v1', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'metadata' }) })
     .then(response => response.json()).then(body => body.value.agents.find(agent => !('kind' in agent)).id));
   assert.equal(await f.page.evaluate(id => window.workspace.create(id).then(() => 'resolved', error => error.message), recordedId), 'This agent is not part of this extension.');
-  assert.equal(await f.page.evaluate(() => window.workspace.open({ hostId: 'x', conversationId: 'y' }).then(() => 'resolved', error => error.message)), 'This conversation is not in this extension.');
+  assert.equal(await f.page.evaluate(() => window.workspace.open({ hostId: 'x', conversationId: 'y' }).then(() => 'resolved', error => error.message)), 'Open requires a loaded or selected conversation in this extension. Load its catalog page first.');
 
   await workspace.getByRole('button', { name: 'Start with Ledger desk' }).click();
   await workspace.locator('#message').waitFor();

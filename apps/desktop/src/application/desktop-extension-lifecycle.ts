@@ -21,11 +21,11 @@ type Lifetime = {
 export class DesktopExtensionLifecycle {
   private desired = new Map<string, DesktopCustomization>();
   private readonly owners = new Map<string, Lifetime>();
-  private readonly cleanupFailures = new Set<string>();
+  private readonly cleanupFailures = new Map<string, Extract<NamespaceActivation, { readonly kind: 'failed' }>>();
   private readonly listeners = new Set<() => void>();
   private snapshot: readonly NamespaceActivation[] = [];
   private attachment: { sink: GenerationSink; token: object } | undefined;
-  private initialSettled = false;
+  private admissionReady = false;
   private nextId = 0;
   private closed = false;
   readonly subscribe = (notify: () => void) => { this.listeners.add(notify); return () => { this.listeners.delete(notify); }; };
@@ -89,8 +89,8 @@ export class DesktopExtensionLifecycle {
 
   private recordCleanupFailure(owner: Lifetime, error: unknown): void {
     const namespace = owner.entry.manifest.namespace;
-    this.cleanupFailures.add(namespace);
     owner.state = { kind: 'failed', namespace, message: `Executable UI cleanup failed. ${customizationMessage(error)} Restart the app before enabling this namespace.` };
+    this.cleanupFailures.set(namespace, owner.state);
   }
 
   private retire(owner: Lifetime): void {
@@ -112,25 +112,22 @@ export class DesktopExtensionLifecycle {
     this.owners.delete(namespace);
     const next = this.desired.get(namespace);
     if (next && !this.closed && !this.cleanupFailures.has(namespace)) this.start(next);
-    this.publish();
   }
 
   private publishSink(): void {
     const generations = this.snapshot.flatMap(owner => owner.kind === 'ready' ? [owner.generation] : []);
-    const value: GenerationSnapshot = this.initialSettled ? { kind: 'ready', generations } : { kind: 'transitioning' };
+    const value: GenerationSnapshot = this.admissionReady ? { kind: 'ready', generations } : { kind: 'transitioning' };
     this.attachment?.sink.publish(this.attachment.token, value);
   }
 
   private publish(): void {
-    this.snapshot = [...new Set([...this.desired.keys(), ...this.cleanupFailures])].sort().map(namespace => {
-      if (this.cleanupFailures.has(namespace)) {
-        const state = this.owners.get(namespace)?.state;
-        return state?.kind === 'failed' ? state : { kind: 'failed', namespace, message: 'Executable UI cleanup failed. Restart the app before enabling this namespace.' };
-      }
+    this.snapshot = [...new Set([...this.desired.keys(), ...this.cleanupFailures.keys()])].sort().map(namespace => {
+      const failure = this.cleanupFailures.get(namespace);
+      if (failure) return failure;
       const owner = this.owners.get(namespace);
       return owner?.wanted ? owner.state : { kind: 'loading', namespace };
     });
-    if (!this.snapshot.some(owner => owner.kind === 'loading')) this.initialSettled = true;
+    if (this.snapshot.some(owner => owner.kind === 'ready') || !this.snapshot.some(owner => owner.kind === 'loading')) this.admissionReady = true;
     this.publishSink();
     this.listeners.forEach(notify => notify());
   }
@@ -140,9 +137,9 @@ export class DesktopExtensionLifecycle {
     this.desired.clear();
     for (const owner of this.owners.values()) { owner.wanted = false; this.retire(owner); }
     this.publish();
-    await Promise.all([...this.owners.values()].flatMap(owner => owner.retirement?.kind === 'pending' ? [owner.retirement.completion] : []));
     if (this.attachment) this.attachment.sink.clear(this.attachment.token);
     this.attachment = undefined;
+    await Promise.all([...this.owners.values()].flatMap(owner => owner.retirement?.kind === 'pending' ? [owner.retirement.completion] : []));
     this.listeners.clear();
   }
 }

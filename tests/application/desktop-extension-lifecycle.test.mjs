@@ -5,9 +5,9 @@ import { createGenerationSource } from '../../apps/desktop/dist/application/fron
 import { pinFrontendTools, retainFrontendTools } from '@openpane/sdk/tools';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => Promise.withResolvers();
-const manifest = namespace => ({ namespace, trust: 'full', sdkVersion: '0.13.0', entries: [{ kind: 'desktop', module: './entry.js' }] });
+const manifest = namespace => ({ namespace, trust: 'full', sdkVersion: '0.14.0', entries: [{ kind: 'desktop', module: './entry.js' }] });
 function fixture(namespace, activate) {
-  return { manifest: manifest(namespace), async load() { return { default: { sdkVersion: '0.13.0', kind: 'desktop', activate } }; } };
+  return { manifest: manifest(namespace), async load() { return { default: { sdkVersion: '0.14.0', kind: 'desktop', activate } }; } };
 }
 const run = { conversation: { hostId: 'host', conversationId: 'conversation' }, runId: 'run', authority: { kind: 'remote-provider', binding: { namespace: 'provider', installationId: 'i', opaqueSessionId: 's' } } };
 
@@ -120,4 +120,17 @@ test('repeated withdrawal does not accumulate retirement followers while an orig
   pin.release(); await owner.close();
   assert.equal(observers, 0, 'unchanged pending retirement needs no new completion observers');
   assert.equal(disposals, 1);
+});
+
+
+test('initial ready generation is admitted while an unrelated activation stays pending', async t => {
+  const owner = new DesktopExtensionLifecycle(), source = createGenerationSource(), loading = deferred();
+  t.after(async () => { loading.resolve({ modules: [], dispose() {} }); await owner.close(); });
+  owner.attach(source);
+  owner.reconcile([fixture('alpha', () => ({ modules: [], dispose() {} })), fixture('beta', () => loading.promise)]);
+  assert.equal(source.snapshot().kind, 'transitioning');
+  await tick();
+  assert.deepEqual(owner.getSnapshot().map(row => [row.namespace, row.kind]), [['alpha', 'ready'], ['beta', 'loading']]);
+  assert.equal(source.snapshot().kind, 'ready');
+  assert.deepEqual(source.snapshot().generations.map(row => row.namespace), ['alpha']);
 });

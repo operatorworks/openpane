@@ -60,7 +60,7 @@ test('native initial view waits for the previous document and retains its exact 
       globalThis.releaseView();
     }),
     page.evaluate(async scope => {
-      const owner = await globalThis.BrowserViewStorage.reopen('native-mac-default', () => {}, true);
+      const owner = await globalThis.BrowserViewStorage.reopen('native-mac-default', () => {}, { waitForPreviousDocument: true });
       owner.select();
       const result = { viewId: owner.viewId, sessionViewId: sessionStorage.getItem('openpane.viewId'),
         saved: await owner.readView('host'), draft: await owner.drafts(() => {}).load(scope) };
@@ -79,7 +79,7 @@ test('native initial view refuses a lock that stays held without inventing anoth
   const holder = await holdNativeView(page);
   const result = await page.evaluate(async () => {
     let failure;
-    try { await globalThis.BrowserViewStorage.reopen('native-mac-default', () => {}, true); }
+    try { await globalThis.BrowserViewStorage.reopen('native-mac-default', () => {}, { waitForPreviousDocument: true }); }
     catch (error) { failure = error.message; }
     const lockAvailable = await navigator.locks.request('openpane-view:native-mac-default', { ifAvailable: true }, lock => lock !== null);
     return { failure, lockAvailable, sessionViewId: sessionStorage.getItem('openpane.viewId') };

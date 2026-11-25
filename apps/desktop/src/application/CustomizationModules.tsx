@@ -67,7 +67,7 @@ function ConversationModuleAction({ action, context, owner }: {
   const state = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
   return <div>
     <Button disabled={state.kind === 'pending'} aria-busy={state.kind === 'pending'} onClick={() => void owner.run(action, context)}>{action.label}</Button>
-    <p role="status" aria-label={`${action.label} status`}>{state.kind === 'pending' ? 'Submitting…' : state.kind === 'settled' ? state.message : ''}</p>
+    <p data-openpane-part="status" role="status" aria-label={`${action.label} status`}>{state.kind === 'pending' ? 'Submitting…' : state.kind === 'settled' ? state.message : ''}</p>
   </div>;
 }
 
@@ -121,9 +121,9 @@ export function CustomizationModules({ owner, active, actions, enabled, agent, s
   }
   return <aside className="customization-panel" aria-label={`Customization ${owner.namespace}`}
     data-customization-namespace={owner.namespace} data-customization-state={owner.kind}>
-    {owner.kind === 'loading' && <BuiltinColors><p role="status">Loading custom tools…</p></BuiltinColors>}
+    {owner.kind === 'loading' && <BuiltinColors><p data-openpane-part="status" role="status">Loading custom tools…</p></BuiltinColors>}
     {owner.kind === 'failed' && <BuiltinColors><p role="alert">Custom tools could not load. {owner.message} Use Restore default view to continue without them.</p></BuiltinColors>}
-    {owner.kind === 'ready' && active && actions && <Suspense fallback={<BuiltinColors><p role="status">Loading custom tools…</p></BuiltinColors>}>
+    {owner.kind === 'ready' && active && actions && <Suspense fallback={<BuiltinColors><p data-openpane-part="status" role="status">Loading custom tools…</p></BuiltinColors>}>
       <CustomizationBoundary key={`${owner.lifetime}/${active.viewId}/${active.scope.hostId}/${active.scope.conversationId}`} fail={owner.fail} fallback={null}>
         <ConversationModules owner={owner} active={active} actions={actions} enabled={enabled} agent={agent} />
       </CustomizationBoundary>

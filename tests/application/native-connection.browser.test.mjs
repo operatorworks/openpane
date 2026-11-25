@@ -86,7 +86,7 @@ test('a fresh Mac connects directly to the local host with no pairing step', asy
   const page = await fixture(t);
   assert.deepEqual(await page.evaluate(() => globalThis.nativeCalls.filter(call => call.kind !== 'execute')), [{ kind: 'connect' }]);
   assert.deepEqual(await page.evaluate(() => [...new Set(globalThis.nativeCalls.filter(call => call.kind === 'execute').map(call => call.observation))]), ['connection-1']);
-  await page.getByText('Host host', { exact: true }).waitFor();
+  await page.getByText('Host host', { exact: true }).filter({ visible: true }).waitFor();
   await assertNoPairing(page);
 });
 
@@ -119,7 +119,7 @@ test('a host replaced during a session disables the app until an explicit reconn
   assert.equal(await draft(), true);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
-  await page.getByText('Host replacement', { exact: true }).waitFor({ state: 'attached' });
+  await page.locator('.settings-panel').getByText('Host replacement', { exact: true }).waitFor({ state: 'attached' });
   await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(button => button.textContent === 'New recorded conversation').disabled);
   assert.deepEqual(await page.evaluate(() => globalThis.nativeCalls.filter(call => call.kind !== 'execute').map(call => call.kind)), ['connect', 'connect']);
   assert.equal(await draft(), true);

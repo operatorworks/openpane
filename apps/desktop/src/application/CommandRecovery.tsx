@@ -17,22 +17,22 @@ export function CommandRecovery({ view, actions, retry, enabled, canRetry = true
       {recoverable.map(entry => <article key={entry.command.clientCommandId}>
         <p><strong>{entry.command.body.kind === 'send' ? entry.command.body.text : entry.command.body.kind}</strong></p>
         <code>{entry.command.clientCommandId}</code><p>{view.document.receipts[entry.command.clientCommandId]?.state.kind ?? 'Result unknown'}</p>
-        <div className="action-row"><button disabled={!enabled || !canRetry} onClick={() => void actions.submit(() => retry(entry.command.clientCommandId))}>Retry original command</button>
-          <button disabled={!enabled} onClick={() => void actions.reconcile(entry.command.clientCommandId)}>Reconcile command</button>
+        <div className="action-row"><button data-openpane-part="button" disabled={!enabled || !canRetry} onClick={() => void actions.submit(() => retry(entry.command.clientCommandId))}>Retry original command</button>
+          <button data-openpane-part="button" disabled={!enabled} onClick={() => void actions.reconcile(entry.command.clientCommandId)}>Reconcile command</button>
           {entry.command.body.kind === 'send' &&
-            <button disabled={!enabled} onClick={() => void actions.abandon(entry.command.clientCommandId)}>Stop waiting</button>}</div>
+            <button data-openpane-part="button" disabled={!enabled} onClick={() => void actions.abandon(entry.command.clientCommandId)}>Stop waiting</button>}</div>
       </article>)}
       {uncertain.map(receipt => <article key={receipt.clientCommandId}><code>{receipt.clientCommandId}</code><p>{receipt.state.kind}</p>
-        <div className="action-row"><button disabled={!enabled} onClick={() => void actions.reconcile(receipt.clientCommandId)}>Reconcile command</button>
-          <button disabled={!enabled} onClick={() => void actions.abandon(receipt.clientCommandId)}>Stop waiting</button></div>
+        <div className="action-row"><button data-openpane-part="button" disabled={!enabled} onClick={() => void actions.reconcile(receipt.clientCommandId)}>Reconcile command</button>
+          <button data-openpane-part="button" disabled={!enabled} onClick={() => void actions.abandon(receipt.clientCommandId)}>Stop waiting</button></div>
       </article>)}
     </section>}
     {pending.length > 0 && <section className="outbox" aria-label="Pending commands">
       <h2>Pending commands</h2><p>These commands may still be running. Check their recorded result if progress has stopped. If a message stays unconfirmed and holds up new messages, Stop waiting releases it; it does not say whether that message ran.</p>
       {pending.map(receipt => <article key={receipt.clientCommandId}>
         <code>{receipt.clientCommandId}</code><p>{receipt.state.kind}</p>
-        <div className="action-row"><button disabled={!enabled} onClick={() => void actions.reconcile(receipt.clientCommandId)}>Check pending command</button>
-          <button disabled={!enabled} onClick={() => void actions.abandon(receipt.clientCommandId)}>Stop waiting</button></div>
+        <div className="action-row"><button data-openpane-part="button" disabled={!enabled} onClick={() => void actions.reconcile(receipt.clientCommandId)}>Check pending command</button>
+          <button data-openpane-part="button" disabled={!enabled} onClick={() => void actions.abandon(receipt.clientCommandId)}>Stop waiting</button></div>
       </article>)}
     </section>}
   </>;

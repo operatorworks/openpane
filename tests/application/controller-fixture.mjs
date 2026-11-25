@@ -4,7 +4,7 @@ import { createApplicationController } from '../../apps/desktop/dist/application
 export const scope = { hostId: 'host', conversationId: 'conversation' };
 export const empty = () => ({ version: 2, route: null, pendingCreation: null });
 export const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
-export function fixture() {
+export function fixture(options = {}) {
   const images = new Map(), loads = [], selected = [], captured = new Map(), views = new Map(), drafts = new Map(), leases = [], created = [], submitted = [], cursors = [], feeds = [];
   let nextId = 0, hostId = 'host', feedCloses = 0, metadataCalls = 0;
   const filters = [], calls = [];
@@ -16,6 +16,7 @@ export function fixture() {
     const owner = { viewId, failure, closed: false, select() { behavior.select(); },
       async readView(host) { await behavior.read(); return views.get(`${viewId}/${host}`) ?? empty(); },
       async saveView(host, value) { if (owner.closed) throw new Error('Closed owner'); views.set(`${viewId}/${host}`, value); },
+      async saveNavigation(host, scope) { await behavior.navigation?.(host, scope); const key = `${viewId}/${host}`; views.set(key, { ...(views.get(key) ?? empty()), route: scope }); },
       savedViews: (...args) => behavior.listing(...args),
       async draftScopes(hostId, after) {
         const scopes = [...drafts.values()].filter(row => drafts.get(`${viewId}/${hostId}/${row.scope.conversationId}`) === row && row.scope.hostId === hostId && (after === null || row.scope.conversationId > after)).map(row => row.scope).sort((a, b) => a.conversationId < b.conversationId ? -1 : 1).slice(0, 100);
@@ -23,6 +24,16 @@ export function fixture() {
       },
       drafts(onFailure) {
         return { load: async selected => { await behavior.load?.(selected, viewId); loads.push(`${viewId}/${selected.hostId}/${selected.conversationId}`); return drafts.get(`${viewId}/${selected.hostId}/${selected.conversationId}`) ?? null; },
+          async commitTransfer(value, transfer) {
+            if (transfer.outcome !== 'copy-cleared' && transfer.outcome !== 'copy-received') throw new Error('This fixture does not admit native carries');
+            try {
+              await behavior.write(); if (owner.closed) throw new Error('Closed owner');
+              if (transfer.outcome === 'copy-received') { drafts.set(`${viewId}/${value.scope.hostId}/${value.scope.conversationId}`, value); return true; }
+              const target = drafts.get(`${transfer.targetViewId}/${transfer.target.hostId}/${transfer.target.conversationId}`)?.draft ?? '';
+              if (target !== transfer.text && !target.startsWith(`${transfer.text}\n\n`)) return false;
+              drafts.set(`${viewId}/${value.scope.hostId}/${value.scope.conversationId}`, value); return true;
+            } catch (error) { onFailure(error); throw error; }
+          },
           loadImage: async (selected, id) => images.get(`${viewId}/${selected.hostId}/${selected.conversationId}/${id}`)?.slice() ?? null,
           async save(value, image) {
             try { await behavior.write(); if (owner.closed) throw new Error('Closed owner'); const key = id => `${viewId}/${value.scope.hostId}/${value.scope.conversationId}/${id}`;
@@ -43,6 +54,7 @@ export function fixture() {
       nativeRuntime: behavior.runtime,
       desiredGitRevision: 'revision', appliedArtifact: { gitRevision: 'revision', artifactId: 'artifact' } } }; },
     async catalog(after, limit, filter) {
+      if (!filter && behavior.catalogEntries) return behavior.catalogEntries(after);
       if (filter) { filters.push({ after, filter }); return behavior.workspaceCatalog ? behavior.workspaceCatalog(after, filter) : []; }
       const supplied = await behavior.catalog(after); cursors.push(after); return (supplied ?? (after === null ? Array.from({ length: 100 }, (_, n) => ({ hostId, conversationId: `c-${n}` })) : [])).map(scope => ({ scope, preview: null, provider: null })); },
     async extensionCall(request) { calls.push(request); if (behavior.extensionCall) return behavior.extensionCall(request); return { kind: 'ok', output: request.input }; },
@@ -62,9 +74,10 @@ export function fixture() {
       watch(request, receive) { const end = deferred(); const feed = { scope: selected, receive, ended: end.promise, finish: end.resolve, close() { feedCloses++; } }; feeds.push(feed); return feed; } }; },
   };
   let connectionOptions;
-  const app = createApplicationController({ createConnection: options => { connectionOptions = options; return connection; },
-    ownedViewStorage: { open: async failure => { await behavior.acquire(); return lease('original-view', failure); }, reopen: async (id, failure) => { await behavior.reopen(id); return lease(id, failure); } }, createId: () => behavior.uuids ? `00000000-0000-4000-8000-${String(++nextId).padStart(12, '0')}` : `id-${++nextId}` });
-  return { app, views, drafts, loads, selected, captured, descriptor, leases, created, submitted, cursors, feeds, behavior,
+  const storage = { open: async failure => { await behavior.acquire(); return lease('original-view', failure); }, reopen: async (id, failure) => { await behavior.reopen(id); return lease(id, failure); } };
+  const app = createApplicationController({ ...options, createConnection: options => { connectionOptions = options; return connection; },
+    ownedViewStorage: storage, createId: () => behavior.uuids ? `00000000-0000-4000-8000-${String(++nextId).padStart(12, '0')}` : `id-${++nextId}` });
+  return { app, storage, views, drafts, loads, selected, captured, descriptor, leases, created, submitted, cursors, feeds, behavior,
     host: value => { hostId = value; }, connectionLost: error => connectionOptions.onConnectionLost(error), feedCloses: () => feedCloses, metadataCalls: () => metadataCalls, filters, calls };
 }
 

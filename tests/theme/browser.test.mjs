@@ -29,6 +29,11 @@ test('desktop controls work with system themes, scoped overrides and accessible 
   assert.equal(await scope.getAttribute('data-appearance'), 'light');
   const moduleButton = page.getByTestId('module-button');
   const send = page.getByTestId('send');
+  assert.equal(await computed(moduleButton, 'font-size'), '13px');
+  assert.equal(await computed(moduleButton, 'line-height'), '18.2px');
+  assert.match(await computed(moduleButton, 'box-shadow'), /inset/);
+  assert.equal(await computed(page.getByTestId('weighted-muted'), 'font-weight'), '700');
+  assert.equal(await computed(page.getByTestId('weighted-code'), 'font-weight'), '700');
   assert.notEqual(await computed(moduleButton, 'background-color'), await computed(send, 'background-color'));
   await t.test('keyboard actions preserve form behavior', async () => {
     await page.getByLabel('Message', { exact: true }).fill('Build a calm interface');

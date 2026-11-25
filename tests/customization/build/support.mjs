@@ -3,14 +3,15 @@ import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execute } from './preparation-support.mjs';
 
 export const root = fileURLToPath(new URL('../../../', import.meta.url));
 export function repository() {
   const directory = mkdtempSync(join(tmpdir(), 'openpane-custom-build-'));
   const repo = join(directory, 'source');
   cpSync(join(root, 'templates/customization'), repo, { recursive: true });
-  const git = (...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
-  git('init', '--quiet');
+  const git = (...args) => execute('git', args, repo);
+  git('init', '--template=', '--quiet');
   const commit = () => {
     git('add', '.');
     git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '--quiet', '-m', 'Fixture');

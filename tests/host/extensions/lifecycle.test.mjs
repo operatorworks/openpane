@@ -249,3 +249,31 @@ test('artifact replacement without a packaged ABI retires the active generation 
     assert.equal(fixture.calls.close, 1); assert.equal(fixture.calls.dispose, 1);
   } finally { await host.close(); }
 });
+
+test('failed provider shutdown still closes the independent UI store while retaining host ownership', async t => {
+  const { UiStore } = await import('../../../apps/host/build/tsc/ui-store.js');
+  const close = UiStore.prototype.close, closed = [];
+  t.mock.method(UiStore.prototype, 'close', function () { close.call(this); closed.push(this); });
+  const configured = options(t), provider = entry(t, { dispose() { throw new Error(secret); } });
+  const host = await startBrowserHost({ agentStartup: { kind:'recorded' }, ...configured, extensions: { kind:'transient',entries:[provider.value] } });
+  await assert.rejects(host.close(), /Host shutdown failed/);
+  assert.equal(closed.length, 1);
+  assert.throws(() => closed[0].db.prepare('SELECT 1'), /closed|not open/i);
+  assert.throws(() => ownDirectory(configured.directory), /Another host owns/);
+  await assert.rejects(host.close(), /Host shutdown failed/); assert.equal(closed.length, 1);
+});
+
+test('a drained UI disconnect error closes its store before releasing directory ownership', async t => {
+  const { UiStore } = await import('../../../apps/host/build/tsc/ui-store.js');
+  const { requestUi } = await import('../../../apps/host/build/tsc/ui-control.js');
+  const { join } = await import('node:path');
+  const close = UiStore.prototype.close, closed = [];
+  t.mock.method(UiStore.prototype, 'close', function () { close.call(this); closed.push(this); });
+  t.mock.method(UiStore.prototype, 'endUiSession', () => { throw new Error('Recorded disconnect persistence failure'); });
+  const configured = options(t);
+  const host = await startBrowserHost({ agentStartup: { kind: 'recorded' }, ...configured, extensions: { kind: 'transient', entries: [] } });
+  await requestUi(join(configured.directory, 'ui.sock'), { op: 'context' });
+  await assert.rejects(host.close(), /Host shutdown failed/);
+  assert.equal(closed.length, 1); assert.throws(() => closed[0].db.prepare('SELECT 1'), /closed|not open/i);
+  const released = ownDirectory(configured.directory); released.close();
+});
