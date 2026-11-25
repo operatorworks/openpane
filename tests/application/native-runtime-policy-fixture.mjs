@@ -1,3 +1,4 @@
+import { desktopSourceModules } from './desktop-source-modules.mjs';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -5,7 +6,9 @@ import { chromium } from 'playwright';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 export async function fixture(t) {
-  const bundle = await build({ stdin: { contents: `import { WindowCoordinator } from './apps/desktop/src/application/window-coordinator.ts';
+  const bundle = await build({ stdin: { contents: `import { windowContext } from './tests/application/window-context-fixture.mjs';
+    import { continuationNotice } from './apps/desktop/src/application/continuation-copy.ts';
+    import { WindowCoordinator } from './apps/desktop/src/application/window-coordinator.ts';
     import { WindowRuntime } from './apps/desktop/src/application/window-runtime.ts';
     import { UiConnection } from './apps/desktop/src/application/ui-connection.ts';
     import { ServiceConnectionLost, ServiceError } from '@openpane/client/service';
@@ -15,12 +18,13 @@ export async function fixture(t) {
     import { transcriptProjection } from '@openpane/contracts/conversation';
     import { recordNativeEditorOrigin } from './apps/desktop/src/application/native-editor-origin.ts';
     import * as carries from './apps/desktop/src/application/draft-carry.ts';
-    Object.assign(globalThis, { recordNativeEditorOrigin, ServiceError, ServiceConnectionLost, controllerFixture, WindowCoordinator, WindowRuntime, UiConnection, BrowserViewStorage, carries, createConversationStore, transcriptProjection });`, resolveDir: root }, bundle: true, write: false, format: 'iife', plugins: [{ name: 'one-controller-class-identity', setup(builder) { builder.onResolve({ filter: /application-controller\.js$/ }, () => ({ path: `${root}apps/desktop/src/application/application-controller.ts` })); } }] });
+    Object.assign(globalThis, { windowContext, continuationNotice, recordNativeEditorOrigin, ServiceError, ServiceConnectionLost, controllerFixture, WindowCoordinator, WindowRuntime, UiConnection, BrowserViewStorage, carries, createConversationStore, transcriptProjection });`, resolveDir: root }, bundle: true, write: false, format: 'iife', plugins: [desktopSourceModules] });
   const browser = await chromium.launch(); t.after(() => browser.close());
   const page = await browser.newPage();
+  const errors = []; page.on('pageerror', error => errors.push(error.message)); t.after(() => assert.deepEqual(errors, []));
   await page.route('http://localhost/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Native placement policy</title>' }));
   await page.goto('http://localhost/policy'); await page.addScriptTag({ content: bundle.outputFiles[0].text });
-  const errors = []; page.on('pageerror', error => errors.push(error.message)); t.after(() => assert.deepEqual(errors, []));
+
   await page.evaluate(() => {
     globalThis.bounded = async pending => { let timer; try { return await Promise.race([pending, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Production boundary did not arrive')), 3000); })]); } finally { clearTimeout(timer); } };
     globalThis.waitFor = async predicate => { const until = performance.now() + 3000; while (!predicate()) { if (performance.now() > until) throw new Error('Bounded production completion did not arrive'); await new Promise(resolve => setTimeout(resolve, 1)); } };

@@ -234,7 +234,7 @@ test('a temporarily busy saved editor stays queued and resumes after its lock be
   f.storage.savedViews = async () => ({ ids: ['closed-view'], after: null });
   let busy = true, attempts = 0;
   f.behavior.binding = confirmed;
-  const target = { ...f.target, openOtherView: viewId => f.pool.open(viewId, async () => { attempts++; return busy ? null : f.physical(viewId); }, { interested: false }) };
+  const target = { ...f.target, openOtherView: viewId => f.pool.open(viewId, async () => { attempts++; return busy ? null : f.physical(viewId); }, { interested: false, kind: 'recovery' }) };
   f.worker.retarget(target); await settle(t);
   assert.equal(attempts, 1); assert.equal(f.records.get('closed-view/closed').frontendSends[0].state, 'unavailable-pending');
   busy = false; await intervals(t, 1);
@@ -250,7 +250,7 @@ test('an editor joining a recovery acquisition does not stall other saved journa
   f.behavior.binding = confirmed;
   let first = true;
   const load = async viewId => { if (viewId === 'first-view' && first) { first = false; entered.resolve(); await release.promise; } return f.physical(viewId); };
-  f.worker.retarget({ ...f.target, openOtherView: viewId => f.pool.open(viewId, () => load(viewId), { interested: false }) });
+  f.worker.retarget({ ...f.target, openOtherView: viewId => f.pool.open(viewId, () => load(viewId), { interested: false, kind: 'recovery' }) });
   await entered.promise;
   const joining = f.pool.open('first-view', () => load('first-view'), { required: true });
   release.resolve(); const active = await joining; t.after(() => active.release()); await settle(t);
@@ -269,7 +269,7 @@ for (const state of ['unavailable-pending', 'retained']) test(`closed-journal re
     const owner = f.physical(viewId); owners.push(owner);
     owner.close = async () => { if (++closes === (state === 'retained' ? 2 : 1)) { entered.resolve(); await completed.promise; } owner.closed = true; };
     return owner;
-  }, { interested: false }) });
+  }, { interested: false, kind: 'recovery' }) });
   await entered.promise; await settle(t);
   assert.equal(f.requests.length, 0); assert.equal(owners.at(-1).closed, false);
   if (state === 'retained') assert.equal(f.records.get('closed-view/closed').frontendSends[0].state, 'unavailable-pending');
@@ -292,13 +292,36 @@ test('a view borrowed during recovery store disposal cannot stall later saved jo
     }
     return borrow;
   };
-  const openOtherView = viewId => f.pool.open(viewId, async () => f.physical(viewId), { interested: false });
+  const openOtherView = viewId => f.pool.open(viewId, async () => f.physical(viewId), { interested: false, kind: 'recovery' });
   f.worker.retarget({ ...f.target, openOtherView }); await began.promise;
-  const joining = await f.pool.open('first-view', async () => f.physical('first-view'), { required: true });
-  t.after(() => joining.release());
-  disposal.resolve(); await settle(t);
+  let joined = false;
+  const joining = f.pool.open('first-view', async () => f.physical('first-view'), { required: true }).then(view => { joined = true; return view; });
+  await flush(); assert.equal(joined, false, 'an editor waits for the recovery-only physical lease');
+  disposal.resolve(); const editor = await joining; t.after(() => editor.release()); await settle(t);
   assert.equal(f.pool.holds('first-view'), true, 'the new borrower keeps its view');
   assert.equal(f.records.get('first-view/first').frontendSends[0].state, 'unavailable-confirmed');
   assert.equal(f.records.get('second-view/second').frontendSends[0].state, 'unavailable-confirmed', 'the serialized pass continues to later saved views');
+  assert.deepEqual(f.failures, []);
+});
+
+for (const stage of ['reopen', 'hydrate']) test(`retired closed-journal recovery cannot acknowledge after ${stage}`, { timeout: 5000 }, async t => {
+  const f = await fixture(t), entered = f.gate(), held = f.gate();
+  f.records.set('closed-view/a', record(scope, 'unavailable-pending'));
+  f.storage.savedViews = async () => ({ ids: ['closed-view'], after: null });
+  let opens = 0, hydrations = 0;
+  const recover = f.pool.recovery.bind(f.pool);
+  f.pool.recovery = async (lease, selected) => {
+    const borrow = await recover(lease, selected);
+    if (lease.storage.viewId === 'closed-view' && ++hydrations === 2 && stage === 'hydrate') { entered.resolve(); await held.promise; }
+    return borrow;
+  };
+  const openOtherView = async viewId => {
+    if (++opens === 2 && stage === 'reopen') { entered.resolve(); await held.promise; }
+    return f.pool.open(viewId, async () => f.physical(viewId), { interested: false, kind: 'recovery' });
+  };
+  f.worker.retarget({ ...f.target, openOtherView }); await settle(t); await entered.promise;
+  f.worker.retarget(null); held.resolve(); await f.worker.drained(); await settle(t);
+  assert.equal(f.requests.length, 1, 'the recorded unavailable reply reached the acknowledgment adapter');
+  assert.equal(f.records.get('closed-view/a').frontendSends[0].state, 'unavailable-pending');
   assert.deepEqual(f.failures, []);
 });

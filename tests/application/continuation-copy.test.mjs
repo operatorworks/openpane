@@ -3,7 +3,7 @@ import test from 'node:test';
 import { boundaryNote, continuationAnnouncement, continuationNotice, earlierLabel } from '../../apps/desktop/src/application/continuation-copy.ts';
 
 const scope = { hostId: 'host', conversationId: 'after' };
-const base = { view: null, action: null, error: '', stalled: false, arrived: null, boundary: null, earlier: [], earlierError: '', more: false };
+const base = { placement: null, view: null, action: null, error: '', stalled: false, arrived: null, boundary: null, earlier: [], earlierError: '', more: false };
 const closed = successor => ({ ...base, view: { predecessor: null, carried: null, closure: 'cancelled', successor } });
 const carried = { carriedTurns: 2, omittedTurns: 0, uncertainTurns: 3, carriedBytes: 2048, limitBytes: 65536 };
 const NO_CARRY = 'Tools, approvals and the agent’s memory did not carry over.';
@@ -48,6 +48,12 @@ test('the give-up state offers only a lookup and a new chat, also before any rea
   assert.deepEqual(continuationNotice({ ...closed({ kind: 'confirmed', scope }), stalled: true }), GIVE_UP);
   assert.deepEqual(continuationNotice({ ...base, action: 'check' }), GIVE_UP);
   assert.deepEqual(continuationNotice({ ...base, error: 'Service request timed out' }), GIVE_UP);
+});
+
+test('a refused placement of a confirmed successor keeps its diagnostic and recovery choices', () => {
+  assert.deepEqual(continuationNotice({ ...closed({ kind: 'confirmed', scope }), stalled: true, error: 'The destination editor refused placement.', placement: { kind: 'refused', reason: 'The destination editor refused placement.' } }), {
+    status: 'The destination editor refused placement.', disclosure: false, choices: ['Check again', 'Start a new chat'],
+  });
 });
 
 test('the persistent region announces state lines on a closed chat and the boundary once Continue arrives', () => {

@@ -73,6 +73,7 @@ async function scanOther(target: RecoveryTarget, viewId: string, signal: AbortSi
       const page = await lease.storage.draftScopes(target.metadata.hostId, after);
       if (!valid()) return false;
       for (const scope of page.scopes) {
+        if (!valid()) return false;
         let borrow: StoreBorrow;
         try { borrow = await target.pool.recovery(lease, scope); }
         catch (error) { if (error instanceof SupersededDraftsError) continue; throw error; }
@@ -87,16 +88,21 @@ async function scanOther(target: RecoveryTarget, viewId: string, signal: AbortSi
   for (const record of records) {
     let references = record.references;
     async function update(id: string, acknowledged: boolean): Promise<void> {
+      if (!valid()) return;
       const lease = await target.openOtherView?.(viewId);
       if (!lease) throw new Error('This saved editor is open in another document.');
       let closing: Promise<void> | null = null;
       try {
-        const borrow = await target.pool.recovery(lease, record.scope);
-        try {
-          const journal = borrow.store.frontendJournal;
-          await (acknowledged ? journal.acknowledged(id) : journal.unavailable(id));
-          references = [...journal.read()];
-        } finally { borrow.release(); }
+        if (valid()) {
+          const borrow = await target.pool.recovery(lease, record.scope);
+          try {
+            if (valid()) {
+              const journal = borrow.store.frontendJournal;
+              await (acknowledged ? journal.acknowledged(id) : journal.unavailable(id));
+              references = [...journal.read()];
+            }
+          } finally { borrow.release(); }
+        }
       } finally { closing = target.pool.releaseRecovery(lease); }
       if (closing) await waitForClose(closing, signal);
     }
@@ -119,12 +125,12 @@ async function discover(target: RecoveryTarget, valid: () => boolean, views: Set
   } while (after !== null && valid());
 }
 export function createFrontendRecovery() {
-  let desired: RecoveryTarget | null = null, running: Pass | null = null, requested = false;
+  let desired: RecoveryTarget | null = null, running: Pass | null = null, requested = false, suspended = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let discoverViews = false;
   const pendingViews = new Set<string>();
   async function start(): Promise<void> {
-    if (running || !desired || !requested) return;
+    if (running || !desired || !requested || suspended) return;
     clearTimeout(timer);
     timer = undefined;
     requested = false;
@@ -164,6 +170,12 @@ export function createFrontendRecovery() {
     }
   }
   return {
+    suspend(paused: boolean): void {
+      if (suspended === paused) return;
+      suspended = paused;
+      if (paused) { running?.lifetime.abort(); clearTimeout(timer); timer = undefined; }
+      else if (desired) { requested = true; queueMicrotask(() => { void start(); }); }
+    },
     async drained(): Promise<void> { await running?.drained; },
     retarget(next: RecoveryTarget | null): void {
       if (sameTarget(desired, next)) return;

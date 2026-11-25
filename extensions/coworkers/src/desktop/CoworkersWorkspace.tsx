@@ -51,18 +51,12 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   const filter = filtered.installationId === installationId ? filtered.coworkerId : null;
   const setFilter = (coworkerId: string | null) => setFiltered({ installationId, coworkerId });
   const [narrowPane, setNarrowPane] = useState<'list' | 'conversation'>('list');
-  // Only a selection or inline result for the pending action may move the narrow pane.
-  // Navigating elsewhere drops the wait, so a later unrelated selection does not move the pane.
-  const [awaiting, setAwaiting] = useState<{ readonly before: string | null } | null>(null);
   const [notice, setNotice] = useState('');
   const waiting = useRef<object | null>(null);
   const inFlight = useRef<object | null>(null);
   const [opening, setOpening] = useState(false);
-  function stopAwaiting() { waiting.current = null; setAwaiting(null); }
+  function stopAwaiting() { waiting.current = null; }
   const selectedKey = props.selected ? `${props.selected.hostId}/${props.selected.conversationId}` : null;
-  useEffect(() => {
-    if (awaiting && selectedKey !== null && selectedKey !== awaiting.before) { stopAwaiting(); setNarrowPane('conversation'); }
-  }, [awaiting, selectedKey]);
   const key = coworkers.map(item => item.providerAgentId).join(',');
   useEffect(() => {
     if (!available || !installationId) return;
@@ -110,7 +104,7 @@ export function CoworkersWorkspace(props: WorkspaceViewProps) {
   async function attempt(action: () => ReturnType<WorkspaceViewProps['open']>) {
     if (inFlight.current) return;
     const attempt = {}; inFlight.current = attempt; waiting.current = attempt; setOpening(true);
-    setNotice(''); setAwaiting({ before: selectedKey });
+    setNotice('');
     try {
       const result = await action();
       if (waiting.current !== attempt) return;

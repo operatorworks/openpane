@@ -1,4 +1,4 @@
-import { assessNativeProbe } from './result.mjs';
+import { assessNativeProbe, finalNativePaints } from './result.mjs';
 import { stopChild } from './process.mjs';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -18,7 +18,7 @@ await copyFile(join(root, 'apps/desktop/src-tauri/target/debug/experience-probe'
 await writeFile(join(app, 'Contents/Info.plist'), `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleExecutable</key><string>experience-probe</string><key>CFBundleIdentifier</key><string>homes.birb.openpane.experience-probe</string><key>CFBundleName</key><string>OpenPane Experience Probe</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>`);
 execFileSync('codesign', ['--force', '--deep', '--sign', '-', app], { stdio: 'pipe' });
 const bundle = await build({ absWorkingDir: root, entryPoints: ['tests/desktop/experience-probe/window.ts'], bundle: true, write: false, format: 'iife' });
-const fixtureSourceHashes = Object.fromEntries(await Promise.all(['run.mjs', 'window.ts', 'native.rs', 'result.mjs'].map(async name => [name, createHash('sha256').update(await readFile(new URL(name, import.meta.url))).digest('hex')])));
+const fixtureSourceHashes = Object.fromEntries(await Promise.all(['run.mjs', 'window.ts', 'native.rs', 'result.mjs', 'process.mjs'].map(async name => [name, createHash('sha256').update(await readFile(new URL(name, import.meta.url))).digest('hex')])));
 const probeBinarySha256 = createHash('sha256').update(await readFile(join(app, 'Contents/MacOS/experience-probe'))).digest('hex');
 const reports = [], timers = new Set(), reportWrites = new Set(), handlers = new Set();
 let stderrTail = Promise.resolve();
@@ -45,9 +45,9 @@ const handle = async (request, response) => {
       const label = report.detail.label; readyCounts[label] = (readyCounts[label] ?? 0) + 1;
       if (report.detail.recovered) recoveredCounts[label] = (recoveredCounts[label] ?? 0) + 1;
     }
-    const frozen = reports.findLast(report => report.kind === 'relay-frozen');
-    const finalPainted = frozen ? [...new Set(reports.filter(report => report.kind === 'paint' && report.at >= frozen.at && report.detail.generation === frozen.detail.generation).map(report => report.detail.label))] : [];
-    response.end(JSON.stringify({ readyCounts, recoveredCounts, finalPainted, frozenGeneration: frozen?.detail.generation ?? null, started: reports.some(report => report.kind === 'minimized') }));
+    const frozen = finalNativePaints(reports);
+    const finalPainted = [...new Set(frozen.paints.map(report => report.detail.label))];
+    response.end(JSON.stringify({ readyCounts, recoveredCounts, finalPainted, frozenGeneration: frozen.generation, started: reports.some(report => report.kind === 'minimized') }));
   }
   else if (path === '/snapshot') response.end('{"available":true}');
   else response.writeHead(404).end();

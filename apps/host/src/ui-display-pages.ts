@@ -60,7 +60,7 @@ export class DisplayPages {
       const highWater = this.data.sequence();
       const rows = this.data.db.prepare('SELECT sequence,id,kind FROM ui_display_events WHERE scope=? AND sequence>? ORDER BY sequence LIMIT ?').all(scope, cursor.sequence, maximumItems + 1);
       const changes: DisplayChange[] = []; let next = highWater, more = rows.length > maximumItems;
-      for (const row of rows.slice(0, maximumItems)) {
+      for (const [index, row] of rows.slice(0, maximumItems).entries()) {
         const sequence = count(row.sequence), publicationId = displayText(row.id);
         let change: DisplayChange;
         if (row.kind === 'published') {
@@ -69,7 +69,7 @@ export class DisplayPages {
           change = { kind: 'published', publication };
         } else if (row.kind === 'removed') change = { kind: 'removed', publicationId, sequence };
         else throw new Error('Invalid stored display change');
-        const candidate: DisplayPage = { ...identity, kind: 'changes', highWater, changes: [...changes, change], next: { kind: 'live', epoch: this.epoch(), sequence: highWater } };
+        const candidate: DisplayPage = { ...identity, kind: 'changes', highWater, changes: [...changes, change], next: { kind: 'live', epoch: this.epoch(), sequence: index + 1 < rows.length ? sequence : highWater } };
         if (bytes(candidate) > maximumBytes) { more = true; break; }
         changes.push(change);
       }
@@ -102,10 +102,11 @@ export class DisplayPages {
     const highWater = snapshot.highWater;
     const rows = this.data.db.prepare('SELECT id FROM ui_display_cards WHERE scope=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?').all(scope, after, highWater, maximumItems + 1);
     const publications: DisplayPublication[] = []; let more = rows.length > maximumItems;
-    for (const row of rows.slice(0, maximumItems)) {
+    for (const [index, row] of rows.slice(0, maximumItems).entries()) {
       const publication = this.data.publication(subscription.scope, displayText(row.id));
       if (!publication) return reset();
-      const candidate: DisplayPage = { ...identity, kind: 'snapshot', snapshotId: id, highWater, publications: [...publications, publication], next: { kind: 'snapshot', snapshotId: id, highWater, after: publication.sequence } };
+      const next: DisplayCursor = index + 1 < rows.length ? { kind: 'snapshot', snapshotId: id, highWater, after: publication.sequence } : { kind: 'live', epoch: this.epoch(), sequence: highWater };
+      const candidate: DisplayPage = { ...identity, kind: 'snapshot', snapshotId: id, highWater, publications: [...publications, publication], next };
       if (bytes(candidate) > maximumBytes) { more = true; break; }
       publications.push(publication);
     }

@@ -1,4 +1,4 @@
-import { validatedDelivery, matchesValidatedDelivery } from './ui-connection.js';
+import { validatedDelivery, matchesValidatedDelivery, sameDelivery } from './ui-connection.js';
 import { parseDelivery, parseUiClientSnapshot, parseWindowContext, parseDisplaySubscription, parseDisplayDelivery, sameScope } from '@openpane/contracts';
 import type { ConversationScope, DisplaySubscription, DeliveryEnvelope, UiClientSnapshot, WindowContext } from '@openpane/contracts';
 import { count, hex, identifier, record } from '@openpane/contracts/decode';
@@ -56,9 +56,9 @@ export class NativeMainUiRelay implements NativeUiRelayPort {
       if (identity && (!expected || !sameScope(identity.scope, expected.scope) || identity.subscriptionId !== expected.subscriptionId)) throw new Error('Foreign native card delivery');
       return { incarnation, envelope: child.envelope === null ? null : parseDelivery(child.envelope), display };
     });
+    this.previousChildren = live;
     if (scoped.some(child => child.envelope && (child.envelope.deliveryGeneration !== snapshot.selection.deliveryGeneration || child.envelope.selectionRevision !== snapshot.selection.revision || child.envelope.digest !== (snapshot.bundle?.digest ?? null)))) return true;
     await this.port.request({ kind: 'publish-ui', snapshot: { ...snapshot, display: null }, children: scoped });
-    this.previousChildren = live;
     if (!Array.isArray(drained.reports) || drained.reports.length > 64) throw new Error('Invalid child report queue');
     for (const value of drained.reports) {
       const entry = record(value, ['id', 'context', 'report']), id = identifier(entry.id, 200);
@@ -105,8 +105,9 @@ export class ChildUiConnection implements UiTransport {
   private confirmed: string | null = null;
   private presencePending = false;
   private presenceTask: Promise<void> | null = null;
-  private painted: UiClientSnapshot | null = null;
-  private failure: { readonly state: UiClientSnapshot; readonly reason: string } | null = null;
+  private painted: { readonly state: UiClientSnapshot; readonly context: string | null; readonly localBuiltin: boolean } | null = null;
+  private restoring: { readonly status: 'pending' | 'failed'; readonly context: string | null; readonly baselineGeneration: number | null } | null = null;
+  private failure: { readonly state: UiClientSnapshot; readonly context: string | null; readonly reason: string } | null = null;
   constructor(private readonly port: DesktopWindowPort) {
     if (port.context.role !== 'chat') throw new Error('A chat UI cache requires a registered child context');
   }
@@ -118,10 +119,10 @@ export class ChildUiConnection implements UiTransport {
   }
   start(): void {
     if (this.started) return; this.started = true;
-    for (const event of ['openpane-ui-wakeup', 'openpane-ui-cache'] as const) void this.port.listen(event, this.refresh).then(unlisten => { if (this.closed) unlisten(); else { this.unlisten.push(unlisten); this.refresh(); } }, error => this.update({ diagnostic: error instanceof Error ? error.message : 'Native UI relay unavailable' }));
+    for (const event of ['openpane-ui-wakeup', 'openpane-ui-cache'] as const) void this.port.listen(event, this.refresh).then(unlisten => { if (this.closed) unlisten(); else { this.unlisten.push(unlisten); this.refresh(); } }, error => this.update({ diagnostic: this.restoreDiagnostic() ?? (error instanceof Error ? error.message : 'Native UI relay unavailable') }));
     document.addEventListener('visibilitychange', this.visibility);
   }
-  private visibility = (): void => { void this.presence().then(this.refresh, () => this.update({ diagnostic: 'Native presence could not be confirmed' })); };
+  private visibility = (): void => { void this.presence().then(this.refresh, () => this.update({ diagnostic: this.restoreDiagnostic() ?? 'Native presence could not be confirmed' })); };
   private presence(): Promise<void> {
     this.presencePending = true;
     return this.presenceTask ??= (async () => {
@@ -145,22 +146,35 @@ export class ChildUiConnection implements UiTransport {
       while (this.requested && !this.closed) {
         this.requested = false;
         try {
-          const value = record(await this.port.request({ kind: 'read-ui' }), ['state', 'localBuiltin', 'context']);
+          const attempt = this.restoring;
+          const value = record(await this.port.request({ kind: 'read-ui' }), ['state', 'localBuiltin', 'recoveryFloor', 'context']);
+          if (attempt !== this.restoring) { this.requested = true; continue; }
           if (typeof value.localBuiltin !== 'boolean') throw new Error('Invalid native recovery state');
+          const recoveryFloor = value.recoveryFloor === null ? 0 : count(value.recoveryFloor);
+          let deliveryContext = this.snapshot.deliveryContext, profileChanged = false;
           if (value.context !== null) {
             const context = parseWindowContext(value.context);
             if (context.role !== 'chat' || context.documentIncarnation !== this.port.context.documentIncarnation || context.viewId !== this.port.context.viewId) throw new Error('Native relay changed window identity');
-            this.update({ deliveryContext: JSON.stringify(context) });
-            if (this.cards.profile(context.profileId, context.hostId)) await this.presence();
+            deliveryContext = JSON.stringify(context);
+            profileChanged = this.cards.profile(context.profileId, context.hostId);
           }
           const state = value.state === null ? null : parseUiClientSnapshot(value.state);
           const advanced = this.cards.accept(state?.display ?? null);
-          this.update({ state, cards: this.cards.getSnapshot(), localBuiltin: value.localBuiltin, diagnostic: state?.fault ?? null });
-          if (advanced || this.presencePending) await this.presence();
-          if (state && this.failure && this.failure.state.selection.deliveryGeneration !== state.selection.deliveryGeneration) this.failure = null;
+          const matches = (saved: { readonly state: UiClientSnapshot; readonly context: string | null }) => this.current(saved.state, saved.context, { state, deliveryContext });
+          if (this.failure && !matches(this.failure)) this.failure = null;
+          let validation = {};
+          if (this.painted && !matches(this.painted)) {
+            this.painted = null; this.confirmed = null;
+            validation = { validatedVisual: this.snapshot.validatedVisual.kind === 'local-builtin' ? this.snapshot.validatedVisual : { kind: 'none' } as const, confirmedGeneration: null };
+          }
+          if (this.restoring?.status === 'failed' && this.restoring.baselineGeneration !== null && !value.localBuiltin && state?.selection.selected.kind === 'builtin' && state.selection.deliveryGeneration > Math.max(this.restoring.baselineGeneration, recoveryFloor)) this.restoring = null;
+          this.update({ state, deliveryContext, cards: this.cards.getSnapshot(), localBuiltin: value.localBuiltin || this.restoring !== null,
+            diagnostic: this.restoreDiagnostic() ?? state?.fault ?? null, ...validation });
+          if (profileChanged || advanced || this.presencePending) await this.presence();
           if (this.failure && document.visibilityState === 'visible') await this.reportFailure();
-          if (state && this.painted && matchesValidatedDelivery(validatedDelivery(this.painted, this.snapshot.deliveryContext), state, this.snapshot.deliveryContext) && document.visibilityState === 'visible') await this.rendered(state);
-        } catch (error) { this.update({ diagnostic: error instanceof Error ? error.message : 'Native UI relay unavailable' }); }
+          const painted = this.painted;
+          if (state && painted && document.visibilityState === 'visible') await this.rendered(state, painted.localBuiltin, painted.context);
+        } catch (error) { this.update({ diagnostic: this.restoreDiagnostic() ?? (error instanceof Error ? error.message : 'Native UI relay unavailable') }); }
       }
       this.reading = false;
     })();
@@ -170,37 +184,55 @@ export class ChildUiConnection implements UiTransport {
     await this.port.request({ kind: 'report-ui', report: { kind: reason === null ? 'rendered' : 'failed', deliveryGeneration: state.selection.deliveryGeneration,
       selectionRevision: state.selection.revision, digest: state.bundle?.digest ?? null, envelope: state.envelope, reason } });
   }
+  private current(state: UiClientSnapshot, context: string | null, incoming: Pick<UiConnectionSnapshot, 'state' | 'deliveryContext'> = this.snapshot): boolean {
+    return context === incoming.deliveryContext && incoming.state !== null && sameDelivery(state, incoming.state);
+  }
   async rendered(state: UiClientSnapshot | null, localBuiltin = false, context = this.snapshot.deliveryContext): Promise<void> {
-    if (context !== this.snapshot.deliveryContext || state && (!this.snapshot.state || !matchesValidatedDelivery(validatedDelivery(state, context), this.snapshot.state, context))) return;
-    if (localBuiltin) this.update({ validatedVisual: { kind: 'local-builtin' } });
-    if (!state || !this.snapshot.state || !matchesValidatedDelivery(validatedDelivery(state, this.snapshot.deliveryContext), this.snapshot.state, this.snapshot.deliveryContext)) return;
-    if (this.snapshot.localBuiltin && state.selection.selected.kind !== 'builtin') return;
-    this.painted = state;
-    if (!localBuiltin) this.update({ validatedVisual: validatedDelivery(state, this.snapshot.deliveryContext) });
-    const key = JSON.stringify([this.snapshot.deliveryContext, state.selection.deliveryGeneration, state.selection.revision, state.bundle?.digest, state.envelope?.requestId]);
+    if (context !== this.snapshot.deliveryContext || state && !this.current(state, context)) return;
+    if (localBuiltin) {
+      if (!this.painted?.localBuiltin) { this.painted = null; this.confirmed = null; this.update({ confirmedGeneration: null }); }
+      this.update({ validatedVisual: { kind: 'local-builtin' } });
+    }
+    if (!state || this.snapshot.localBuiltin && state.selection.selected.kind !== 'builtin' || !localBuiltin && this.snapshot.localBuiltin) return;
+    const painted = { state, context, localBuiltin }; this.painted = painted;
+    if (!localBuiltin) this.update({ validatedVisual: validatedDelivery(state, context) });
+    const key = JSON.stringify([context, state.selection.deliveryGeneration, state.selection.revision, state.bundle?.digest, state.envelope?.requestId, localBuiltin]);
     if (this.confirmed === key) return;
     await this.report(state, null);
-    if (this.painted !== state || context !== this.snapshot.deliveryContext || !this.snapshot.state || !matchesValidatedDelivery(validatedDelivery(state, context), this.snapshot.state, context)) return;
+    if (this.painted !== painted || !this.current(state, context)
+      || !(matchesValidatedDelivery(this.snapshot.validatedVisual, state, context)
+        || localBuiltin && this.snapshot.localBuiltin && state.selection.selected.kind === 'builtin' && this.snapshot.validatedVisual.kind === 'local-builtin')) return;
     this.confirmed = key; this.update({ confirmedGeneration: state.selection.deliveryGeneration });
   }
   async failed(state: UiClientSnapshot, reason: string, context = this.snapshot.deliveryContext): Promise<void> {
-    if (context !== this.snapshot.deliveryContext || !this.snapshot.state || !matchesValidatedDelivery(validatedDelivery(state, context), this.snapshot.state, context)) return;
+    if (!this.current(state, context)) return;
     this.confirmed = null;
     this.update({ validatedVisual: { kind: 'none' }, confirmedGeneration: null });
-    this.painted = null; this.failure = { state, reason: reason.slice(0, 500) || 'Appearance failed' };
+    this.painted = null; this.failure = { state, context, reason: reason.slice(0, 500) || 'Appearance failed' };
     await this.reportFailure();
   }
   private async reportFailure(): Promise<void> {
     const failure = this.failure;
-    if (!failure) return;
+    if (!failure || !this.current(failure.state, failure.context)) return;
     await this.report(failure.state, failure.reason);
     if (this.failure === failure) this.failure = null;
+  }
+  private restoreDiagnostic(): string | null {
+    return this.restoring?.status === 'pending' ? 'Restoring OpenPane appearance. Main will save builtin selection.'
+      : this.restoring?.status === 'failed' ? 'OpenPane appearance is visible locally. Saving failed; retry Restore appearance.' : null;
   }
   async restore(expectedHost?: UiRecoveryHost): Promise<void> {
     const host = expectedHost === undefined || this.snapshot.deliveryContext === null ? null : parseWindowContext(JSON.parse(this.snapshot.deliveryContext));
     if (expectedHost && (host?.hostId !== expectedHost.hostId || host.profileId !== expectedHost.profileId)) throw new Error('Appearance recovery belongs to a different host profile');
-    this.update({ localBuiltin: true, diagnostic: 'Restoring OpenPane appearance. Main will save builtin selection.' });
-    await this.port.request({ kind: 'restore-builtin', ...(host ? { expectedContext: { hostId: host.hostId, profileId: host.profileId } } : {}) });
+    this.painted = null; this.failure = null; this.confirmed = null;
+    const attempt = { status: 'pending' as const, context: this.snapshot.deliveryContext, baselineGeneration: this.snapshot.state?.selection.deliveryGeneration ?? null }; this.restoring = attempt;
+    this.update({ localBuiltin: true, validatedVisual: this.snapshot.validatedVisual.kind === 'local-builtin' ? this.snapshot.validatedVisual : { kind: 'none' }, confirmedGeneration: null, diagnostic: this.restoreDiagnostic() });
+    try {
+      await this.port.request({ kind: 'restore-builtin', ...(host ? { expectedContext: { hostId: host.hostId, profileId: host.profileId } } : {}) });
+      if (this.restoring === attempt && (attempt.context === null || attempt.context === this.snapshot.deliveryContext)) { this.restoring = null; this.refresh(); }
+    } catch {
+      if (this.restoring === attempt && (attempt.context === null || attempt.context === this.snapshot.deliveryContext)) { this.restoring = { ...attempt, status: 'failed', baselineGeneration: attempt.baselineGeneration ?? this.snapshot.state?.selection.deliveryGeneration ?? null }; this.update({ diagnostic: this.restoreDiagnostic() }); }
+    }
   }
   close(): void {
     this.closed = true;

@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { UiStore } from '../../apps/host/build/tsc/ui-store.js';
+import { parseUiRequest } from '../../apps/host/build/tsc/ui-protocol.js';
 import { UiConnection } from '../../apps/desktop/dist/application/ui-connection.js';
 import { ChildUiConnection } from '../../apps/desktop/dist/application/native-ui-relay.js';
 
@@ -28,33 +33,34 @@ for (const seat of ['main', 'child']) test(`${seat} invalidates a rejected appea
 });
 
 test('main confirms a lost paint reply when polling returns a fresh object for the same delivery', { timeout: 5000 }, async t => {
-  const previous = globalThis.document; globalThis.document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
-  const ui = new UiConnection();
-  let reports = 0, reads = 0, nextRead;
-  const pollingAgain = new Promise(resolve => { nextRead = resolve; });
-  ui.window = { ...context, role: 'main', label: 'main' };
-  ui.context = { hostId: 'host', profileId: 'profile' };
-  ui.recovery = null;
-  ui.snapshot = { ...ui.getSnapshot(), state, localBuiltin: false, deliveryContext: 'document' };
-  ui.post = async request => {
-    if (request.op === 'paint') {
-      if (reports++ === 0) throw new Error('First paint reply lost');
-      return {};
+  const previous = { document: globalThis.document, fetch: globalThis.fetch, storage: globalThis.localStorage };
+  const directory = await mkdtemp(join(tmpdir(), 'lost-ui-paint-')), store = new UiStore(join(directory, 'ui.sqlite'), 'host'), saved = new Map();
+  globalThis.document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  globalThis.localStorage = { getItem: key => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value), removeItem: key => saved.delete(key) };
+  let reports = 0, reads = 0, nextRead, secondRead, release;
+  const pollingAgain = new Promise(resolve => { nextRead = resolve; }), pollingSecond = new Promise(resolve => { secondRead = resolve; }), held = new Promise(resolve => { release = resolve; });
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    if (request.op === 'state') {
+      if (++reads === 2) { secondRead(); await held; }
+      if (reads > 2) {
+        nextRead(); return new Promise((_, reject) => { if (options.signal.aborted) reject(new Error('Closed')); else options.signal.addEventListener('abort', () => reject(new Error('Closed')), { once: true }); });
+      }
     }
-    assert.equal(request.op, 'state');
-    if (reads++ === 0) return structuredClone(state);
-    nextRead();
-    return new Promise((_, reject) => ui.abort.signal.addEventListener('abort', () => reject(new Error('Closed')), { once: true }));
+    let value;
+    try { value = await store.execute(parseUiRequest(request.op === 'state' ? { ...request, waitMs: 0 } : request)); }
+    catch (error) { return Response.json({ ok: false, code: error.code ?? 'unavailable', error: error.message }, { status: 409 }); }
+    if (request.op === 'paint' && reports++ === 0) throw new Error('First paint reply lost');
+    return Response.json({ ok: true, value });
   };
-  t.after(() => { ui.close(); globalThis.document = previous; });
-  await assert.rejects(ui.rendered(state), /First paint reply lost/);
+  const ui = new UiConnection();
+  t.after(async () => { release(); ui.close(); globalThis.document = previous.document; globalThis.fetch = previous.fetch; globalThis.localStorage = previous.storage; store.close(); await rm(directory, { recursive: true, force: true }); });
+  ui.start(); await pollingSecond;
+  const painted = ui.getSnapshot().state; assert.ok(painted);
+  await assert.rejects(ui.rendered(painted), /First paint reply lost/);
   assert.equal(ui.getSnapshot().confirmedGeneration, null);
-  const reading = ui.readLoop();
-  await pollingAgain;
-  assert.notEqual(ui.getSnapshot().state, state);
-  assert.equal(reports, 2);
-  assert.equal(ui.getSnapshot().confirmedGeneration, 0);
-  ui.close(); await reading;
+  release(); await pollingAgain;
+  assert.notEqual(ui.getSnapshot().state, painted); assert.equal(reports, 2); assert.equal(ui.getSnapshot().confirmedGeneration, 0);
 });
 
 
@@ -123,4 +129,118 @@ test('retrying offline restore retains the already validated local builtin appea
   assert.equal(ui.getSnapshot().localBuiltin, true);
   assert.deepEqual(ui.getSnapshot().validatedVisual, { kind: 'local-builtin' });
   assert.equal(ui.getSnapshot().confirmedGeneration, null);
+});
+
+const untilChild = async predicate => { for (let n = 0; n < 200 && !predicate(); n++) await new Promise(resolve => setImmediate(resolve)); assert.ok(predicate(), 'child boundary checkpoint'); };
+function childReportingFixture(t, { snapshot = state, builtin = false, report = async () => ({}), restore = async () => ({}), presence = async () => ({}) } = {}) {
+  const previous = globalThis.document; globalThis.document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  let currentContext = context, currentState = snapshot, localBuiltin = builtin, recoveryFloor = null;
+  const reports = [];
+  const ui = new ChildUiConnection({ context: { ...context, reservation: { scope } }, async request(command) {
+    if (command.kind === 'presence') return presence();
+    if (command.kind === 'read-ui') return { context: currentContext, state: currentState, localBuiltin, recoveryFloor };
+    if (command.kind === 'report-ui') { reports.push({ context: currentContext, report: command.report }); return report(command.report); }
+    if (command.kind === 'restore-builtin') { const result = await restore(); localBuiltin = true; return result; }
+    throw new Error(command.kind);
+  } });
+  t.after(() => { ui.close(); globalThis.document = previous; });
+  return { ui, reports, cache(nextState, builtin, floor = null) { currentState = nextState; localBuiltin = builtin; recoveryFloor = floor; }, async read(nextContext = currentContext) { currentContext = nextContext; ui.refresh(); await untilChild(() => JSON.parse(ui.getSnapshot().deliveryContext ?? 'null')?.profileId === nextContext.profileId && ui.getSnapshot().state !== null); await new Promise(resolve => setImmediate(resolve)); } };
+}
+test('child local builtin paint retains its mode across cache refresh', { timeout: 5000 }, async t => {
+  const f = childReportingFixture(t, { builtin: true }); await f.read(); await f.ui.rendered(f.ui.getSnapshot().state, true);
+  assert.equal(f.ui.getSnapshot().validatedVisual.kind, 'local-builtin');
+  await f.read(); assert.equal(f.ui.getSnapshot().validatedVisual.kind, 'local-builtin');
+});
+test('child restore fences an in-flight themed confirmation', { timeout: 5000 }, async t => {
+  let release, entered; const held = new Promise(resolve => { release = resolve; }), reporting = new Promise(resolve => { entered = resolve; }); t.after(() => release());
+  const manifest = { schemaVersion: 2, id: 'report-test', label: 'Report test', theme: { density: 'comfortable', mode: 'system', light: {}, dark: {} }, presentation: { home: { kind: 'stack', panes: ['conversations'] }, transcript: 'bubbles', navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } }, stylesheet: null, assets: [] };
+  const themed = { ...state, selection: { ...state.selection, revision: 1, deliveryGeneration: 1, selected: { kind: 'experience', digest: 'a'.repeat(64) } }, bundle: { manifest, digest: 'a'.repeat(64) } };
+  const f = childReportingFixture(t, { snapshot: themed, report: async () => { entered(); await held; return {}; } });
+  await f.read(); const painting = f.ui.rendered(f.ui.getSnapshot().state); await reporting;
+  await f.ui.restore(); await f.ui.rendered(f.ui.getSnapshot().state, true);
+  release(); await painting;
+  assert.equal(f.ui.getSnapshot().validatedVisual.kind, 'local-builtin'); assert.equal(f.ui.getSnapshot().confirmedGeneration, null);
+});
+test('child restore failure preserves builtin and offers retry without rejecting', { timeout: 5000 }, async t => {
+  const f = childReportingFixture(t, { restore: async () => { throw new Error('Native broker unavailable'); } }); await f.read();
+  await f.ui.restore(); assert.equal(f.ui.getSnapshot().localBuiltin, true); assert.match(f.ui.getSnapshot().diagnostic, /retry|could not be saved/i);
+});
+
+const themedChildState = () => ({ ...state, selection: { ...state.selection, revision: 1, deliveryGeneration: 1, selected: { kind: 'experience', digest: 'a'.repeat(64) } }, bundle: { digest: 'a'.repeat(64), manifest: { schemaVersion: 2, id: 'restore-test', label: 'Restore test', theme: { density: 'comfortable', mode: 'system', light: {}, dark: {} }, presentation: { home: { kind: 'stack', panes: ['conversations'] }, transcript: 'bubbles', navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } }, stylesheet: null, assets: [] } } });
+test('child cache refresh cannot undo a failed local Restore or invalidate its retry paint', async t => {
+  const f = childReportingFixture(t, { snapshot: themedChildState(), restore: async () => { throw new Error('Broker unavailable'); } }); await f.read();
+  await f.ui.restore(); await f.ui.rendered(f.ui.getSnapshot().state, true); await f.read();
+  assert.equal(f.ui.getSnapshot().localBuiltin, true); assert.match(f.ui.getSnapshot().diagnostic, /retry Restore/);
+  assert.equal(f.ui.getSnapshot().validatedVisual.kind, 'local-builtin');
+  await f.ui.restore(); assert.equal(f.ui.getSnapshot().validatedVisual.kind, 'local-builtin'); assert.equal(f.ui.getSnapshot().confirmedGeneration, null);
+});
+
+test('child publishes a new delivery without an old validation even when presence fails', async t => {
+  const previous = globalThis.document; globalThis.document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  let current = state, failPresence = false, reads = 0;
+  const ui = new ChildUiConnection({ context: { ...context, reservation: { scope } }, async request(command) {
+    if (command.kind === 'read-ui') { reads++; return { state: current, localBuiltin: false, recoveryFloor: null, context }; }
+    if (command.kind === 'presence') { if (failPresence) throw new Error('Presence unavailable'); return {}; }
+    if (command.kind === 'report-ui') return {};
+    throw new Error(command.kind);
+  } }); t.after(() => { ui.close(); globalThis.document = previous; });
+  ui.refresh(); await untilChild(() => ui.getSnapshot().state); await ui.rendered(ui.getSnapshot().state);
+  const snapshots = []; ui.subscribe(() => snapshots.push(ui.getSnapshot()));
+  current = { ...state, change: 2, selection: { ...state.selection, revision: 2, deliveryGeneration: 2 } }; failPresence = true; ui.selectScope(scope); ui.refresh();
+  await untilChild(() => reads === 2 && /Presence/.test(ui.getSnapshot().diagnostic ?? ''));
+  const advanced = snapshots.filter(value => value.state?.selection.deliveryGeneration === 2); assert.ok(advanced.length > 0);
+  for (const snapshot of advanced) {
+    assert.equal(snapshot.validatedVisual.kind, 'none'); assert.equal(snapshot.confirmedGeneration, null);
+  }
+});
+
+test('successful child Restore hands fallback to the broker and accepts a newer custom cache', async t => {
+  const f = childReportingFixture(t, { snapshot: themedChildState() }); await f.read(); await f.ui.restore(); await f.read();
+  assert.equal(f.ui.getSnapshot().localBuiltin, true);
+  const newer = themedChildState(); newer.selection = { ...newer.selection, revision: 3, deliveryGeneration: 3 };
+  f.cache(newer, false); await f.read(); assert.equal(f.ui.getSnapshot().localBuiltin, false);
+  await f.ui.rendered(f.ui.getSnapshot().state); assert.equal(f.ui.getSnapshot().confirmedGeneration, 3);
+});
+
+test('a failed child Restore keeps its retry instruction after a presence error', async t => {
+  const f = childReportingFixture(t, { snapshot: themedChildState(), restore: async () => { throw new Error('Restore unavailable'); }, presence: async () => { throw new Error('Presence unavailable'); } });
+  await f.read(); await f.ui.restore(); f.ui.selectScope(scope); await f.read();
+  assert.equal(f.ui.getSnapshot().localBuiltin, true); assert.match(f.ui.getSnapshot().diagnostic, /retry Restore/);
+});
+
+test('child Restore before its first cache read still reports a failed save', async t => {
+  let f;
+  f = childReportingFixture(t, { snapshot: themedChildState(), restore: async () => { await f.read(); throw new Error('Recorded save failure'); } });
+  await f.ui.restore(); assert.equal(f.ui.getSnapshot().localBuiltin, true); assert.match(f.ui.getSnapshot().diagnostic, /retry Restore/);
+});
+
+test('cached builtin cannot retire a child Restore whose request later fails', async t => {
+  let reject, entered;
+  const held = new Promise((_, no) => { reject = no; }), requested = new Promise(yes => { entered = yes; });
+  const f = childReportingFixture(t, { restore: async () => { entered(); return held; } });
+  await f.read(); const restoring = f.ui.restore(); await requested; await f.read();
+  reject(new Error('Recorded save failure')); await restoring;
+  f.cache(themedChildState(), false); await f.read();
+  assert.equal(f.ui.getSnapshot().localBuiltin, true); assert.match(f.ui.getSnapshot().diagnostic, /retry Restore/);
+});
+
+
+test('an earlier broker Restore cannot retire a later failed child request', async t => {
+  const f = childReportingFixture(t, { snapshot: themedChildState(), builtin: true, restore: async () => { throw new Error('Later IPC failed'); } });
+  await f.read(); await f.ui.restore(); await f.read();
+  const builtin = { ...state, selection: { ...state.selection, revision: 2, deliveryGeneration: 2 } };
+  f.cache(builtin, false, 2); await f.read();
+  assert.equal(f.ui.getSnapshot().localBuiltin, true); assert.match(f.ui.getSnapshot().diagnostic, /retry Restore/);
+  const themed = themedChildState(); themed.selection = { ...themed.selection, revision: 3, deliveryGeneration: 3 };
+  f.cache(themed, false, 2); await f.read();
+  assert.equal(f.ui.getSnapshot().localBuiltin, true); assert.match(f.ui.getSnapshot().diagnostic, /retry Restore/);
+});
+
+test('a newer externally saved builtin retires a failed child Restore', async t => {
+  const f = childReportingFixture(t, { snapshot: themedChildState(), restore: async () => { throw new Error('IPC failed'); } });
+  await f.read(); await f.ui.restore();
+  f.cache({ ...state, selection: { ...state.selection, revision: 2, deliveryGeneration: 2 } }, false); await f.read();
+  assert.equal(f.ui.getSnapshot().localBuiltin, false); assert.doesNotMatch(f.ui.getSnapshot().diagnostic ?? '', /retry Restore/);
+  const themed = themedChildState(); themed.selection = { ...themed.selection, revision: 3, deliveryGeneration: 3 };
+  f.cache(themed, false); await f.read(); assert.equal(f.ui.getSnapshot().localBuiltin, false);
 });

@@ -112,7 +112,6 @@ export class DesktopExtensionLifecycle {
     this.owners.delete(namespace);
     const next = this.desired.get(namespace);
     if (next && !this.closed && !this.cleanupFailures.has(namespace)) this.start(next);
-    this.publish();
   }
 
   private publishSink(): void {

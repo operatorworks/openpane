@@ -3,7 +3,7 @@ import { canonicalJson, parseEditorBinding, parseScope, sameScope } from '@openp
 import type { ConversationScope } from '@openpane/contracts';
 import { openViewDatabase } from './browser-storage.js';
 import { editorBindingKey } from './editor-bindings.js';
-import { carryKey as key, carryTargetKey as targetKey, carryPrefix as prefix, namedCarry, parseCarry, keyedCarry, readKeptDraft, carryEpochKey, carryRequestEpoch } from './draft-carry-records.js';
+import { carryKey as key, carryTargetKey as targetKey, carryPrefix as prefix, namedCarry, parseCarry, keyedCarry, readKeptDraft, carryEpochKey, carryRequestEpoch, keptDraftKey, keptDraftCarry } from './draft-carry-records.js';
 import type { DraftCarry } from './draft-carry-records.js';
 export type { DraftCarry } from './draft-carry-records.js';
 
@@ -31,7 +31,7 @@ export async function pruneDraftCarryHistory(epoch: number, pendingRequestIds: r
           let carry: DraftCarry;
           try { carry = keyedCarry(all.result[index], keys.result[index]); } catch { continue; }
           if ((carry.kind === 'settled' || carry.kind === 'cancelled') && !carry.retainedText && carryRequestEpoch(carry.requestId) < epoch && !pendingRequestIds.includes(carry.requestId)) {
-            if (carry.kind === 'cancelled' && carry.target) store.put(true, ['draft-carry-kept', carry.source.hostId, carry.source.conversationId, carry.target.conversationId]);
+            if (carry.kind === 'cancelled' && carry.target) store.put(true, keptDraftKey(carry.source, carry.target));
             store.delete(key(carry.source, carry.requestId));
             if (carry.target) store.delete(targetKey(carry.source, carry.requestId, carry.target));
             retained--;
@@ -77,16 +77,16 @@ export async function bindDraftCarry(source: ConversationScope, requestId: strin
         const carry = namedCarry(request.result, source, requestId);
         if (carry.target && !sameScope(carry.target, target)) throw new Error('Draft carry target is already fixed');
         if (carry.kind === 'cancelled') {
-          if (carry.target === null) store.put({ ...carry, target }, key(source, requestId));
-          store.put(true, ['draft-carry-kept', source.hostId, source.conversationId, target.conversationId]);
+          const bound = parseCarry({ ...carry, target });
+          if (carry.target === null) store.put(bound, key(source, requestId));
+          store.put(true, keptDraftKey(source, target));
         }
         if (carry.kind === 'offered') {
           readKeptDraft(store, source, target, kept => {
             try {
               if (kept) {
-                store.put(true, ['draft-carry-kept', source.hostId, source.conversationId, target.conversationId]);
-                store.put({ version: 1, kind: 'cancelled', source, sourceViewId: carry.sourceViewId, requestId, target,
-                  retainedText: carry.expected.text, outcome: 'kept-at-source' } satisfies DraftCarry, key(source, requestId));
+                store.put(true, keptDraftKey(source, target));
+                store.put({ ...keptDraftCarry(carry), target }, key(source, requestId));
                 store.delete(targetKey(source, requestId, target));
               } else if (carry.target === null) {
                 const bound = parseCarry({ ...carry, target }); store.put(bound, key(source, requestId));
@@ -144,10 +144,10 @@ export async function cancelDraftCarry(carry: Pick<DraftCarry, 'source' | 'reque
         const current = namedCarry(request.result, carry.source, carry.requestId);
         if (current.kind === 'settled') { set(false); return; }
         if (current.kind !== 'cancelled') {
-          store.put({ version: 1, kind: 'cancelled', source: current.source, sourceViewId: current.sourceViewId, requestId: current.requestId, target: current.target, retainedText: current.expected.text, outcome: 'kept-at-source' } satisfies DraftCarry, key(carry.source, carry.requestId));
+          store.put(keptDraftCarry(current), key(carry.source, carry.requestId));
           if (current.target) store.delete(targetKey(current.source, current.requestId, current.target));
         }
-        if (current.target) store.put(true, ['draft-carry-kept', current.source.hostId, current.source.conversationId, current.target.conversationId]);
+        if (current.target) store.put(true, keptDraftKey(current.source, current.target));
         set(true);
       } catch (error) { fail(error); }
     };
@@ -217,7 +217,7 @@ export async function removeRetainedCarry(carry: DraftCarry): Promise<void> {
       if (request.result === undefined) { set(undefined); return; }
       const current = namedCarry(request.result, carry.source, carry.requestId);
       if (current.kind === 'offered' || current.kind === 'applied' || canonicalJson(current) !== canonicalJson(carry)) throw new Error('This draft transfer changed. Refresh its saved recovery before removing it.');
-      if (current.kind === 'cancelled' && current.target) { store.put(true, ['draft-carry-kept', current.source.hostId, current.source.conversationId, current.target.conversationId]); store.delete(key(carry.source, carry.requestId)); }
+      if (current.kind === 'cancelled' && current.target) { store.put(true, keptDraftKey(current.source, current.target)); store.delete(key(carry.source, carry.requestId)); }
       else if (current.kind === 'cancelled') store.put({ version: 1, kind: 'cancelled', source: current.source, sourceViewId: current.sourceViewId,
         requestId: current.requestId, target: null, outcome: 'kept-at-source', ...(current.emptyOnly ? { emptyOnly: true } : {}) } satisfies DraftCarry, key(carry.source, carry.requestId));
       else store.delete(key(carry.source, carry.requestId));

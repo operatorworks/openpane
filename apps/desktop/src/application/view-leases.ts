@@ -139,6 +139,10 @@ export function createViewLeasePool(deps: {
   return {
     adopt,
     open,
+    async drainRecovery(): Promise<void> {
+      await Promise.allSettled([...acquisitions.values()].filter(pending => pending.kind === 'recovery').map(pending => pending.task));
+      await Promise.all([...leases.values()].filter(lease => lease.kind === 'recovery').map(lease => lease.closed));
+    },
     async flushDrafts(): Promise<void> {
       const stores = [...leases.values()].flatMap(lease => [...lease.stores.values()].filter(slot => !slot.closing).map(slot => slot.store));
       await Promise.all(stores.map(store => store.captureDraft()));

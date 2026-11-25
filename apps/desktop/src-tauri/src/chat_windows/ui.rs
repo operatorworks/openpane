@@ -104,15 +104,10 @@ impl ChatWindows {
                         return Err("duplicate-child-snapshot");
                     }
                 }
-                broker.child_snapshots = scoped;
-                broker.snapshot = Some(snapshot);
-                for target in broker
-                    .documents
-                    .keys()
-                    .filter(|target| target.as_str() != "main")
-                {
-                    let _ = app.emit_to(target, "openpane-ui-cache", ());
+                if !broker.publish_snapshot(snapshot, scoped)? {
+                    return Ok(json!({"ok":true}));
                 }
+                broker.notify_child_cache(app);
                 Ok(json!({"ok":true}))
             }
             Command::ReadUi { incarnation } => {
@@ -126,7 +121,7 @@ impl ChatWindows {
                     )
                 };
                 Ok(
-                    json!({"state":state,"localBuiltin":broker.local_builtin,"context":self.context(broker,label,document)}),
+                    json!({"state":state,"localBuiltin":broker.visual_builtin(),"recoveryFloor":broker.bound_recovery_floor(),"context":self.context(broker,label,document)}),
                 )
             }
             Command::Presence {
@@ -207,7 +202,7 @@ impl ChatWindows {
                 }
                 let contexts: Vec<_> = broker.documents.iter().filter(|(target,document)| target.as_str() != "main" && document.ready).filter_map(|(target,document)|self.context(broker,target,document).map(|context|json!({"context":context,"visible":document.visible,"presenceSequence":document.presence_sequence,"display":document.display,"placement":document.scope.as_ref().and_then(|scope|broker.storage.profile(&self.origin).ok()?.windows.get(&scope.key())).and_then(|entry|entry.binding_revision.map(|revision|json!({"nativeTransitionId":entry.transition_id,"bindingRevision":revision})))}))).collect();
                 Ok(
-                    json!({"children":contexts,"reports":broker.reports.values().collect::<Vec<_>>(),"localBuiltin":broker.local_builtin}),
+                    json!({"children":contexts,"reports":broker.reports.values().collect::<Vec<_>>(),"localBuiltin":broker.visual_builtin()}),
                 )
             }
             Command::ConfirmUi { incarnation, ids } => {

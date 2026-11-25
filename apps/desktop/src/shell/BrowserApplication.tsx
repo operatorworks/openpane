@@ -286,17 +286,18 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
       : <ExtensionsList rows={rows} enabled={!suspended} onOpen={setSelectedExtension}
           tools={toolsEligible ? <ThemeScope palette={contentPalette} className="content-theme">{moduleList('tools')}</ThemeScope> : null} conversation={toolsTarget} />}
   </div>;
-  const controls = <div className="application-notices">
-    {windowRecovery}
-    {!workspaceOpen && personalizationNotice}
-    {app.capturedSends.length > 0 && <section aria-label="Captured tools"><h3>Captured tools</h3>
+  const capturedTools = app.capturedSends.length > 0 && <section aria-label="Captured tools"><h3>Captured tools</h3>
       <p>Tools are retained for these sends. Execution is not enabled.</p>
       {app.capturedSends.map(send => <div key={send.key} data-captured-command={send.command.clientCommandId}>
         <p data-openpane-part="status" role="status">{send.status === 'waiting' ? 'Waiting for confirmed run' : send.status === 'bound' ? 'Bound to confirmed run' : 'Captured tools unavailable'} · {send.command.body.text}</p>
         {send.binding && <p>Run {send.binding.run.runId}</p>}
         {send.status !== 'unavailable' && <button data-openpane-part="button" type="button" onClick={() => void controller.releaseCapturedSend(send.key)}>Release captured tools</button>}
       </div>)}
-    </section>}
+    </section>;
+  const controls = <div className="application-notices">
+    {windowRecovery}
+    {!workspaceOpen && personalizationNotice}
+    {capturedTools}
     {app.savedViewNotice && <p role="note">{app.savedViewNotice}</p>}
     {!workspaceOpen && hostAlerts}
     {!workspaceOpen && creationRecovery}
@@ -376,7 +377,7 @@ export function BrowserApplication({ children, artifact, controller: supplied, c
     <header className="application-chat-header" data-openpane-part="page-header"><h1 data-openpane-part="caption-title">{app.active?.agent.label ?? 'Opening chat'}</h1>
       <button data-openpane-part="button" type="button" data-openpane-essential="new-chat" disabled={!enabled || !app.active} onClick={() => void controller.create(app.active?.agent.id)}>New chat</button>
     </header>
-    {personalizationNotice}{hostAlerts}{creationRecovery}{windowRecovery}
+    {personalizationNotice}{hostAlerts}{creationRecovery}{windowRecovery}{capturedTools}
     {activeConversation ?? <section aria-label="Chat ownership"><p data-openpane-part="status" role="status">Waiting for this window's assigned editor.</p><button data-openpane-part="button" data-openpane-essential="retry-editor" type="button" onClick={() => window.location.reload()}>Retry assigned editor</button></section>}
     <footer>{app.active ? <ConversationStatus active={app.active} /> : 'No editor ready'}</footer>
   </ThemeScope>;

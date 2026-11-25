@@ -1,3 +1,4 @@
+import { DatabaseSync } from 'node:sqlite';
 import { canonicalJson } from '@openpane/contracts';
 import { transcriptProjection } from '@openpane/contracts/conversation';
 import assert from 'node:assert/strict';
@@ -228,14 +229,21 @@ for (const duplicate of [false, true]) {
         await release.promise;
         return effect(operation, 'completed');
       } });
-    const f = await fixture(t, [a]), scope = await create(f), port = f.client.conversation(scope);
+    const registry = createProviderRegistry([{ ...a.value, authority: { credentials: {},
+      issue: () => ({ credential:null,expectedAuthority:'remote-provider',assertAuthorized() {} }), async close() {} } }]);
+    await registry.activate(); t.after(() => registry.close());
+    const [discovered] = await registry.discover();
+    const target = { kind:'provider',contributionId:discovered.contributionId,instance:discovered.instance,agent:discovered.agents[0],presentationVersion:1,expectedAuthority:discovered.expectedAuthority };
+    const f = hostFixture(t), scope = hostScope, host = f.open({ projection:transcriptProjection,providers:registry });
+    await host.createProviderConversation(scope,target,registry); const port = host.conversation(scope);
     await port.submit(send(scope));
     a.connected.submit = async operation => { a.calls.submits.push(operation); return { kind: 'pending', evidence: { queued: true } }; };
     const left = port.submit(send(scope, 'left')), right = port.submit(send(scope, duplicate ? 'left' : 'right'));
     const pending = Promise.all([left, right]);
     await entered.promise;
     try {
-      await assert.rejects(until(() => a.calls.reconciles.length > 1, 200), /Condition timed out/);
+      await new Promise(setImmediate);
+      assert.equal(a.calls.reconciles.length, 1, 'both direct host calls join the same held provider lookup');
     } finally { release.resolve(); await pending; }
     const results = await pending;
     assert.equal(results.filter(result => result.kind === 'receipt').length, duplicate ? 2 : 1);
@@ -243,7 +251,8 @@ for (const duplicate of [false, true]) {
     else assert.equal(results.find(result => result.kind === 'rejected').reason, 'send-awaiting-confirmation');
     assert.deepEqual(a.calls.reconciles, [a.calls.submits[0]]);
     assert.equal(a.calls.submits.length, 2);
-    assert.equal(f.inspect(db => db.prepare('SELECT COUNT(*) AS n FROM commands').get().n), 2);
+    const db = new DatabaseSync(f.path);
+    try { assert.equal(db.prepare('SELECT COUNT(*) AS n FROM commands').get().n, 2); } finally { db.close(); }
     assert.equal((await port.receipt('send')).state.kind, 'completed');
   });
 }

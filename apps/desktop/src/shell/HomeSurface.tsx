@@ -11,12 +11,12 @@ export function HomeSurface({ composition, destination, panes }: {
   readonly destination: MainDestination;
   readonly panes: Readonly<Record<HomePaneKind, ReactNode>>;
 }) {
-  const { order, visible, columns, placement, balance, gridTemplateRows } = homeLayout(composition, destination);
-  return <section className="home-surface" data-openpane-part="home" data-home-destination={destination} data-home-columns={columns ? 'two' : 'one'} data-home-balance={balance} aria-label={destination === 'home' ? 'Home' : 'Chats'}>
-    <h1 className="home-heading" tabIndex={-1} hidden={destination !== 'home'}>Home</h1>
-    <div className="pane-host" style={{ gridTemplateRows: gridTemplateRows }}>
-      {order.map(kind => <section key={kind} className="home-pane" role="group" data-openpane-part="pane" data-home-pane={kind}
-        hidden={!visible.includes(kind)} aria-labelledby={`home-pane-${kind}`} style={columns ? placement(kind) : undefined}>
+  const layout = homeLayout(composition, destination);
+  return <section className="home-surface" data-openpane-part="home" {...layout.surface}>
+    <h1 className="home-heading" tabIndex={-1} {...layout.heading}>Home</h1>
+    <div className="pane-host" style={layout.hostStyle}>
+      {layout.order.map(kind => <section key={kind} className="home-pane" role="group" data-openpane-part="pane" data-home-pane={kind}
+        {...layout.pane(kind)} aria-labelledby={`home-pane-${kind}`}>
         <h2 id={`home-pane-${kind}`} data-openpane-essential="pane-heading" data-openpane-part="pane-heading" className="home-pane-heading">{labels[kind]}</h2>
         <div className="home-pane-body">{panes[kind]}</div>
       </section>)}

@@ -794,10 +794,11 @@ test('one unreadable saved view cannot block another unbound chat', async t => {
     const original = { version: 999, route: { hostId: 'host', conversationId: 'broken' }, pendingCreation: [] };
     await new Promise((resolve, reject) => { const tx = db.transaction('records', 'readwrite'); tx.objectStore('records').put(original, ['view', 'broken-view', 'host']); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error); }); db.close();
     const healthy = await globalThis.BrowserViewStorage.locateEditor({ hostId: 'host', conversationId: 'healthy' });
+    const preferred = await globalThis.BrowserViewStorage.locateEditor({ hostId: 'host', conversationId: 'healthy' }, 'broken-view');
     const broken = await globalThis.BrowserViewStorage.locateEditor(original.route).then(() => 'opened', error => error.message);
-    return { healthy, broken };
+    return { healthy, preferred, broken };
   });
-  assert.deepEqual(result.healthy, { binding: null, legacyViewIds: [] }); assert.match(result.broken, /unreadable.*preserved/);
+  assert.deepEqual(result.healthy, { binding: null, legacyViewIds: [] }); assert.deepEqual(result.preferred, result.healthy); assert.match(result.broken, /unreadable.*preserved/);
 });
 
 test('legacy recovery finds its duplicate draft after navigation changes and exposes saved images without sending', async t => {
@@ -844,17 +845,17 @@ test('the first retry completes a fresh handoff from a prior source-released res
     const sourcePort = source.drafts(() => {}); await sourcePort.load(scope); await sourcePort.save({ scope, draft: 'Exact interrupted draft', outbox: [] }); await source.close();
     const catalog = await S.reopen('retry-catalog', () => {}), phases = [];
     const reservation = { scope, viewId: 'retry-source-view', label: 'child', transitionId: 'retry-transition', creationAgentId: null, phase: 'source-released', bindingRevision: null, writerGeneration: null };
-    let phase = reservation.phase;
+    let phase = reservation.phase, child;
     const coordinator = new globalThis.WindowCoordinator({ context: { role: 'main', label: 'main', liveRelay: true }, async request(command) {
       if (command.kind === 'lookup') return { kind: 'closed', reservation };
       if (command.kind === 'reserve') return reservation;
       if (command.kind === 'phase') { phases.push(command.phase); phase = command.phase; return { ok: true }; }
-      if (command.kind === 'launch') { if (phase !== 'source-released') throw new Error('source-not-released'); return { kind: 'detached', scope, label: 'child' }; }
+      if (command.kind === 'launch') { if (phase !== 'source-released') throw new Error('source-not-released'); child = await S.claimEditor({ scope, viewId: reservation.viewId, label: reservation.label, transitionId: reservation.transitionId, creation: null }, () => {}); return { kind: 'detached', scope, label: 'child' }; }
       throw new Error(command.kind);
     } });
     coordinator.setPresentation({ navigation: 'rail', chats: 'separate', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } });
     const placed = await coordinator.acquire({ scope, creation: false, carryFrom: null, initialDraft: null, agentId: 'agent', agentLabel: 'Agent' }, { storage: catalog, holds: () => false, async quiesce() {}, async release() {} });
-    const child = await S.claimEditor({ scope, viewId: reservation.viewId, label: reservation.label, transitionId: reservation.transitionId, creation: null }, () => {});
+    if (!child) throw new Error('The native launch did not acquire its actual committed handoff');
     const saved = await child.drafts(() => {}).load(scope); await child.close(); await catalog.close();
     return { placed, phases, text: saved.draft };
   });
@@ -1536,4 +1537,40 @@ for (const row of ['absent', 'undefined', 'malformed', 'offered']) test(`delegat
   assert.deepEqual(result.sourceAfter, result.sourceBefore);
   if (row === 'undefined' || row === 'malformed') { assert.equal(result.placements, 0); assert.equal(result.completed, null); assert.deepEqual(result.after, result.before); assert.deepEqual(result.index, []); assert.equal(typeof result.notice, 'string'); }
   else { assert.equal(result.placements, 1); assert.equal(result.completed.kind, 'inline'); if (row === 'absent') { assert.deepEqual(result.after, result.before); assert.deepEqual(result.index, []); } else { assert.equal(result.after.value.target.conversationId, 'strict-bind-target'); assert.equal(result.index.length, 1); } }
+});
+
+for (const invalid of ['source', 'foreign']) test(`Keep validates a late ${invalid} target without damaging its saved carry`, async t => {
+  const page = await fixture(t), result = await page.evaluate(async invalid => {
+    const S = globalThis.BrowserViewStorage, c = globalThis.carries, source = { hostId:'host',conversationId:'kept-late-source' }, target = { hostId:'host',conversationId:'kept-late-target' };
+    const owner = await S.claimEditor({ scope:source,viewId:'kept-late-view',label:'main',transitionId:null,creation:{agentId:'default'} }, () => {});
+    const store = globalThis.createConversationStore({ scope:source,port:{scope:source},projection:globalThis.transcriptProjection,drafts:owner.drafts(() => {}) });
+    try {
+      await store.ready; await store.setDraft('Exact kept source text');
+      await c.offerDraftCarry({ source,sourceViewId:owner.viewId,writerGeneration:owner.editorBinding().writerGeneration,requestId:'1:late-keep',emptyOnly:true,expected:await store.captureDraft() });
+      await c.cancelDraftCarry((await c.sourceCarries(source))[0]);
+      const before = (await c.sourceCarries(source))[0];
+      const refused = await c.bindDraftCarry(source,'1:late-keep',invalid === 'source' ? source : {...target,hostId:'foreign'}).then(() => false, () => true);
+      const after = (await c.sourceCarries(source))[0], unrelatedMarker = await c.keptDraft(source,target);
+      await c.bindDraftCarry(source,'1:late-keep',target);
+      return { refused,before,after,unrelatedMarker,final:(await c.sourceCarries(source))[0],text:(await store.captureDraft()).text,kept:await c.keptDraft(source,target) };
+    } finally { await store.dispose(); await owner.close(); }
+  }, invalid);
+  assert.equal(result.refused,true); assert.deepEqual(result.after,result.before); assert.equal(result.unrelatedMarker,false);
+  assert.equal(result.final.kind,'cancelled'); assert.equal(result.final.emptyOnly,true); assert.equal(result.kept,true); assert.equal(result.text,'Exact kept source text');
+});
+
+for (const action of ['save-cleared-view', 'open-remaining-work']) test(`catalog navigation clears through ${action}`, async t => {
+  const page = await fixture(t), result = await page.evaluate(async action => {
+    const S = globalThis.BrowserViewStorage, scope = { hostId:'host',conversationId:'catalog-clear' };
+    const catalog = await S.open(() => {}, 'openpane.catalogViewId'); let editor;
+    try {
+      editor = await S.claimEditor({ scope,viewId:'catalog-clear-editor',label:'main',transitionId:null,creation:{agentId:'default'} }, () => {});
+      await catalog.saveNavigation('host',scope);
+      const before = (await catalog.readView('host')).route, binding = (await S.locateEditor(scope)).binding;
+      if (action === 'save-cleared-view') await catalog.saveView('host',{version:2,route:null,pendingCreation:null});
+      else await catalog.openRemainingWork('host');
+      return { before, expected: scope, route:(await catalog.readView('host')).route,binding:(await S.locateEditor(scope)).binding, originalBinding:binding };
+    } finally { await editor?.close(); await catalog.close(); }
+  }, action);
+  assert.deepEqual(result.before,result.expected); assert.equal(result.route,null); assert.deepEqual(result.binding,result.originalBinding); assert.equal(result.binding.viewId,'catalog-clear-editor');
 });

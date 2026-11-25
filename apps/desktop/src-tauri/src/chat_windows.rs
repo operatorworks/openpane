@@ -2,9 +2,10 @@ mod intents;
 mod types;
 mod ui;
 pub use types::Command;
+use types::UiRecoveryContext;
 
 use crate::chat_window_records::{
-    identifier, Action, Intent, IntentRef, Phase, Reservation, Scope,
+    identifier, Action, Intent, IntentRef, Phase, Reservation, Scope, MAX_SAFE_INTEGER,
 };
 use crate::chat_window_storage::{random_id, Storage};
 use serde::Serialize;
@@ -24,22 +25,44 @@ struct Document {
     display: Option<Value>,
     ready: bool,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingClose {
+    attempt_id: String,
+    independent: bool,
+}
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum RecoveryAdmission {
+    Accepted,
+    Superseded,
+    Cancelled,
+}
+struct PendingRecovery {
+    sequence: u64,
+    initiator: Option<String>,
+    context: Option<UiRecoveryContext>,
+}
+struct RecoveryFloor {
+    context: UiRecoveryContext,
+    delivery_generation: u64,
+}
 struct Broker {
     storage: Storage,
     presence_clock: u64,
     documents: BTreeMap<String, Document>,
     opening: BTreeMap<String, Scope>,
-    host: Option<(String, String)>,
+    host: Option<UiRecoveryContext>,
     snapshot: Option<Value>,
     reports: BTreeMap<String, Value>,
     child_snapshots: BTreeMap<String, Value>,
-    local_builtin: bool,
+    recovery: Option<PendingRecovery>,
     recovery_sequence: u64,
+    recovery_cancelled_through: u64,
+    recovery_floor: Option<RecoveryFloor>,
     main_closing: bool,
     main_close_requested: bool,
     close_sequence: u64,
-    pending_closes: BTreeMap<String, String>,
-    independent_closes: std::collections::BTreeSet<String>,
+    pending_closes: BTreeMap<String, PendingClose>,
 }
 #[derive(Debug, PartialEq, Eq)]
 enum CloseProgress {
@@ -70,61 +93,220 @@ impl Broker {
         abandoned
     }
     fn bind_host(&mut self, host_id: String, profile_id: String) -> Result<(), &'static str> {
-        if self
+        let context = UiRecoveryContext {
+            host_id,
+            profile_id,
+        };
+        let changed = self
             .host
             .as_ref()
-            .is_some_and(|previous| previous != &(host_id.clone(), profile_id.clone()))
-        {
+            .is_some_and(|previous| previous != &context);
+        if changed {
             if self.children_open() {
-                return Err(
-                    "Close chat windows and restart OpenPane after the host identity changes.",
-                );
+                return Err("host-change-with-live-children");
             }
             self.snapshot = None;
-            self.local_builtin = false;
             self.child_snapshots.clear();
             self.reports.clear();
         }
-        self.host = Some((host_id, profile_id));
+        if changed
+            || self
+                .recovery
+                .as_ref()
+                .and_then(|pending| pending.context.as_ref())
+                .is_some_and(|saved| saved != &context)
+        {
+            self.recovery_cancelled_through = self.recovery_sequence;
+            self.recovery = None;
+        }
+        if let Some(pending) = &mut self.recovery {
+            pending.context.get_or_insert(context.clone());
+        }
+        if self
+            .recovery_floor
+            .as_ref()
+            .is_some_and(|floor| floor.context != context)
+        {
+            self.recovery_floor = None;
+        }
+        self.host = Some(context);
+        Ok(())
+    }
+    fn require_recovery_context(&self, expected: &UiRecoveryContext) -> Result<(), &'static str> {
+        if self.host.as_ref() != Some(expected) {
+            return Err("wrong-host");
+        }
         Ok(())
     }
     fn request_restore(
         &mut self,
-        expected_context: Option<(&str, &str)>,
+        expected_context: Option<&UiRecoveryContext>,
+        initiator: Option<String>,
     ) -> Result<(), &'static str> {
-        if expected_context.is_some_and(|expected| {
-            self.host
-                .as_ref()
-                .map(|host| (host.0.as_str(), host.1.as_str()))
-                != Some(expected)
-        }) {
-            return Err("wrong-host");
+        if let Some(expected) = expected_context {
+            self.require_recovery_context(expected)?;
         }
         self.recovery_sequence = self
             .recovery_sequence
             .checked_add(1)
             .ok_or("recovery-sequence-exhausted")?;
-        self.local_builtin = true;
+        self.recovery = Some(PendingRecovery {
+            sequence: self.recovery_sequence,
+            context: self.host.clone(),
+            initiator,
+        });
         Ok(())
     }
-    fn confirm_restore(&mut self, sequence: u64) {
-        if self.recovery_sequence == sequence {
-            self.local_builtin = false;
+    fn recovery_cancelled(&self, sequence: u64) -> Result<bool, &'static str> {
+        if sequence == 0 || sequence > self.recovery_sequence {
+            return Err("unknown-recovery");
+        }
+        Ok(sequence <= self.recovery_cancelled_through)
+    }
+    fn scope_recovery(
+        &mut self,
+        sequence: u64,
+        expected: UiRecoveryContext,
+        submitted: bool,
+    ) -> Result<RecoveryAdmission, &'static str> {
+        let cancelled = self.recovery_cancelled(sequence)?;
+        if self.host.as_ref().is_some_and(|bound| bound != &expected) {
+            return Err("wrong-host");
+        }
+        if !submitted && cancelled {
+            return Ok(RecoveryAdmission::Cancelled);
+        }
+        if let Some(pending) = self
+            .recovery
+            .as_mut()
+            .filter(|pending| pending.sequence == sequence)
+        {
+            if pending
+                .context
+                .as_ref()
+                .is_some_and(|saved| saved != &expected)
+            {
+                return Err("wrong-host");
+            }
+            pending.context = Some(expected);
+            return Ok(RecoveryAdmission::Accepted);
+        }
+        if submitted {
+            return Ok(RecoveryAdmission::Accepted);
+        }
+        if self.recovery.as_ref().is_some_and(|pending| {
+            pending.sequence > sequence
+                && pending
+                    .context
+                    .as_ref()
+                    .is_none_or(|context| context == &expected)
+        }) {
+            return Ok(RecoveryAdmission::Superseded);
+        }
+        Ok(RecoveryAdmission::Cancelled)
+    }
+    fn bound_recovery_floor(&self) -> Option<u64> {
+        self.recovery_floor
+            .as_ref()
+            .filter(|floor| self.host.as_ref() == Some(&floor.context))
+            .map(|floor| floor.delivery_generation)
+    }
+    fn visual_builtin(&self) -> bool {
+        self.recovery.is_some() || self.snapshot.is_none() && self.bound_recovery_floor().is_some()
+    }
+    fn recovery_state(&self) -> Value {
+        json!({"pending":self.recovery.is_some(),"sequence":self.recovery_sequence,"initiator":self.recovery.as_ref().and_then(|pending|pending.initiator.as_deref()),"hostId":self.recovery_context().map(|context| &context.host_id),"profileId":self.recovery_context().map(|context| &context.profile_id)})
+    }
+    fn recovery_context(&self) -> Option<&UiRecoveryContext> {
+        self.recovery
+            .as_ref()
+            .and_then(|pending| pending.context.as_ref())
+    }
+    fn confirm_restore(
+        &mut self,
+        sequence: u64,
+        delivery_generation: u64,
+        expected: UiRecoveryContext,
+    ) -> Result<bool, &'static str> {
+        if self.host.as_ref().is_some_and(|bound| bound != &expected) {
+            return Err("wrong-host");
+        }
+        let Some(pending) = self
+            .recovery
+            .as_ref()
+            .filter(|pending| pending.sequence == sequence)
+        else {
+            return Ok(false);
+        };
+        if pending.context.as_ref() != Some(&expected) {
+            return Err("unscoped-recovery");
+        }
+        self.recovery = None;
+        let generation = self
+            .recovery_floor
+            .as_ref()
+            .filter(|floor| floor.context == expected)
+            .map_or(delivery_generation, |floor| {
+                floor.delivery_generation.max(delivery_generation)
+            });
+        self.recovery_floor = Some(RecoveryFloor {
+            context: expected,
+            delivery_generation: generation,
+        });
+        if self
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.pointer("/selection/deliveryGeneration"))
+            .and_then(Value::as_u64)
+            .is_none_or(|cached| cached < generation)
+        {
+            self.snapshot = None;
+            self.child_snapshots.clear();
+        }
+        Ok(true)
+    }
+    fn notify_child_cache(&self, app: &tauri::AppHandle) {
+        for target in self
+            .documents
+            .keys()
+            .filter(|target| target.as_str() != "main")
+        {
+            let _ = app.emit_to(target, "openpane-ui-cache", ());
         }
     }
 
+    fn publish_snapshot(
+        &mut self,
+        snapshot: Value,
+        children: BTreeMap<String, Value>,
+    ) -> Result<bool, &'static str> {
+        let generation = snapshot
+            .pointer("/selection/deliveryGeneration")
+            .and_then(Value::as_u64)
+            .ok_or("invalid-ui-state")?;
+        let floor = self.bound_recovery_floor().unwrap_or(0);
+        if generation < floor {
+            return Ok(false);
+        }
+        self.child_snapshots = children;
+        self.snapshot = Some(snapshot);
+        Ok(true)
+    }
+
+    fn document_ready(&self, reservation: &Reservation) -> bool {
+        self.documents
+            .get(&reservation.label)
+            .is_some_and(|document| {
+                document.ready
+                    && document.scope.as_ref() == Some(&reservation.scope)
+                    && document.view_id == reservation.view_id
+            })
+    }
     fn lookup_window(&self, origin: &str, scope: &Scope) -> Result<Value, &'static str> {
         let Some(reservation) = self.storage.profile(origin)?.windows.get(&scope.key()) else {
             return Ok(json!({"kind":"absent"}));
         };
-        let ready = self
-            .documents
-            .get(&reservation.label)
-            .is_some_and(|document| {
-                document.ready
-                    && document.scope.as_ref() == Some(scope)
-                    && document.view_id == reservation.view_id
-            });
+        let ready = self.document_ready(reservation);
         let kind = if ready {
             "ready"
         } else if self.opening.contains_key(&reservation.label)
@@ -153,8 +335,13 @@ impl Broker {
                 .close_sequence
                 .checked_add(1)
                 .ok_or("close-sequence-exhausted")?;
-            self.pending_closes
-                .insert(label.into(), self.close_sequence.to_string());
+            self.pending_closes.insert(
+                label.into(),
+                PendingClose {
+                    attempt_id: self.close_sequence.to_string(),
+                    independent: false,
+                },
+            );
         }
         Ok(())
     }
@@ -174,8 +361,10 @@ impl Broker {
     }
     fn begin_close(&mut self, label: &str) -> Result<Vec<String>, &'static str> {
         if label != "main" {
-            self.independent_closes.insert(label.into());
             self.request_close(label)?;
+            if let Some(pending) = self.pending_closes.get_mut(label) {
+                pending.independent = true;
+            }
             return Ok(vec![label.into()]);
         }
         self.main_closing = true;
@@ -199,15 +388,13 @@ impl Broker {
     fn cancel_close(&mut self) {
         self.main_closing = false;
         self.main_close_requested = false;
-        self.pending_closes
-            .retain(|label, _| self.independent_closes.contains(label));
+        self.pending_closes.retain(|_, pending| pending.independent);
     }
     fn cancel_close_for(&mut self, label: &str, attempt_id: &str) -> Result<(), &'static str> {
         self.authorize_close(label, attempt_id)?;
         if self.main_closing {
             self.cancel_close();
         }
-        self.independent_closes.remove(label);
         self.pending_closes.remove(label);
         Ok(())
     }
@@ -215,7 +402,7 @@ impl Broker {
         if self
             .pending_closes
             .get(label)
-            .is_some_and(|current| current == attempt_id)
+            .is_some_and(|current| current.attempt_id == attempt_id)
         {
             Ok(())
         } else {
@@ -228,7 +415,6 @@ impl Broker {
         }
         self.documents.remove(label);
         self.opening.remove(label);
-        self.independent_closes.remove(label);
         self.pending_closes.remove(label);
         if label == "main" {
             self.main_closing = true;
@@ -236,7 +422,7 @@ impl Broker {
         self.close_progress()
     }
     fn advance_presence(&mut self, label: &str) -> Result<u64, &'static str> {
-        if self.presence_clock >= 9_007_199_254_740_991 {
+        if self.presence_clock >= MAX_SAFE_INTEGER {
             return Err("presence-sequence-exhausted");
         }
         self.presence_clock += 1;
@@ -274,13 +460,14 @@ impl ChatWindows {
                     snapshot: None,
                     reports: BTreeMap::new(),
                     child_snapshots: BTreeMap::new(),
-                    local_builtin: false,
+                    recovery: None,
                     recovery_sequence: 0,
+                    recovery_cancelled_through: 0,
+                    recovery_floor: None,
                     main_closing: false,
                     main_close_requested: false,
                     close_sequence: 0,
                     pending_closes: BTreeMap::new(),
-                    independent_closes: std::collections::BTreeSet::new(),
                 })
             })
         };
@@ -308,7 +495,10 @@ impl ChatWindows {
             .ok_or("stale-document")
     }
     fn context(&self, broker: &Broker, label: &str, document: &Document) -> Option<Value> {
-        let (host_id, profile_id) = broker.host.as_ref()?;
+        let UiRecoveryContext {
+            host_id,
+            profile_id,
+        } = broker.host.as_ref()?;
         let mut context = json!({"role": if document.scope.is_some() {"chat"} else {"main"}, "hostId":host_id,"profileId":profile_id,
             "brokerInstance":self.instance,"label":label,"documentIncarnation":document.incarnation,"viewId":document.view_id});
         if let Some(scope) = &document.scope {
@@ -329,7 +519,7 @@ impl ChatWindows {
         Ok(())
     }
     fn require_host(&self, broker: &Broker, scope: &Scope) -> Result<(), &'static str> {
-        if broker.host.as_ref().ok_or("ui-context-not-bound")?.0 != scope.host_id {
+        if broker.host.as_ref().ok_or("ui-context-not-bound")?.host_id != scope.host_id {
             return Err("foreign-host");
         }
         Ok(())
@@ -511,7 +701,7 @@ impl ChatWindows {
             .lock()
             .map_err(|_| "native-broker-unavailable")?;
         let broker = guard.as_mut().map_err(|error| *error)?;
-        broker.request_restore(None)?;
+        broker.request_restore(None, None)?;
         for label in broker.documents.keys() {
             let _ = app.emit_to(label, "openpane-ui-wakeup", ());
         }
@@ -592,7 +782,6 @@ impl ChatWindows {
             if let Ok(broker) = guard.as_mut() {
                 broker.documents.remove(label);
                 broker.opening.remove(label);
-                broker.independent_closes.remove(label);
                 broker.pending_closes.remove(label);
                 let _ = app.emit_to("main", "openpane-ui-wakeup", ());
                 let progress = broker.close_progress();
@@ -783,8 +972,10 @@ impl ChatWindows {
                 incarnation,
                 scope,
                 expected_transition_id,
+                expected_context,
             } => {
                 self.require_main(broker, label, &incarnation)?;
+                broker.require_recovery_context(&expected_context)?;
                 let reservation = broker
                     .storage
                     .profile(&self.origin)?
@@ -864,14 +1055,7 @@ impl ChatWindows {
                         .lock()
                         .map_err(|_| "native-broker-unavailable")?;
                     let broker = guard.as_ref().map_err(|error| *error)?;
-                    return if broker
-                        .documents
-                        .get(&reservation.label)
-                        .is_some_and(|document| {
-                            document.ready
-                                && document.scope.as_ref() == Some(&reservation.scope)
-                                && document.view_id == reservation.view_id
-                        }) {
+                    return if broker.document_ready(&reservation) {
                         Ok(json!({"kind":"detached","scope":scope,"label":reservation.label}))
                     } else {
                         Ok(
@@ -982,14 +1166,10 @@ impl ChatWindows {
                 visible,
             } => {
                 let document = self.document(broker, label, &incarnation)?;
-                if binding.schema_version != 1
-                    || binding.kind != "editing"
-                    || document.scope.as_ref() != Some(&binding.scope)
-                    || document.view_id != binding.view_id
-                    || binding.revision == 0
-                    || binding.writer_generation == 0
-                    || binding.revision > 9_007_199_254_740_991
-                    || binding.writer_generation > 9_007_199_254_740_991
+                if document
+                    .scope
+                    .as_ref()
+                    .is_none_or(|scope| !binding.admits(scope, &document.view_id))
                 {
                     return Err("binding-mismatch");
                 }
@@ -1038,32 +1218,51 @@ impl ChatWindows {
             Command::RestoreBuiltin {
                 incarnation,
                 expected_context,
+                request_id,
             } => {
                 self.document(broker, label, &incarnation)?;
-                broker.request_restore(
-                    expected_context
-                        .as_ref()
-                        .map(|context| (context.host_id.as_str(), context.profile_id.as_str())),
-                )?;
+                if let Some(id) = request_id.as_ref() {
+                    identifier(id, 200)?;
+                }
+                broker.request_restore(expected_context.as_ref(), request_id)?;
                 for target in broker.documents.keys() {
                     let _ = app.emit_to(target, "openpane-ui-wakeup", ());
                 }
                 Ok(
-                    json!({"sequence":broker.recovery_sequence,"hostId":broker.host.as_ref().map(|host| &host.0),"profileId":broker.host.as_ref().map(|host| &host.1)}),
+                    json!({"sequence":broker.recovery_sequence,"hostId":broker.recovery_context().map(|context| &context.host_id),"profileId":broker.recovery_context().map(|context| &context.profile_id)}),
                 )
             }
             Command::ReadRecovery { incarnation } => {
                 self.require_main(broker, label, &incarnation)?;
-                Ok(
-                    json!({"pending":broker.local_builtin,"sequence":broker.recovery_sequence,"hostId":broker.host.as_ref().map(|host| &host.0),"profileId":broker.host.as_ref().map(|host| &host.1)}),
-                )
+                Ok(broker.recovery_state())
             }
-            Command::ConfirmRecovery {
+            Command::ReadRecoveryCancellation {
                 incarnation,
                 sequence,
             } => {
                 self.require_main(broker, label, &incarnation)?;
-                broker.confirm_restore(sequence);
+                Ok(json!({"cancelled":broker.recovery_cancelled(sequence)?}))
+            }
+            Command::ScopeRecovery {
+                incarnation,
+                sequence,
+                expected_context,
+                submitted,
+            } => {
+                self.require_main(broker, label, &incarnation)?;
+                let admission = broker.scope_recovery(sequence, expected_context, submitted)?;
+                Ok(json!({"admission":admission}))
+            }
+            Command::ConfirmRecovery {
+                incarnation,
+                sequence,
+                delivery_generation,
+                expected_context,
+            } => {
+                self.require_main(broker, label, &incarnation)?;
+                if broker.confirm_restore(sequence, delivery_generation, expected_context)? {
+                    broker.notify_child_cache(app);
+                }
                 Ok(json!({"ok":true}))
             }
             Command::CloseCancelled {
@@ -1077,7 +1276,7 @@ impl ChatWindows {
             Command::ReadClose { incarnation } => {
                 self.document(broker, label, &incarnation)?;
                 Ok(
-                    json!({"pending":broker.pending_closes.contains_key(label),"attemptId":broker.pending_closes.get(label)}),
+                    json!({"pending":broker.pending_closes.contains_key(label),"attemptId":broker.pending_closes.get(label).map(|pending| &pending.attempt_id)}),
                 )
             }
             Command::CloseReady {
@@ -1262,6 +1461,12 @@ pub async fn desktop_window(
 
 #[cfg(test)]
 mod admission_tests {
+    fn confirm(broker: &mut super::Broker, sequence: u64, generation: u64) {
+        let host = broker.host.clone().unwrap();
+        broker.scope_recovery(sequence, host.clone(), true).unwrap();
+        broker.confirm_restore(sequence, generation, host).unwrap();
+    }
+
     use super::*;
 
     #[test]
@@ -1296,7 +1501,10 @@ mod admission_tests {
         {
             let mut guard = windows.broker.lock().unwrap();
             let broker = guard.as_mut().unwrap();
-            broker.host = Some(("host".into(), "profile".into()));
+            broker.host = Some(UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile".into(),
+            });
             for n in 0..31 {
                 windows
                     .reserve(
@@ -1545,7 +1753,10 @@ mod admission_tests {
         {
             let mut guard = windows.broker.lock().unwrap();
             let broker = guard.as_mut().unwrap();
-            broker.host = Some(("host".into(), "profile".into()));
+            broker.host = Some(UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile".into(),
+            });
             let scope = Scope {
                 host_id: "host".into(),
                 conversation_id: "failed-closed".into(),
@@ -1611,7 +1822,10 @@ mod admission_tests {
         {
             let mut guard = windows.broker.lock().unwrap();
             let broker = guard.as_mut().unwrap();
-            broker.host = Some(("host".into(), "profile".into()));
+            broker.host = Some(UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile".into(),
+            });
             let scope = Scope {
                 host_id: "host".into(),
                 conversation_id: "lookup-phases".into(),
@@ -1674,7 +1888,10 @@ mod admission_tests {
         {
             let mut guard = windows.broker.lock().unwrap();
             let broker = guard.as_mut().unwrap();
-            broker.host = Some(("host".into(), "profile".into()));
+            broker.host = Some(UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile".into(),
+            });
             for n in 0..31 {
                 windows
                     .reserve(
@@ -1748,7 +1965,10 @@ mod admission_tests {
         {
             let mut guard = windows.broker.lock().unwrap();
             let broker = guard.as_mut().unwrap();
-            broker.host = Some(("host".into(), "profile".into()));
+            broker.host = Some(UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile".into(),
+            });
             let scope = Scope {
                 host_id: "host".into(),
                 conversation_id: "preserved".into(),
@@ -1935,7 +2155,10 @@ mod admission_tests {
         {
             let mut guard = windows.broker.lock().unwrap();
             let broker = guard.as_mut().unwrap();
-            broker.host = Some(("host".into(), "profile".into()));
+            broker.host = Some(UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile".into(),
+            });
             let scope = Scope {
                 host_id: "host".into(),
                 conversation_id: "chat".into(),
@@ -1976,7 +2199,10 @@ mod admission_tests {
         {
             let mut guard = windows.broker.lock().unwrap();
             let broker = guard.as_mut().unwrap();
-            broker.host = Some(("host".into(), "profile".into()));
+            broker.host = Some(UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile".into(),
+            });
             broker
                 .storage
                 .mutate(&windows.origin, |profile| {
@@ -2026,7 +2252,10 @@ mod admission_tests {
         {
             let mut guard = windows.broker.lock().unwrap();
             let broker = guard.as_mut().unwrap();
-            broker.host = Some(("host".into(), "profile".into()));
+            broker.host = Some(UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile".into(),
+            });
             let scope = Scope {
                 host_id: "host".into(),
                 conversation_id: "chat".into(),
@@ -2126,15 +2355,21 @@ mod admission_tests {
             let mut guard = windows.broker.lock().unwrap();
             let broker = guard.as_mut().unwrap();
             assert_eq!(
-                broker.request_restore(Some(("host-a", "profile-a"))),
+                broker.request_restore(
+                    Some(&UiRecoveryContext {
+                        host_id: "host-a".into(),
+                        profile_id: "profile-a".into()
+                    }),
+                    None
+                ),
                 Err("wrong-host")
             );
-            broker.request_restore(None).unwrap();
+            broker.request_restore(None, None).unwrap();
             broker
                 .bind_host("host-a".into(), "profile-a".into())
                 .unwrap();
             assert!(
-                broker.local_builtin,
+                broker.recovery.is_some(),
                 "an initially unbound explicit restore belongs to the first binding"
             );
             let queued_host = broker.host.clone();
@@ -2143,30 +2378,48 @@ mod admission_tests {
                 .bind_host("host-b".into(), "profile-b".into())
                 .unwrap();
             assert!(
-                !broker.local_builtin,
+                !broker.recovery.is_some(),
                 "a previous host's pending restore cannot replay after rebind"
             );
-            assert_eq!(queued_host, Some(("host-a".into(), "profile-a".into())));
+            assert_eq!(queued_host.unwrap().host_id, "host-a");
             assert_eq!(broker.recovery_sequence, old_sequence);
             assert_eq!(
-                broker.request_restore(Some(("host-a", "profile-a"))),
+                broker.request_restore(
+                    Some(&UiRecoveryContext {
+                        host_id: "host-a".into(),
+                        profile_id: "profile-a".into()
+                    }),
+                    None
+                ),
                 Err("wrong-host")
             );
             assert_eq!(
-                broker.request_restore(Some(("host-b", "old-profile-b"))),
+                broker.request_restore(
+                    Some(&UiRecoveryContext {
+                        host_id: "host-b".into(),
+                        profile_id: "old-profile-b".into()
+                    }),
+                    None
+                ),
                 Err("wrong-host")
             );
             broker
-                .request_restore(Some(("host-b", "profile-b")))
+                .request_restore(
+                    Some(&UiRecoveryContext {
+                        host_id: "host-b".into(),
+                        profile_id: "profile-b".into(),
+                    }),
+                    None,
+                )
                 .unwrap();
             assert!(broker.recovery_sequence > old_sequence);
-            broker.confirm_restore(old_sequence);
-            assert!(broker.local_builtin);
+            confirm(broker, old_sequence, 2);
+            assert!(broker.recovery.is_some());
             broker
                 .bind_host("host-b".into(), "new-profile-b".into())
                 .unwrap();
             assert!(
-                !broker.local_builtin,
+                !broker.recovery.is_some(),
                 "profile changes also cancel pending recovery"
             );
         }
@@ -2205,22 +2458,412 @@ mod admission_tests {
             assert!(broker
                 .bind_host("other-host".into(), "profile".into())
                 .is_err());
-            assert_eq!(broker.host.as_ref().unwrap().0, "host");
+            assert_eq!(broker.host.as_ref().unwrap().host_id, "host");
             broker.abandon_unregistered_openings();
             broker
                 .bind_host("other-host".into(), "profile".into())
                 .unwrap();
-            broker.request_restore(None).unwrap();
+            broker.request_restore(None, None).unwrap();
             let first = broker.recovery_sequence;
-            broker.request_restore(None).unwrap();
+            broker.request_restore(None, None).unwrap();
             let retry = broker.recovery_sequence;
             assert!(retry > first);
-            broker.confirm_restore(first);
-            assert!(broker.local_builtin);
-            broker.confirm_restore(retry);
-            assert!(!broker.local_builtin);
-            broker.request_restore(None).unwrap();
-            assert!(broker.local_builtin);
+            broker.snapshot = Some(json!({"old":"appearance"}));
+            confirm(broker, first, 2);
+            assert!(broker.recovery.is_some());
+            assert!(broker.snapshot.is_some());
+            confirm(broker, retry, 2);
+            assert!(!broker.recovery.is_some());
+            assert!(broker.snapshot.is_none());
+            broker.snapshot = Some(json!({"new":"appearance"}));
+            confirm(broker, retry, 2);
+            assert!(broker.snapshot.is_some());
+            assert!(!broker
+                .publish_snapshot(
+                    json!({"selection":{"deliveryGeneration":1}}),
+                    BTreeMap::new()
+                )
+                .unwrap());
+            assert_eq!(broker.snapshot.as_ref().unwrap()["new"], "appearance");
+            broker.request_restore(None, None).unwrap();
+            let current = broker.recovery_sequence;
+            assert!(broker
+                .publish_snapshot(
+                    json!({"selection":{"deliveryGeneration":5}}),
+                    BTreeMap::new()
+                )
+                .unwrap());
+            confirm(broker, current, 4);
+            assert_eq!(
+                broker.snapshot.as_ref().unwrap()["selection"]["deliveryGeneration"],
+                5
+            );
+            assert!(!broker
+                .publish_snapshot(
+                    json!({"selection":{"deliveryGeneration":3}}),
+                    BTreeMap::new()
+                )
+                .unwrap());
+            assert_eq!(
+                broker.snapshot.as_ref().unwrap()["selection"]["deliveryGeneration"],
+                5
+            );
+            broker.request_restore(None, None).unwrap();
+            assert!(broker.recovery.is_some());
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn native_supersession_distinguishes_unposted_work_from_immutable_submissions() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-submission-{}", uuid::Uuid::new_v4()));
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.bind_host("a".into(), "profile-a".into()).unwrap();
+            let a = broker.host.clone().unwrap();
+            broker.request_restore(None, None).unwrap();
+            let first = broker.recovery_sequence;
+            assert_eq!(
+                broker.scope_recovery(first, a.clone(), false).unwrap(),
+                RecoveryAdmission::Accepted
+            );
+            broker.request_restore(None, None).unwrap();
+            let second = broker.recovery_sequence;
+            assert_eq!(
+                broker.scope_recovery(first, a.clone(), false).unwrap(),
+                RecoveryAdmission::Superseded
+            );
+            assert_eq!(
+                broker.scope_recovery(first, a.clone(), true).unwrap(),
+                RecoveryAdmission::Accepted
+            );
+            assert!(!broker.confirm_restore(first, 2, a.clone()).unwrap());
+            assert_eq!(broker.recovery.as_ref().unwrap().sequence, second);
+            confirm(broker, second, 3);
+            assert_eq!(
+                broker.scope_recovery(first, a.clone(), false).unwrap(),
+                RecoveryAdmission::Cancelled
+            );
+            assert_eq!(
+                broker.scope_recovery(first, a.clone(), true).unwrap(),
+                RecoveryAdmission::Accepted
+            );
+            broker.bind_host("b".into(), "profile-b".into()).unwrap();
+            assert_eq!(broker.scope_recovery(first, a, true), Err("wrong-host"));
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn foreign_binding_cancellation_survives_newer_same_profile_restore() {
+        for settle_b in [false, true] {
+            let directory = std::env::temp_dir().join(format!(
+                "openpane-cancelled-sequence-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let windows = ChatWindows::new(
+                Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+                &directory,
+                true,
+            );
+            {
+                let mut guard = windows.broker.lock().unwrap();
+                let broker = guard.as_mut().unwrap();
+                broker.bind_host("a".into(), "profile-a".into()).unwrap();
+                let a = broker.host.clone().unwrap();
+                broker.request_restore(None, None).unwrap();
+                let cancelled = broker.recovery_sequence;
+                assert_eq!(
+                    broker.scope_recovery(cancelled, a.clone(), false).unwrap(),
+                    RecoveryAdmission::Accepted
+                );
+                broker.bind_host("b".into(), "profile-b".into()).unwrap();
+                if settle_b {
+                    let b = broker.host.clone().unwrap();
+                    broker.request_restore(None, None).unwrap();
+                    let older_b = broker.recovery_sequence;
+                    broker.request_restore(None, None).unwrap();
+                    let settled_b = broker.recovery_sequence;
+                    confirm(broker, settled_b, 4);
+                    broker.bind_host("a".into(), "profile-a".into()).unwrap();
+                    broker.bind_host("b".into(), "profile-b".into()).unwrap();
+                    broker.request_restore(None, None).unwrap();
+                    assert_eq!(broker.scope_recovery(older_b, b.clone(), false).unwrap(), RecoveryAdmission::Cancelled, "B history must be cancelled even when the bind away happened after latest B settled");
+                    assert!(broker.recovery_cancelled(older_b).unwrap());
+                    assert_eq!(
+                        broker.scope_recovery(older_b, b, true).unwrap(),
+                        RecoveryAdmission::Accepted
+                    );
+                }
+                broker.bind_host("a".into(), "profile-a".into()).unwrap();
+                broker.request_restore(None, None).unwrap();
+                let same_profile = broker.recovery_sequence;
+                broker.request_restore(None, None).unwrap();
+                let latest = broker.recovery_sequence;
+                assert_eq!(
+                    broker.scope_recovery(cancelled, a.clone(), false).unwrap(),
+                    RecoveryAdmission::Cancelled
+                );
+                assert_eq!(
+                    broker.scope_recovery(cancelled, a.clone(), true).unwrap(),
+                    RecoveryAdmission::Accepted,
+                    "immutable submissions still replay under original authority"
+                );
+                assert_eq!(
+                    broker
+                        .scope_recovery(same_profile, a.clone(), false)
+                        .unwrap(),
+                    RecoveryAdmission::Superseded,
+                    "ordinary same-profile supersession stays distinct"
+                );
+                assert_eq!(
+                    broker.scope_recovery(latest, a.clone(), false).unwrap(),
+                    RecoveryAdmission::Accepted
+                );
+                assert!(!broker.confirm_restore(cancelled, 5, a).unwrap());
+                assert_eq!(broker.recovery.as_ref().unwrap().sequence, latest);
+                assert!(broker.recovery_cancelled(cancelled).unwrap());
+                assert!(!broker.recovery_cancelled(latest).unwrap());
+                assert_eq!(broker.recovery_cancelled(0), Err("unknown-recovery"));
+                assert_eq!(
+                    broker.recovery_cancelled(latest + 1),
+                    Err("unknown-recovery")
+                );
+            }
+            drop(windows);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn cancellation_history_query_has_an_exact_main_document_wire_shape() {
+        let valid =
+            json!({"kind":"read-recovery-cancellation","incarnation":"document","sequence":1});
+        assert!(matches!(
+            serde_json::from_value::<Command>(valid.clone()).unwrap(),
+            Command::ReadRecoveryCancellation { sequence: 1, .. }
+        ));
+        for invalid in [
+            json!({"kind":"read-recovery-cancellation","sequence":1}),
+            json!({"kind":"read-recovery-cancellation","incarnation":"document"}),
+            json!({"kind":"read-recovery-cancellation","incarnation":"document","sequence":-1}),
+            json!({"kind":"read-recovery-cancellation","incarnation":"document","sequence":1,"extra":true}),
+        ] {
+            assert!(serde_json::from_value::<Command>(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn resolved_startup_restore_is_never_reattributed_to_a_different_first_binding() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-pending-profile-{}", uuid::Uuid::new_v4()));
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.request_restore(None, None).unwrap();
+            let sequence = broker.recovery_sequence;
+            let a = UiRecoveryContext {
+                host_id: "a".into(),
+                profile_id: "profile-a".into(),
+            };
+            broker.scope_recovery(sequence, a.clone(), false).unwrap();
+            assert_eq!(broker.recovery_context().unwrap().host_id, "a");
+            broker.bind_host("b".into(), "profile-b".into()).unwrap();
+            assert!(
+                broker.recovery.is_none(),
+                "a resolved request is cancelled, never advertised under B"
+            );
+            assert_eq!(
+                broker
+                    .scope_recovery(
+                        sequence,
+                        UiRecoveryContext {
+                            host_id: "b".into(),
+                            profile_id: "profile-b".into()
+                        },
+                        false
+                    )
+                    .unwrap(),
+                RecoveryAdmission::Cancelled,
+                "a delayed unscoped reply cannot claim a cancelled request for B"
+            );
+            assert_eq!(
+                broker.confirm_restore(sequence, 5, a.clone()),
+                Err("wrong-host")
+            );
+            assert_eq!(
+                broker.scope_recovery(sequence, a, false),
+                Err("wrong-host"),
+                "the pre-write hook also rejects after B binds"
+            );
+            assert!(broker
+                .publish_snapshot(
+                    json!({"selection":{"deliveryGeneration":0}}),
+                    BTreeMap::new()
+                )
+                .unwrap());
+            assert!(!broker.visual_builtin());
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn settled_restore_keeps_builtin_visible_until_a_qualifying_snapshot_arrives() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-visual-floor-{}", uuid::Uuid::new_v4()));
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.bind_host("a".into(), "profile-a".into()).unwrap();
+            broker
+                .publish_snapshot(
+                    json!({"selection":{"deliveryGeneration":1}}),
+                    BTreeMap::new(),
+                )
+                .unwrap();
+            broker.request_restore(None, None).unwrap();
+            confirm(broker, broker.recovery_sequence, 2);
+            assert!(
+                broker.recovery.is_none(),
+                "the host write is settled and must not be retried"
+            );
+            assert!(broker.snapshot.is_none());
+            assert!(
+                broker.visual_builtin(),
+                "a child waking after confirmation must remove its old theme"
+            );
+            assert!(!broker
+                .publish_snapshot(
+                    json!({"selection":{"deliveryGeneration":1}}),
+                    BTreeMap::new()
+                )
+                .unwrap());
+            assert!(broker.visual_builtin());
+            assert!(broker
+                .publish_snapshot(
+                    json!({"selection":{"deliveryGeneration":3}}),
+                    BTreeMap::new()
+                )
+                .unwrap());
+            assert!(!broker.visual_builtin());
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn startup_restore_floor_does_not_cross_the_first_profile_binding() {
+        let directory =
+            std::env::temp_dir().join(format!("openpane-floor-profile-{}", uuid::Uuid::new_v4()));
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            broker.request_restore(None, None).unwrap();
+            broker
+                .scope_recovery(
+                    broker.recovery_sequence,
+                    UiRecoveryContext {
+                        host_id: "host-a".into(),
+                        profile_id: "profile-a".into(),
+                    },
+                    false,
+                )
+                .unwrap();
+            broker
+                .confirm_restore(
+                    broker.recovery_sequence,
+                    5,
+                    UiRecoveryContext {
+                        host_id: "host-a".into(),
+                        profile_id: "profile-a".into(),
+                    },
+                )
+                .unwrap();
+            broker
+                .bind_host("host-b".into(), "profile-b".into())
+                .unwrap();
+            assert!(broker
+                .publish_snapshot(
+                    json!({"selection":{"deliveryGeneration":0}}),
+                    BTreeMap::new()
+                )
+                .unwrap());
+            broker
+                .request_restore(
+                    Some(&UiRecoveryContext {
+                        host_id: "host-b".into(),
+                        profile_id: "profile-b".into(),
+                    }),
+                    None,
+                )
+                .unwrap();
+            let sequence = broker.recovery_sequence;
+            assert_eq!(
+                broker.confirm_restore(
+                    sequence,
+                    7,
+                    UiRecoveryContext {
+                        host_id: "host-a".into(),
+                        profile_id: "profile-a".into()
+                    }
+                ),
+                Err("wrong-host")
+            );
+            assert!(broker.recovery.is_some());
+            assert!(broker
+                .confirm_restore(
+                    sequence,
+                    1,
+                    UiRecoveryContext {
+                        host_id: "host-b".into(),
+                        profile_id: "profile-b".into()
+                    }
+                )
+                .unwrap());
+            broker.opening.insert(
+                "child".into(),
+                Scope {
+                    host_id: "host-b".into(),
+                    conversation_id: "chat".into(),
+                },
+            );
+            assert_eq!(
+                broker
+                    .bind_host("host-c".into(), "profile-c".into())
+                    .unwrap_err(),
+                "host-change-with-live-children"
+            );
+            assert!(!broker
+                .publish_snapshot(
+                    json!({"selection":{"deliveryGeneration":0}}),
+                    BTreeMap::new()
+                )
+                .unwrap());
         }
         drop(windows);
         std::fs::remove_dir_all(directory).unwrap();
@@ -2243,13 +2886,23 @@ mod admission_tests {
             let broker = guard.as_mut().unwrap();
             assert_eq!(broker.begin_close("first").unwrap(), vec!["first"]);
             assert_eq!(broker.begin_close("second").unwrap(), vec!["second"]);
-            let attempt = broker.pending_closes.get("first").unwrap().clone();
+            let attempt = broker
+                .pending_closes
+                .get("first")
+                .map(|pending| &pending.attempt_id)
+                .unwrap()
+                .clone();
             broker.cancel_close_for("first", &attempt).unwrap();
             assert!(!broker.pending_closes.contains_key("first"));
             assert!(broker.pending_closes.contains_key("second"));
             assert!(!broker.main_closing);
             broker.begin_close("main").unwrap();
-            let attempt = broker.pending_closes.get("second").unwrap().clone();
+            let attempt = broker
+                .pending_closes
+                .get("second")
+                .map(|pending| &pending.attempt_id)
+                .unwrap()
+                .clone();
             broker.cancel_close_for("second", &attempt).unwrap();
             assert!(broker.pending_closes.is_empty());
             assert!(!broker.main_closing);
@@ -2287,17 +2940,33 @@ mod admission_tests {
                 );
             }
             broker.begin_close("second").unwrap();
-            let independent_attempt = broker.pending_closes.get("second").unwrap().clone();
+            let independent_attempt = broker
+                .pending_closes
+                .get("second")
+                .map(|pending| &pending.attempt_id)
+                .unwrap()
+                .clone();
             broker.begin_close("second").unwrap();
             assert_eq!(
-                broker.pending_closes.get("second"),
+                broker
+                    .pending_closes
+                    .get("second")
+                    .map(|pending| &pending.attempt_id),
                 Some(&independent_attempt)
             );
             broker.begin_close("main").unwrap();
-            let attempt = broker.pending_closes.get("first").unwrap().clone();
+            let attempt = broker
+                .pending_closes
+                .get("first")
+                .map(|pending| &pending.attempt_id)
+                .unwrap()
+                .clone();
             broker.cancel_close_for("first", &attempt).unwrap();
             assert_eq!(
-                broker.pending_closes.get("second"),
+                broker
+                    .pending_closes
+                    .get("second")
+                    .map(|pending| &pending.attempt_id),
                 Some(&independent_attempt)
             );
             assert!(!broker.main_closing);
@@ -2306,7 +2975,10 @@ mod admission_tests {
             broker.begin_close("main").unwrap();
             broker.cancel_close();
             assert_eq!(
-                broker.pending_closes.get("second"),
+                broker
+                    .pending_closes
+                    .get("second")
+                    .map(|pending| &pending.attempt_id),
                 Some(&independent_attempt)
             );
             assert!(!broker.main_closing);
@@ -2350,9 +3022,19 @@ mod admission_tests {
                 );
             }
             broker.begin_close("main").unwrap();
-            let second_attempt = broker.pending_closes.get("second").unwrap().clone();
+            let second_attempt = broker
+                .pending_closes
+                .get("second")
+                .map(|pending| &pending.attempt_id)
+                .unwrap()
+                .clone();
             assert!(broker.authorize_close("second", &second_attempt).is_ok());
-            let attempt = broker.pending_closes.get("first").unwrap().clone();
+            let attempt = broker
+                .pending_closes
+                .get("first")
+                .map(|pending| &pending.attempt_id)
+                .unwrap()
+                .clone();
             broker.cancel_close_for("first", &attempt).unwrap();
             assert!(
                 windows.document(broker, "second", "second").is_ok(),
@@ -2365,9 +3047,19 @@ mod admission_tests {
             assert!(broker.documents.contains_key("second"));
             broker.begin_close("second").unwrap();
             broker.begin_close("main").unwrap();
-            let attempt = broker.pending_closes.get("first").unwrap().clone();
+            let attempt = broker
+                .pending_closes
+                .get("first")
+                .map(|pending| &pending.attempt_id)
+                .unwrap()
+                .clone();
             broker.cancel_close_for("first", &attempt).unwrap();
-            let second_attempt = broker.pending_closes.get("second").unwrap().clone();
+            let second_attempt = broker
+                .pending_closes
+                .get("second")
+                .map(|pending| &pending.attempt_id)
+                .unwrap()
+                .clone();
             assert!(broker.authorize_close("second", &second_attempt).is_ok());
             assert!(broker.documents.contains_key("second"));
         }
@@ -2450,7 +3142,10 @@ mod admission_tests {
             {
                 let mut guard = windows.broker.lock().unwrap();
                 let broker = guard.as_mut().unwrap();
-                broker.host = Some(("host".into(), "profile".into()));
+                broker.host = Some(UiRecoveryContext {
+                    host_id: "host".into(),
+                    profile_id: "profile".into(),
+                });
                 for n in 0..admitted {
                     windows
                         .reserve(
@@ -2569,7 +3264,10 @@ mod admission_tests {
         {
             let mut guard = windows.broker.lock().unwrap();
             let broker = guard.as_mut().unwrap();
-            broker.host = Some(("host".into(), "profile".into()));
+            broker.host = Some(UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile".into(),
+            });
             broker
                 .storage
                 .mutate(&windows.origin, |profile| {
@@ -2698,7 +3396,10 @@ mod admission_tests {
         {
             let mut guard = windows.broker.lock().unwrap();
             let broker = guard.as_mut().unwrap();
-            broker.host = Some(("host".into(), "profile".into()));
+            broker.host = Some(UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile".into(),
+            });
             let scope = Scope {
                 host_id: "host".into(),
                 conversation_id: "still-live".into(),
@@ -2780,7 +3481,10 @@ mod admission_tests {
             {
                 let mut guard = windows.broker.lock().unwrap();
                 let broker = guard.as_mut().unwrap();
-                broker.host = Some(("host".into(), "profile".into()));
+                broker.host = Some(UiRecoveryContext {
+                    host_id: "host".into(),
+                    profile_id: "profile".into(),
+                });
                 let scope = Scope {
                     host_id: "host".into(),
                     conversation_id: "target".into(),
@@ -2920,7 +3624,10 @@ mod admission_tests {
         {
             let mut lock = windows.broker.lock().unwrap();
             let broker = lock.as_mut().unwrap();
-            broker.host = Some(("host".into(), "profile".into()));
+            broker.host = Some(UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile".into(),
+            });
             let scope = Scope {
                 host_id: "host".into(),
                 conversation_id: "target".into(),
@@ -3033,7 +3740,10 @@ mod admission_tests {
             {
                 let mut lock = windows.broker.lock().unwrap();
                 let broker = lock.as_mut().unwrap();
-                broker.host = Some(("host".into(), "profile".into()));
+                broker.host = Some(UiRecoveryContext {
+                    host_id: "host".into(),
+                    profile_id: "profile".into(),
+                });
                 let scope = Scope {
                     host_id: "host".into(),
                     conversation_id: "target".into(),
@@ -3183,8 +3893,18 @@ mod admission_tests {
                 broker.pending_closes, first_quit,
                 "repeated Quit keeps the active attempts"
             );
-            let second_attempt = broker.pending_closes.get("second").unwrap().clone();
-            let attempt = broker.pending_closes.get("first").unwrap().clone();
+            let second_attempt = broker
+                .pending_closes
+                .get("second")
+                .map(|pending| &pending.attempt_id)
+                .unwrap()
+                .clone();
+            let attempt = broker
+                .pending_closes
+                .get("first")
+                .map(|pending| &pending.attempt_id)
+                .unwrap()
+                .clone();
             broker.cancel_close_for("first", &attempt).unwrap();
             assert_eq!(
                 broker.authorize_close("second", &second_attempt),
@@ -3192,7 +3912,12 @@ mod admission_tests {
             );
             // Hold delivery of that rejection while the user starts Quit again.
             broker.begin_close("main").unwrap();
-            let current = broker.pending_closes.get("second").unwrap().clone();
+            let current = broker
+                .pending_closes
+                .get("second")
+                .map(|pending| &pending.attempt_id)
+                .unwrap()
+                .clone();
             assert_ne!(second_attempt, current);
             assert_eq!(
                 broker.authorize_close("second", &second_attempt),
@@ -3265,17 +3990,87 @@ mod admission_tests {
                 },
             );
             assert_eq!(broker.begin_close("main").unwrap(), vec!["main"]);
-            let attempt = broker.pending_closes.get("main").unwrap().clone();
+            let attempt = broker
+                .pending_closes
+                .get("main")
+                .map(|pending| &pending.attempt_id)
+                .unwrap()
+                .clone();
             // prepare failed, but cancellation never reached the broker.
             assert_eq!(
                 broker.begin_close("main").unwrap(),
                 vec!["main"],
                 "explicit Quit again must wake cancellation retry"
             );
-            assert_eq!(broker.pending_closes.get("main"), Some(&attempt));
+            assert_eq!(
+                broker
+                    .pending_closes
+                    .get("main")
+                    .map(|pending| &pending.attempt_id),
+                Some(&attempt)
+            );
             broker.cancel_close_for("main", &attempt).unwrap();
             assert!(!broker.main_closing);
             assert!(!broker.pending_closes.contains_key("main"));
+        }
+        drop(windows);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn inline_recovery_requires_exact_profile_and_restore_wake_correlates_initiator() {
+        let command: Command = serde_json::from_value(json!({"kind":"recover-inline","incarnation":"document","scope":{"hostId":"host","conversationId":"chat"},"expectedTransitionId":"closed","expectedContext":{"hostId":"host","profileId":"profile-a"}})).unwrap();
+        assert!(
+            matches!(command, Command::RecoverInline { expected_context, .. } if expected_context.profile_id == "profile-a")
+        );
+        assert!(serde_json::from_value::<Command>(json!({"kind":"recover-inline","incarnation":"document","scope":{"hostId":"host","conversationId":"chat"},"expectedTransitionId":"closed"})).is_err());
+        let command: Command = serde_json::from_value(
+            json!({"kind":"restore-builtin","incarnation":"document","requestId":"request-1"}),
+        )
+        .unwrap();
+        assert!(
+            matches!(command, Command::RestoreBuiltin { request_id: Some(id), .. } if id == "request-1")
+        );
+        let directory =
+            std::env::temp_dir().join(format!("openpane-inline-profile-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let windows = ChatWindows::new(
+            Some("http://127.0.0.1:17777/browser.html".parse().unwrap()),
+            &directory,
+            true,
+        );
+        {
+            let mut guard = windows.broker.lock().unwrap();
+            let broker = guard.as_mut().unwrap();
+            let a = UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile-a".into(),
+            };
+            let b = UiRecoveryContext {
+                host_id: "host".into(),
+                profile_id: "profile-b".into(),
+            };
+            broker
+                .bind_host(a.host_id.clone(), a.profile_id.clone())
+                .unwrap();
+            assert!(broker.require_recovery_context(&a).is_ok());
+            broker
+                .bind_host(b.host_id.clone(), b.profile_id.clone())
+                .unwrap();
+            assert_eq!(
+                broker.require_recovery_context(&a).unwrap_err(),
+                "wrong-host"
+            );
+            assert!(broker.require_recovery_context(&b).is_ok());
+            assert!(broker.recovery.is_none());
+            broker
+                .request_restore(Some(&b), Some("request-1".into()))
+                .unwrap();
+            assert_eq!(
+                broker.recovery_state(),
+                json!({"pending":true,"sequence":1,"initiator":"request-1","hostId":"host","profileId":"profile-b"})
+            );
+            broker.request_restore(None, None).unwrap();
+            assert_eq!(broker.recovery_state()["initiator"], Value::Null);
         }
         drop(windows);
         std::fs::remove_dir_all(directory).unwrap();

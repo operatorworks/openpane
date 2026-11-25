@@ -8,7 +8,7 @@ import { BrowserViewStorage } from './browser-storage.js';
 import { handoffRevision } from './editor-bindings.js';
 import type { PlacementAcquisition, PlacementPort, PlacementPurpose } from './placement-port.js';
 import { PlacementSuperseded, placementReason } from './placement-port.js';
-import { DesktopWindowPort, parseNativeReservation, parseNativePlacementIntent, childPlacementResult, parseNativeWindowLookup } from './window-context.js';
+import { sameNativeAttempt, DesktopWindowPort, parseNativeReservation, parseNativePlacementIntent, childPlacementResult, parseNativeWindowLookup } from './window-context.js';
 import type { NativeReservation, NativePlacementIntent, NativeWindowLookup } from './window-context.js';
 
 type Request = Parameters<PlacementPort['acquire']>[0];
@@ -83,16 +83,7 @@ export class WindowCoordinator implements PlacementPort {
     let requestId: string = crypto.randomUUID(), captured: { readonly cancel: () => Promise<void> } | null = null;
     try {
       const carry = action.carry && (action.kind !== 'open' || this.port.context.role !== 'chat' || !await keptDraft(this.port.context.reservation.scope, action.scope));
-      let context = record(await this.port.request({ kind: 'intent-context' }), ['epoch', 'pendingCarryRequests']), epoch = count(context.epoch);
-      if (!epoch) throw new Error('Invalid native request epoch');
-      const protectedRequests = () => {
-        if (!Array.isArray(context.pendingCarryRequests) || context.pendingCarryRequests.length > 1024) throw new Error('Invalid native carry inventory');
-        return context.pendingCarryRequests.map(value => identifier(value, 200));
-      };
-      if (carry && await pruneDraftCarryHistory(epoch, protectedRequests()) >= 1000) {
-        context = record(await this.port.request({ kind: 'intent-context', retireAfter: epoch }), ['epoch', 'pendingCarryRequests']); epoch = count(context.epoch);
-        await pruneDraftCarryHistory(epoch, protectedRequests());
-      }
+      const epoch = await this.intentEpoch(carry);
       requestId = `${epoch}:${requestId}`;
       this.inFlightIntents.add(requestId);
       captured = carry ? await this.capture(requestId, undefined, emptyOnly) : null;
@@ -123,6 +114,26 @@ export class WindowCoordinator implements PlacementPort {
       try { await captured?.cancel(); } catch { reason += ' The draft remains pending in its source; recover local storage before retrying.'; }
       const result = { kind: 'refused', reason: placementReason(reason) } as const; this.notice(result, requestId); return result;
     } finally { this.inFlightIntents.delete(requestId); }
+  }
+  private async intentEpoch(prune: boolean): Promise<number> {
+    const port = this.port;
+    if (!port) throw new Error('Native placement is unavailable.');
+    const read = async (retireAfter?: number) => {
+      const input = record(await port.request({ kind: 'intent-context', ...(retireAfter === undefined ? {} : { retireAfter }) }), ['epoch', 'pendingCarryRequests']);
+      const epoch = count(input.epoch);
+      if (!epoch) throw new Error('Invalid native request epoch');
+      return { epoch, pendingCarryRequests: input.pendingCarryRequests };
+    };
+    const pending = (value: unknown) => {
+      if (!Array.isArray(value) || value.length > 1024) throw new Error('Invalid native carry inventory');
+      return value.map(value => identifier(value, 200));
+    };
+    let context = await read();
+    if (prune && await pruneDraftCarryHistory(context.epoch, pending(context.pendingCarryRequests)) >= 1000) {
+      context = await read(context.epoch);
+      await pruneDraftCarryHistory(context.epoch, pending(context.pendingCarryRequests));
+    }
+    return context.epoch;
   }
   private async savedIntentResult(request: Request): Promise<Exclude<ConversationOpenResult, { readonly kind: 'inline' }> | null> {
     if (!request.intentRef || !this.port) return null;
@@ -188,12 +199,7 @@ export class WindowCoordinator implements PlacementPort {
     const carries = await sourceCarries(request.carryFrom);
     const existing = carries.find(carry => (carry.kind === 'offered' || carry.kind === 'applied' || carry.kind === 'cancelled' || carry.kind === 'refused' && request.purpose === 'passive') && carry.target && sameScope(carry.target, request.scope));
     if (existing) { if (existing.kind === 'offered' || existing.kind === 'applied') onDependent?.(); return; }
-    let context = record(await this.port.request({ kind: 'intent-context' }), ['epoch', 'pendingCarryRequests']), epoch = count(context.epoch);
-    const pending = () => { if (!Array.isArray(context.pendingCarryRequests) || context.pendingCarryRequests.length > 1024) throw new Error('Invalid native carry inventory'); return context.pendingCarryRequests.map(value => identifier(value, 200)); };
-    if (await pruneDraftCarryHistory(epoch, pending()) >= 1000) {
-      context = record(await this.port.request({ kind: 'intent-context', retireAfter: epoch }), ['epoch', 'pendingCarryRequests']); epoch = count(context.epoch);
-      await pruneDraftCarryHistory(epoch, pending());
-    }
+    const epoch = await this.intentEpoch(true);
     const requestId = `${epoch}:main-${reservation.transitionId}`;
     const unbound = carries.find(carry => carry.kind === 'offered' && carry.target === null && carry.requestId.endsWith(`:main-${reservation.transitionId}`));
     if (unbound) { onDependent?.(); await bindDraftCarry(request.carryFrom, unbound.requestId, request.scope); return; }
@@ -257,7 +263,7 @@ export class WindowCoordinator implements PlacementPort {
         if (focused) return focused;
         native = await this.lookup(request.scope);
         if (native.kind === 'ready') observedDetached = { kind: 'detached', scope: request.scope, label: native.reservation.label };
-        if (native.kind === 'closed' && native.reservation.phase === 'target-ready' && native.reservation.viewId === observed.reservation.viewId && native.reservation.label === observed.reservation.label && native.reservation.transitionId === observed.reservation.transitionId) return { kind: 'detached', scope: request.scope, label: native.reservation.label };
+        if (native.kind === 'closed' && native.reservation.phase === 'target-ready' && sameNativeAttempt(native.reservation, observed.reservation)) return { kind: 'detached', scope: request.scope, label: native.reservation.label };
         assertCurrent();
         if (native.kind === 'opening' || native.kind === 'ready') return this.rememberPending({ kind: 'pending', scope: request.scope, reason: 'The recorded window is closing. Retry opening this chat after it finishes.' }, native.reservation);
       }

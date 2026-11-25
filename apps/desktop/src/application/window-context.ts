@@ -15,6 +15,9 @@ export interface NativeReservation {
   readonly bindingRevision: number | null;
   readonly writerGeneration: number | null;
 }
+export function sameNativeAttempt(a: NativeReservation, b: NativeReservation): boolean {
+  return sameScope(a.scope, b.scope) && a.viewId === b.viewId && a.label === b.label && a.transitionId === b.transitionId;
+}
 export type NativeWindowLookup =
   | { readonly kind: 'absent' }
   | { readonly kind: 'closed' | 'opening' | 'ready'; readonly reservation: NativeReservation };

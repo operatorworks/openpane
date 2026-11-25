@@ -24,11 +24,11 @@ export function parseMetricsCard(value: unknown): MetricsCardV1 {
   const card: MetricsCardV1 = {
     schemaVersion: 1, title: boundedText(input.title, 200), query: boundedText(input.query, METRICS_CARD_LIMITS.query),
     fromMs, toMs, fetchedAtMs: count(input.fetchedAtMs),
-    series: input.series.map((value: unknown) => {
+    series: Array.from(input.series, (value: unknown) => {
       const series = record(value, ['label', 'unit', 'points']);
       if (!Array.isArray(series.points) || series.points.length > METRICS_CARD_LIMITS.points) throw new Error('Invalid metrics points');
       let previous = -1;
-      const points = series.points.map((value: unknown): readonly [number, number | null] => {
+      const points = Array.from(series.points, (value: unknown): readonly [number, number | null] => {
         if (!Array.isArray(value) || value.length !== 2) throw new Error('Invalid metrics point');
         const time = count(value[0]);
         if (time <= previous) throw new Error('Metrics timestamps must be strictly increasing epoch milliseconds');

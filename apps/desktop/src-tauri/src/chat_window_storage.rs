@@ -1,4 +1,4 @@
-use crate::chat_window_records::Profile;
+use crate::chat_window_records::{Action, Phase, Profile};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -8,6 +8,10 @@ use std::{
     path::{Path, PathBuf},
 };
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
+const PROFILE_METADATA_BYTES: usize = b"\"inlineCompletionVersion\":1,".len();
+const INITIAL_EPOCH_BYTES: usize = b"\"intentEpoch\":1,".len();
+const DEFAULT_CARRY_BYTES: usize = b"\"carry\":false,".len();
+const INLINE_PHASE_GROWTH: usize = b"inline-ready".len() - b"assigned".len();
 
 pub fn random_id() -> Result<String, &'static str> {
     let mut bytes = [0; 16];
@@ -23,6 +27,53 @@ struct Records {
     profiles: BTreeMap<String, Profile>,
 }
 impl Records {
+    fn encode(&self) -> Result<Vec<u8>, &'static str> {
+        let bytes = serde_json::to_vec(self).map_err(|_| "native-records-unavailable")?;
+        // Charge the compact legacy representation, excluding defaulted schema metadata
+        // and the maximum phase growth introduced by inline-completion reconciliation.
+        let overhead: usize = self
+            .profiles
+            .values()
+            .map(|profile| {
+                PROFILE_METADATA_BYTES
+                    + if profile.intent_epoch == 1 {
+                        INITIAL_EPOCH_BYTES
+                    } else {
+                        0
+                    }
+                    + profile
+                        .windows
+                        .values()
+                        .filter(|entry| entry.phase == Phase::InlineReady)
+                        .count()
+                        * INLINE_PHASE_GROWTH
+                    + profile
+                        .intents
+                        .values()
+                        .map(|intent| {
+                            let carry = match &intent.action {
+                                Action::Open { carry, .. } | Action::Create { carry, .. } => *carry,
+                            };
+                            (if carry { 0 } else { DEFAULT_CARRY_BYTES })
+                                + if intent
+                                    .target
+                                    .as_ref()
+                                    .is_some_and(|target| target.phase == Phase::InlineReady)
+                                {
+                                    INLINE_PHASE_GROWTH
+                                } else {
+                                    0
+                                }
+                        })
+                        .sum::<usize>()
+            })
+            .sum();
+        let payload = bytes.len().saturating_sub(overhead);
+        if payload as u64 > MAX_BYTES {
+            return Err("native-record-capacity");
+        }
+        Ok(bytes)
+    }
     fn validate(&self) -> Result<(), &'static str> {
         if self.schema_version != 1 {
             return Err("unsupported-native-records");
@@ -97,16 +148,17 @@ impl Storage {
                 let file = File::open(&path).map_err(|_| "native-records-unavailable")?;
                 same_file(&file, &expected)?;
                 let mut bytes = Vec::new();
-                file.take(MAX_BYTES + 1)
+                file.take(MAX_BYTES * 2 + 1)
                     .read_to_end(&mut bytes)
                     .map_err(|_| "native-records-unavailable")?;
-                if bytes.len() as u64 > MAX_BYTES {
+                if bytes.len() as u64 > MAX_BYTES * 2 {
                     return Err("native-record-capacity");
                 }
                 serde_json::from_slice(&bytes).map_err(|_| "corrupt-native-records")?
             }
         };
         records.validate()?;
+        records.encode()?;
         Ok(Self {
             directory: directory.into(),
             records,
@@ -145,6 +197,7 @@ impl Storage {
             origin.into(),
             Profile {
                 origin: origin.into(),
+                inline_completion_version: 1,
                 intent_epoch: 1,
                 catalog_view_id,
                 windows: BTreeMap::new(),
@@ -179,10 +232,7 @@ impl Storage {
         sync: impl FnOnce(&Path) -> std::io::Result<()>,
     ) -> Result<(), &'static str> {
         next.validate()?;
-        let bytes = serde_json::to_vec(&next).map_err(|_| "native-records-unavailable")?;
-        if bytes.len() as u64 > MAX_BYTES {
-            return Err("native-record-capacity");
-        }
+        let bytes = next.encode()?;
         let temporary = self
             .directory
             .join(format!(".chat-windows-{}.tmp", random_id()?));
@@ -226,6 +276,123 @@ mod tests {
             std::env::temp_dir().join(format!("openpane-chat-windows-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&path).unwrap();
         path
+    }
+    #[test]
+    fn legacy_profiles_at_capacity_upgrade_and_reopen_without_losing_catalog_ids() {
+        let dir = temp();
+        let profile = |origin: String, catalog_view_id: String| Profile {
+            origin,
+            catalog_view_id,
+            inline_completion_version: 0,
+            intent_epoch: 1,
+            windows: BTreeMap::new(),
+            intents: BTreeMap::new(),
+        };
+        let mut legacy = profile(String::new(), "c".into());
+        use crate::chat_window_records::{Action, CompletedPlacement, Phase, Reservation, Scope};
+        let source = Scope {
+            host_id: "host".into(),
+            conversation_id: "source".into(),
+        };
+        let target_scope = Scope {
+            host_id: "host".into(),
+            conversation_id: "target".into(),
+        };
+        legacy
+            .intent(
+                source.clone(),
+                "1:legacy".into(),
+                Action::Open {
+                    scope: target_scope.clone(),
+                    carry: false,
+                    passive: false,
+                },
+            )
+            .unwrap();
+        legacy
+            .assign_intent(
+                &source,
+                "1:legacy",
+                Reservation {
+                    scope: target_scope.clone(),
+                    view_id: "view".into(),
+                    label: "chat".into(),
+                    transition_id: "attempt".into(),
+                    creation_agent_id: None,
+                    phase: Phase::Assigned,
+                    binding_revision: None,
+                    writer_generation: None,
+                },
+                false,
+                None,
+            )
+            .unwrap();
+        legacy
+            .intents
+            .get_mut(&Profile::intent_key(&source, "1:legacy"))
+            .unwrap()
+            .result = Some(CompletedPlacement::Inline {
+            scope: target_scope.clone(),
+        });
+        let mut value = serde_json::to_value(legacy).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("inlineCompletionVersion");
+        value.as_object_mut().unwrap().remove("intentEpoch");
+        value["intents"][Profile::intent_key(&source, "1:legacy")]["action"]
+            .as_object_mut()
+            .unwrap()
+            .remove("carry");
+        let overhead = serde_json::to_vec(&value).unwrap().len() + 4;
+        let empty = serde_json::to_vec(&serde_json::json!({"schemaVersion":1,"profiles":{}}))
+            .unwrap()
+            .len();
+        let target = MAX_BYTES as usize - 1;
+        let count = (target - empty) / (4096 + overhead) - 1;
+        let mut profiles = serde_json::Map::new();
+        for index in 0..count {
+            let origin = format!("{index:08}{}", "x".repeat(2040));
+            let mut entry = value.clone();
+            entry["origin"] = serde_json::json!(origin);
+            profiles.insert(origin, entry);
+        }
+        let current =
+            serde_json::to_vec(&serde_json::json!({"schemaVersion":1,"profiles":profiles}))
+                .unwrap()
+                .len();
+        let remaining = target - current - 2 * overhead;
+        let first_len = remaining / 4;
+        let first_origin = "y".repeat(first_len);
+        let mut first = value.clone();
+        first["origin"] = serde_json::json!(first_origin);
+        profiles.insert(first_origin, first);
+        let origin = "z".repeat(remaining / 2 - first_len);
+        let mut entry = value;
+        entry["origin"] = serde_json::json!(origin);
+        if remaining % 2 == 1 {
+            entry["catalogViewId"] = serde_json::json!("cc");
+        }
+        profiles.insert(origin.clone(), entry);
+        let bytes = serde_json::to_vec(&serde_json::json!({"schemaVersion":1,"profiles":profiles}))
+            .unwrap();
+        assert_eq!(bytes.len(), target);
+        let path = dir.join("chat-windows-v1.json");
+        std::fs::write(&path, bytes).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let mut store = Storage::open(&dir).unwrap();
+        let catalog = store.profile(&origin).unwrap().catalog_view_id.clone();
+        store.ensure_profile(&origin).unwrap();
+        assert_eq!(store.profile(&origin).unwrap().inline_completion_version, 1);
+        assert_eq!(
+            store.profile(&origin).unwrap().windows[&target_scope.key()].phase,
+            Phase::InlineReady
+        );
+        drop(store);
+        let reopened = Storage::open(&dir).unwrap();
+        assert_eq!(reopened.profile(&origin).unwrap().catalog_view_id, catalog);
+        drop(reopened);
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn state_survives_restart_with_private_modes_and_one_writer() {
@@ -410,11 +577,27 @@ mod tests {
                     .intents
                     .get_mut(&Profile::intent_key(&source, "1:old"))
                     .unwrap()
-                    .result = Some(serde_json::json!({"kind":"inline","scope":scope}));
+                    .result = Some(crate::chat_window_records::CompletedPlacement::Inline {
+                    scope: scope.clone(),
+                });
                 Ok(())
             })
             .unwrap();
         drop(store);
+        let path = dir.join("chat-windows-v1.json");
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        for profile in legacy["profiles"].as_object_mut().unwrap().values_mut() {
+            assert_eq!(
+                profile
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("inlineCompletionVersion"),
+                Some(serde_json::json!(1))
+            );
+        }
+        std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+
         let mut reopened = Storage::open(&dir).unwrap();
         reopened.ensure_profile("origin").unwrap();
         assert_eq!(

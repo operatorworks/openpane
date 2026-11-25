@@ -5,6 +5,14 @@ import type { SavedView } from './view-state.js';
 import { decodeView } from './view-state.js';
 import { carryKey, carryPrefix, namedCarry } from './draft-carry-records.js';
 
+function holdsOnlyScope(saved: SavedView, scope: ConversationScope): boolean {
+  return (saved.route === null || sameScope(saved.route, scope))
+    && (saved.pendingCreation === null || sameScope(saved.pendingCreation.scope, scope));
+}
+function assignedView(saved: SavedView, scope: ConversationScope, creationAgentId: string | null): SavedView {
+  const pendingCreation = saved.pendingCreation ?? (saved.route === null && creationAgentId !== null ? { scope, agentId: creationAgentId } : null);
+  return { version: 2, route: saved.route ?? (pendingCreation ? null : scope), pendingCreation };
+}
 export const editorBindingKey = (scope: ConversationScope): IDBValidKey => ['editor-binding', scope.hostId, scope.conversationId];
 export const editorViewKey = (viewId: string): IDBValidKey => ['editor-view-binding', viewId];
 export function scopeImageRange(viewId: string, scope: ConversationScope): IDBKeyRange {
@@ -80,7 +88,7 @@ export function transferEditor(db: IDBDatabase, plan: HandoffPlan, transaction =
           && nativeEditorOriginMatches(parseNativeEditorOrigin(requests.nativeOrigin.result, scope), current)) throw new Error('This saved native editor needs an explicit reopen.');
         plan.assertCurrent?.();
         const source = decodeView(requests.sourceView.result, scope.hostId);
-        if (sourceViewId === targetViewId && (requests.targetDrafts.result > (requests.sourceDraft.result === undefined ? 0 : 1) || requests.targetImages.result !== requests.imageKeys.result.length || source.route && !sameScope(source.route, scope) || source.pendingCreation && !sameScope(source.pendingCreation.scope, scope))) throw new Error('This legacy view contains other conversations; use a distinct dedicated destination.');
+        if (sourceViewId === targetViewId && (requests.targetDrafts.result > (requests.sourceDraft.result === undefined ? 0 : 1) || requests.targetImages.result !== requests.imageKeys.result.length || !holdsOnlyScope(source, scope))) throw new Error('This legacy view contains other conversations; use a distinct dedicated destination.');
         if (sourceViewId !== targetViewId) {
           if (requests.carries.result.length > 1024) throw new Error('Draft carry history exceeds limits');
           if (requests.carryKeys.result.length !== requests.carries.result.length) throw new Error('Draft carry identity changed');
@@ -148,12 +156,11 @@ export function activateEditor(db: IDBDatabase, claim: EditorClaim): Promise<Edi
         const matchingOrigin = origin && previous?.kind === 'editing' && nativeEditorOriginMatches(origin, previous) ? origin : null;
         if (claim.purpose === 'passive' && matchingOrigin) throw new Error('This saved native editor needs an explicit reopen.');
         const saved = decodeView(view.result, claim.scope.hostId);
-        if (saved.route && !sameScope(saved.route, claim.scope) || saved.pendingCreation && !sameScope(saved.pendingCreation.scope, claim.scope)) throw new Error('Assigned view contains another conversation');
+        if (!holdsOnlyScope(saved, claim.scope)) throw new Error('Assigned view contains another conversation');
         if (claim.creation && saved.pendingCreation && saved.pendingCreation.agentId !== claim.creation.agentId) throw new Error('Saved creation belongs to a different agent');
         result = { schemaVersion: 1, kind: 'editing', scope: claim.scope, viewId: claim.viewId,
           revision: previous?.revision ?? 1, writerGeneration: next(previous?.writerGeneration ?? 0) };
-        const pending = saved.pendingCreation ?? (claim.creation && saved.route === null ? { scope: claim.scope, agentId: claim.creation.agentId } : null);
-        const nextSaved: SavedView = { version: 2, route: saved.route ?? (pending ? null : claim.scope), pendingCreation: pending };
+        const nextSaved = assignedView(saved, claim.scope, claim.creation?.agentId ?? null);
         store.put(result, editorBindingKey(claim.scope)); store.put(claim.scope, editorViewKey(claim.viewId));
         if (matchingOrigin?.label === claim.label) store.put({ ...matchingOrigin, revision: result.revision, writerGeneration: result.writerGeneration }, nativeEditorOriginKey(claim.scope));
         store.put(nextSaved, ['view', claim.viewId, claim.scope.hostId]);
@@ -192,10 +199,9 @@ export function recoverEditor(db: IDBDatabase, grant: Omit<EditorRecoveryGrant, 
           if (current.targetLabel !== grant.nativeLabel || current.transitionId !== grant.fromTransitionId) throw new Error('A different handoff owns this conversation');
         }
         const saved = decodeView(view.result, grant.scope.hostId);
-        if (saved.route && !sameScope(saved.route, grant.scope) || saved.pendingCreation && !sameScope(saved.pendingCreation.scope, grant.scope)) throw new Error('Recovery view contains another conversation');
+        if (!holdsOnlyScope(saved, grant.scope)) throw new Error('Recovery view contains another conversation');
         if (saved.pendingCreation && grant.creationAgentId !== null && saved.pendingCreation.agentId !== grant.creationAgentId) throw new Error('Recovery creation belongs to another agent');
-        const pending = saved.pendingCreation ?? (saved.route === null && grant.creationAgentId !== null ? { scope: grant.scope, agentId: grant.creationAgentId } : null);
-        store.put({ version: 2, route: saved.route ?? (pending ? null : grant.scope), pendingCreation: pending } satisfies SavedView, ['view', grant.viewId, grant.scope.hostId]);
+        store.put(assignedView(saved, grant.scope, grant.creationAgentId), ['view', grant.viewId, grant.scope.hostId]);
         result = { schemaVersion: 1, kind: 'handoff-reserved', scope: grant.scope, viewId: grant.viewId,
           revision: next(current?.revision ?? 0), writerGeneration: next(current?.writerGeneration ?? 0), transitionId: grant.transitionId, targetLabel: grant.targetLabel };
         store.put(result, editorBindingKey(grant.scope)); store.put(grant.scope, editorViewKey(grant.viewId));

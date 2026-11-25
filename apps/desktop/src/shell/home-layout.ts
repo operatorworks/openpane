@@ -19,5 +19,14 @@ export function homeLayout(composition: HomeComposition, destination: MainDestin
   };
   const balance = destination === 'home' && composition.kind === 'columns' ? composition.balance
     : visible[0] === 'conversation' ? 'primary-wide' : 'secondary-wide';
-  return { order, visible, columns, placement, balance, gridTemplateRows: `repeat(${columns ? destination === 'home' ? rows : 1 : visible.length}, minmax(0, 1fr))` };
+  return {
+    order,
+    surface: { 'data-home-destination': destination, 'data-home-columns': columns ? 'two' : 'one', 'data-home-balance': balance, 'aria-label': destination === 'home' ? 'Home' : 'Chats' },
+    heading: { hidden: destination !== 'home' },
+    hostStyle: { gridTemplateRows: `repeat(${columns ? destination === 'home' ? rows : 1 : visible.length}, minmax(0, 1fr))` },
+    pane: (kind: HomePaneKind) => {
+      const style = placement(kind);
+      return { hidden: !visible.includes(kind), style: { gridColumn: String(style.gridColumn ?? ''), gridRow: String(style.gridRow ?? '') } };
+    },
+  };
 }

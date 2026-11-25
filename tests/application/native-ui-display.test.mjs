@@ -72,7 +72,7 @@ test('overlapping child presence changes retry the latest subscription after a f
   const previous = globalThis.document; globalThis.document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
   let release, failed = false; const held = new Promise(resolve => { release = resolve; }), attempts = [];
   const child = new ChildUiConnection({ context: native, async request(command) {
-    if (command.kind === 'read-ui') return { state: state(null), localBuiltin: false, context: null };
+    if (command.kind === 'read-ui') return { state: state(null), localBuiltin: false, recoveryFloor: null, context: null };
     if (command.kind === 'presence') {
       attempts.push(command.display);
       if (attempts.length === 1) await held;
@@ -99,7 +99,7 @@ test('a native child advances only its scoped cache cursor, reports presence and
   const requests = []; let cached = null, subscription = null, wake;
   const port = { context: native, async listen(_name, handler) { wake = handler; return () => {}; }, async request(command) {
     requests.push(command);
-    if (command.kind === 'read-ui') return { state: cached, localBuiltin: false, context };
+    if (command.kind === 'read-ui') return { state: cached, localBuiltin: false, recoveryFloor: null, context };
     if (command.kind === 'presence') subscription = command.display;
     return { ok: true };
   } };
@@ -157,7 +157,7 @@ test('a native child retries an unconfirmed card cursor when the cached page is 
   let child; t.after(() => { child?.close(); globalThis.document = originalDocument; });
   let wake, cached = null, subscription = null, rejected = false; const attempts = [];
   const port = { context: native, async listen(_name, handler) { wake = handler; return () => {}; }, async request(command) {
-    if (command.kind === 'read-ui') return { state: cached, localBuiltin: false, context };
+    if (command.kind === 'read-ui') return { state: cached, localBuiltin: false, recoveryFloor: null, context };
     if (command.kind === 'presence') {
       attempts.push(command.display);
       if (command.display?.cursor?.kind === 'snapshot' && !rejected) { rejected = true; throw new Error('Presence reply lost'); }
@@ -210,7 +210,7 @@ test('a second explicit native restore arriving during the first save is process
   ui.getSnapshot = () => ({ deliveryContext: null });
   ui.restoreNative = async current => { calls.push(current); if (current === 1) await first; if (current === sequence) pending = false; return true; };
   const runtime = Object.create(WindowRuntime.prototype);
-  Object.assign(runtime, { context: { role: 'main' }, ui, port: { async request() { return { pending, sequence, hostId: 'host', profileId: 'profile' }; } }, nativeRecoverySeen: null, nativeRecoveryTask: null, snapshot: {}, listeners: new Set() });
+  Object.assign(runtime, { context: { role: 'main' }, ui, port: { async request() { return { initiator: null, pending, sequence, hostId: 'host', profileId: 'profile' }; } }, nativeRecoverySeen: null, nativeRecoveryTask: null, snapshot: {}, listeners: new Set() });
   const firstWake = runtime.recoveryWake(); await wait(() => calls.length === 1);
   sequence = 2; const secondWake = runtime.recoveryWake(); release(); await Promise.all([firstWake, secondWake]);
   assert.deepEqual(calls, [1, 2]); assert.equal(pending, false);
@@ -220,11 +220,12 @@ test('a wake that first sees a newer native sequence queues behind a manual rest
   const { WindowRuntime, MainUiConnection } = await import('../../apps/desktop/dist/application/window-runtime.js');
   const { UiConnection } = await import('../../apps/desktop/dist/application/ui-connection.js');
   const original = UiConnection.prototype.requestRecovery; let sequence = 0, pending = false, release; const gate = new Promise(resolve => { release = resolve; }), calls = [];
-  UiConnection.prototype.requestRecovery = async function(originator) { calls.push(originator.sequence); if (calls.length === 1) await gate; await this.recovered(originator); return true; };
+  UiConnection.prototype.requestRecovery = async function(originator) { calls.push(originator.sequence); if (calls.length === 1) await gate; await this.recovered(originator, 1, { hostId: 'host', profileId: 'profile' }); return { recorded: true, host: { hostId: 'host', profileId: 'profile' }, basis: 'receipt' }; };
   t.after(() => { release(); UiConnection.prototype.requestRecovery = original; });
   const port = { context: { liveRelay: true, role: 'main', brokerInstance: 'broker' }, async request(command) {
     if (command.kind === 'restore-builtin') { pending = true; return { sequence: ++sequence, hostId: 'host', profileId: 'profile' }; }
-    if (command.kind === 'read-recovery') return { pending, sequence, hostId: 'host', profileId: 'profile' };
+    if (command.kind === 'read-recovery') return { initiator: null, pending, sequence, hostId: 'host', profileId: 'profile' };
+    if (command.kind === 'scope-recovery') return { admission: 'accepted' };
     if (command.kind === 'confirm-recovery') { if (sequence === command.sequence) pending = false; return {}; }
     throw new Error(command.kind);
   } };
@@ -278,7 +279,7 @@ test('main reconciles a native restore already pending before its wake listener 
   const runtime = Object.create(WindowRuntime.prototype);
   Object.assign(runtime, { context: { role: 'main' }, started: false, closed: false, cleanups: [], recoveryDirty: false, nativeRecoverySeen: null, nativeRecoveryTask: null,
     configurePlacementTracking() {}, uiChanged() {}, async drive() {}, ui, controller: { subscribe() { return () => {}; }, async start() {}, getSnapshot: () => ({ lastPlacement: null }) },
-    port: { async listen(event) { if (event === 'openpane-ui-wakeup') await installed; return () => {}; }, async request(command) { if (command.kind === 'read-close') return { pending: false, attemptId: null }; assert.equal(command.kind, 'read-recovery'); reads++; return { pending, sequence: 3, hostId: 'host', profileId: 'profile' }; } } });
+    port: { async listen(event) { if (event === 'openpane-ui-wakeup') await installed; return () => {}; }, async request(command) { if (command.kind === 'read-close') return { pending: false, attemptId: null }; assert.equal(command.kind, 'read-recovery'); reads++; return { initiator: null, pending, sequence: 3, hostId: 'host', profileId: 'profile' }; } } });
   runtime.start(); await new Promise(resolve => setImmediate(resolve)); assert.equal(reads, 0);
   install(); await wait(() => restored.length === 1);
   assert.deepEqual(restored, [3]); assert.equal(pending, false); assert.equal(reads, 2);
@@ -353,7 +354,7 @@ test('a delayed child report cannot replace confirmation of a newer delivery', a
   let release, entered; const held = new Promise(resolve => { release = resolve; }), reporting = new Promise(resolve => { entered = resolve; });
   let cached = state(null), reports = 0;
   const child = new ChildUiConnection({ context: native, async request(command) {
-    if (command.kind === 'read-ui') return { state: cached, localBuiltin: false, context };
+    if (command.kind === 'read-ui') return { state: cached, localBuiltin: false, recoveryFloor: null, context };
     if (command.kind === 'report-ui' && reports++ === 0) { entered(); await held; }
     return { ok: true };
   } });

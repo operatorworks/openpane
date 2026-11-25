@@ -7,7 +7,7 @@ import type { DisplayRequest } from './ui-display-protocol.js';
 
 export const UI_FRAME_BYTES = 4 * 1024 * 1024;
 export class UiRefusal extends Error {
-  constructor(readonly code: 'invalid-input' | 'conflict' | 'stale-revision' | 'expired' | 'capacity' | 'unavailable' | 'not-found', message: string) { super(message); }
+  constructor(readonly code: 'invalid-input' | 'wrong-host' | 'conflict' | 'stale-revision' | 'expired' | 'capacity' | 'unavailable' | 'not-found', message: string) { super(message); }
 }
 export class UiTimeout extends UiRefusal {
   constructor(message: string) { super('unavailable', message); }
@@ -29,7 +29,6 @@ export type UiRequest = DisplayRequest
   | { readonly op: 'placement-failed'; readonly session: string; readonly envelope: DeliveryEnvelope; readonly transitionId: string; readonly reason: string }
   | { readonly op: 'state'; readonly after: number | null; readonly waitMs: number; readonly context: WindowContext; readonly visible: boolean; readonly presenceSequence: number; readonly nativePlacement?: boolean; readonly display?: DisplaySubscription | null; readonly liveChildren?: readonly string[] }
   | { readonly op: 'ack'; readonly session: string; readonly envelope: DeliveryEnvelope; readonly result: { readonly kind: 'rendered' } | { readonly kind: 'failed'; readonly reason: string } };
-export const parseDeliveryEnvelope = parseDelivery;
 export function parseUiRequest(value: unknown): UiRequest {
   const input = record(value);
   switch (input.op) {
@@ -107,7 +106,7 @@ export function parseUiRequest(value: unknown): UiRequest {
       if (result.kind === 'rendered') record(result, ['kind']);
       else if (result.kind === 'failed') record(result, ['kind', 'reason']);
       else throw new Error('Invalid rendering result');
-      return { op: input.op, session: identifier(input.session, 200), envelope: parseDeliveryEnvelope(input.envelope),
+      return { op: input.op, session: identifier(input.session, 200), envelope: parseDelivery(input.envelope),
         result: result.kind === 'rendered' ? { kind: 'rendered' } : { kind: 'failed', reason: identifier(result.reason, 500) } };
     }
     default: return parseDisplayRequest(value);

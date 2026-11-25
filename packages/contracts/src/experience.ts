@@ -143,7 +143,7 @@ export function parseExperience(value: unknown): ExperienceV2 {
   if (!Array.isArray(input.assets) || input.assets.length > EXPERIENCE_LIMITS.assets + 1) throw new Error('Invalid experience asset inventory');
   const names = new Set<string>();
   let imageBytes = 0, images = 0;
-  const assets = input.assets.map((value: unknown) => {
+  const assets = Array.from(input.assets, (value: unknown) => {
     const asset = record(value, ['name', 'mimeType', 'bytes', 'sha256']);
     const name = identifier(asset.name, 128);
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name) || names.has(name)) throw new Error('Invalid or duplicate experience asset name');

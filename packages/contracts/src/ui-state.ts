@@ -39,8 +39,9 @@ export interface NativePlacementTarget {
 }
 export type CohortSlot =
   | { readonly kind: 'document'; readonly context: WindowContext }
-  | { readonly kind: 'transition'; readonly transitionId: string; readonly source: Extract<WindowContext, { readonly role: 'main' }>;
-      readonly target: NativePlacementTarget | null; readonly resolved: Extract<WindowContext, { readonly role: 'chat' }> | null };
+  | ({ readonly kind: 'transition'; readonly transitionId: string; readonly source: Extract<WindowContext, { readonly role: 'main' }> } & (
+      | { readonly target: null; readonly resolved: null }
+      | { readonly target: NativePlacementTarget; readonly resolved: Extract<WindowContext, { readonly role: 'chat' }> | null }));
 export type VisualOutcome =
   | { readonly kind: 'pending'; readonly reason: string }
   | { readonly kind: 'rendered' }

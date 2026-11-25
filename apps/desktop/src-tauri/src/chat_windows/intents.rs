@@ -175,7 +175,7 @@ impl ChatWindows {
                         broker
                             .host
                             .as_ref()
-                            .is_some_and(|host| host.0 == reservation.scope.host_id)
+                            .is_some_and(|host| host.host_id == reservation.scope.host_id)
                             && !matches!(reservation.phase, Phase::TargetReady | Phase::InlineReady)
                             && !broker.opening.contains_key(&reservation.label)
                     })
@@ -184,7 +184,7 @@ impl ChatWindows {
             }
             Command::PendingIntents { incarnation } => {
                 self.require_main(broker, label, &incarnation)?;
-                let host = &broker.host.as_ref().ok_or("ui-context-not-bound")?.0;
+                let host = &broker.host.as_ref().ok_or("ui-context-not-bound")?.host_id;
                 let pending: Vec<&Intent> = broker
                     .storage
                     .profile(&self.origin)?
@@ -286,15 +286,7 @@ fn assignment_binding<'a>(
     let Some(binding) = binding else {
         return Ok(None);
     };
-    if binding.schema_version != 1
-        || binding.kind != "editing"
-        || binding.scope != *scope
-        || binding.view_id != view_id
-        || binding.revision == 0
-        || binding.writer_generation == 0
-        || binding.revision > 9_007_199_254_740_991
-        || binding.writer_generation > 9_007_199_254_740_991
-    {
+    if !binding.admits(scope, view_id) {
         return Err("binding-mismatch");
     }
     Ok(Some((

@@ -295,17 +295,23 @@ export function createConversationStore<E, P>(options: StoreOptions<E, P>): Conv
       if (closed) await ready;
       const incoming = file.bytes instanceof Uint8Array ? file.bytes.slice() : file.bytes.then(bytes => bytes.slice());
       void Promise.resolve(incoming).catch(() => {});
-      // The queued edit owns the file read, so close and placement drain it before releasing storage.
+      // Close and placement drain the admitted read until it completes or the user cancels it.
       const started = await editComposer(async () => {
         let bytes: Uint8Array, name: string;
+        let cancel = () => {};
         try {
-          bytes = await incoming;
-          if (signal?.aborted) return { done: Promise.resolve() };
+          const cancelled = new Promise<null>(resolve => { cancel = () => resolve(null); });
+          signal?.addEventListener('abort', cancel, { once: true });
+          if (signal?.aborted) cancel();
+          const read = await Promise.race([incoming, cancelled]);
+          if (read === null || signal?.aborted) return { done: Promise.resolve() };
+          bytes = read;
           if (!bytes.byteLength) throw new Error('This image file is empty.');
           if (bytes.byteLength > IMAGE_MAX_BYTES) throw new Error('Choose an image of at most 4 MB.');
           if (!imageType(bytes)) throw new Error('Choose a PNG or JPEG image.');
           name = imageName(file.name);
-        } catch (error) { if (local.image) throw error; return { error }; }
+        } catch (error) { if (signal?.aborted) return { done: Promise.resolve() }; if (local.image) throw error; return { error }; }
+        finally { signal?.removeEventListener('abort', cancel); }
         const image: ComposerImageRecord = immutable({ selectionId: createImageId(), uploadId: parseUploadId(createImageId()), name, byteLength: bytes.byteLength, attachment: null });
         await persist(revised({ image }), { selectionId: image.selectionId, bytes });
         return { done: closed ? Promise.resolve() : upload(image, bytes) };

@@ -40,10 +40,9 @@ interface ContinuationRecord<Owner extends ContinuationOwner> {
   /** Check again returned no view. A click zeroes this with the budgets; settling a view clears it. */
   checkFailed: boolean;
   stopped: boolean;
-  successorPlaced: boolean;
   follow: boolean;
   purpose: PlacementPurpose;
-  placement: Extract<ConversationOpenResult, { readonly kind: 'pending' }> | null;
+  placement: ConversationOpenResult | null;
 }
 interface ContinuationPort<Owner extends ContinuationOwner> {
   owner(): Owner | null;
@@ -62,7 +61,7 @@ interface ContinuationPort<Owner extends ContinuationOwner> {
   run(operation: (owner: Owner) => Promise<void>): Promise<void>;
 }
 function stalled<Owner extends ContinuationOwner>(record: ContinuationRecord<Owner>): boolean {
-  return record.checkFailed || record.failures >= CONTINUATION_READ_ATTEMPTS || record.moves >= CONTINUATION_MOVE_ATTEMPTS;
+  return record.checkFailed || record.placement?.kind === 'refused' || record.failures >= CONTINUATION_READ_ATTEMPTS || record.moves >= CONTINUATION_MOVE_ATTEMPTS;
 }
 
 /** Continuation polling, draft moves, and earlier segments. The application controller keeps catalog, route, and install order. */
@@ -96,6 +95,12 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
   function liveContinuation(record: ContinuationRecord<Owner>): boolean {
     return !record.stopped && continuation === record && port.owner() === record.owner && port.active()?.store === record.target.store;
   }
+  function placementBlocks(record: ContinuationRecord<Owner>): boolean {
+    return record.placement !== null && record.placement.kind !== 'refused';
+  }
+  function idle(record: ContinuationRecord<Owner>): boolean {
+    return liveContinuation(record) && !record.action && !placementBlocks(record) && !stalled(record);
+  }
   function boundaryAt(record: ContinuationRecord<Owner>, index: number): ContinuationBoundary | null {
     const link = record.chain[index];
     if (!link?.view?.predecessor) return null;
@@ -103,7 +108,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
   }
   function publishContinuation(record: ContinuationRecord<Owner>): void {
     if (continuation !== record) return;
-    port.publish({ continuation: { view: record.chain[0]?.view ?? null, action: record.action, error: record.error, stalled: stalled(record), arrived: record.arrived, boundary: boundaryAt(record, 0),
+    port.publish({ continuation: { view: record.chain[0]?.view ?? null, action: record.action, error: record.error, placement: record.placement, stalled: stalled(record), arrived: record.arrived, boundary: boundaryAt(record, 0),
       earlier: record.earlier, earlierError: record.earlierError,
       more: record.earlier.length < EARLIER_SEGMENT_LIMIT && record.chain[record.earlier.length + 1] !== undefined } });
   }
@@ -137,18 +142,18 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
   }
   /** Background reads; a click owns the record while its action runs. */
   async function refreshContinuation(record: ContinuationRecord<Owner>): Promise<void> {
-    if (!liveContinuation(record) || record.action || record.placement || record.successorPlaced || stalled(record)) return;
+    if (!idle(record)) return;
     let view: ContinuationView;
     try { view = await readContinuation(record.owner, record.target.scope); }
     catch {
-      if (!liveContinuation(record) || record.action || record.placement || record.successorPlaced || stalled(record)) return;
+      if (!idle(record)) return;
       if (++record.failures < CONTINUATION_READ_ATTEMPTS) pollContinuation(record);
       else publishContinuation(record);
       return;
     }
-    if (!liveContinuation(record) || record.action || record.placement || record.successorPlaced || stalled(record)) return;
+    if (!idle(record)) return;
     const successor = await settleContinuation(record, view);
-    if (!successor || !liveContinuation(record) || record.action || record.placement || record.successorPlaced || stalled(record)) return;
+    if (!successor || !idle(record)) return;
     if (!record.follow) return;
     if (port.busy()) pollContinuation(record);
     else void port.run(owner => moveToSuccessor(owner, record, successor));
@@ -161,7 +166,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     }
     stop();
     const record: ContinuationRecord<Owner> = { owner, target, chain: [{ scope: target.scope, view: null }], arrived, earlier: [], action: null,
-      error: '', earlierError: '', timer: undefined, delay: CONTINUATION_POLL_MS, failures: 0, moves: 0, checkFailed: false, stopped: false, successorPlaced: false, follow, purpose: 'passive', placement: null };
+      error: '', earlierError: '', timer: undefined, delay: CONTINUATION_POLL_MS, failures: 0, moves: 0, checkFailed: false, stopped: false, follow, purpose: 'passive', placement: null };
     continuation = record;
     publishContinuation(record);
     void refreshContinuation(record);
@@ -240,16 +245,15 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     try {
       const newest = await newestSegment(owner, successor);
       const permission = carry(owner, from.scope);
-      const opened = await port.install(owner, newest, 'continue', purpose, !permission.explicit);
+      const opened = await port.current(owner, port.install(owner, newest, 'continue', purpose, !permission.explicit));
       permission.placed(opened);
       port.publish({ lastPlacement: opened });
       if (opened.kind !== 'inline') {
         record = restoredRecord(record);
         if (!liveContinuation(record)) return;
         clearTimeout(record.timer);
-        record.placement = opened.kind === 'pending' ? opened : null;
-        record.checkFailed = opened.kind === 'refused';
-        record.action = null; record.successorPlaced = opened.kind === 'detached';
+        record.placement = opened;
+        record.action = null;
         record.error = opened.kind === 'detached' ? 'Continuation opened in its own window.' : opened.reason;
         publishContinuation(record); return;
       }
@@ -284,7 +288,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
   async function act(owner: Owner, target: OpenConversation, action: 'start' | 'check'): Promise<void> {
     port.requireTarget(owner, target);
     const record = continuation;
-    if (!record || !liveContinuation(record) || record.action || record.placement || record.successorPlaced) return;
+    if (!record || !liveContinuation(record) || record.action || placementBlocks(record)) return;
     clearTimeout(record.timer);
     record.action = action;
     record.follow = true;
@@ -295,6 +299,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     record.failures = 0;
     record.moves = 0;
     record.checkFailed = false;
+    record.placement = null;
     publishContinuation(record);
     let view: ContinuationView | null = null, error = '', lost = false;
     try { view = await readContinuation(owner, target.scope, action); }
@@ -351,7 +356,7 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
         publishContinuation(record);
         // A poll that fired during the load gave way to it without arming another. A move that started during the load keeps its action.
         const kind = record.chain[0]?.view?.successor?.kind;
-        if (record.action === null && !record.placement && !record.successorPlaced && (kind === 'starting' || kind === 'confirmed') && !stalled(record)) pollContinuation(record);
+        if (idle(record) && (kind === 'starting' || kind === 'confirmed')) pollContinuation(record);
       }
     }
   }
@@ -361,23 +366,14 @@ export function createContinuationSession<Owner extends ContinuationOwner>(port:
     if (key !== undefined && result.kind !== 'refused') consumeCarry(owner, key);
     const record = continuation;
     if (!record || record.placement !== expected || !liveContinuation(record)) return key !== undefined;
-    record.placement = null;
-    record.checkFailed = result.kind === 'refused';
-    record.successorPlaced = result.kind !== 'refused';
-    if (record.successorPlaced) consumeCarry(owner, carryKey(record.target.scope));
+    record.placement = result;
+    if (result.kind !== 'refused') consumeCarry(owner, carryKey(record.target.scope));
     record.error = result.kind === 'refused' ? result.reason : 'Continuation opened in its assigned editor.';
     publishContinuation(record); return true;
   }
   function pendingPlacement() {
     const record = continuation;
-    return record && liveContinuation(record) ? record.placement : null;
+    return record && liveContinuation(record) && record.placement?.kind === 'pending' ? record.placement : null;
   }
-  function trackPlacement(result: ConversationOpenResult): void {
-    const record = continuation;
-    if (result.kind !== 'pending' || !result.scope || !record?.placement?.scope || !sameScope(record.placement.scope, result.scope)) return;
-    const key = record.owner.pendingContinuationCarries.get(record.placement);
-    if (key !== undefined && liveContinuation(record)) record.owner.pendingContinuationCarries.set(result, key);
-    record.placement = result;
-  }
-  return { stop, watch, newestSegment, carry, moveDraft, act, readEarlier, settlePlacement, pendingPlacement, trackPlacement };
+  return { stop, watch, newestSegment, carry, moveDraft, act, readEarlier, settlePlacement, pendingPlacement };
 }

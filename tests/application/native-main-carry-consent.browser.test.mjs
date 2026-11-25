@@ -1,29 +1,8 @@
+import { fixture } from './native-runtime-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { build } from 'esbuild';
-import { chromium } from 'playwright';
 
-const root = fileURLToPath(new URL('../../', import.meta.url));
-async function fixture(t) {
-  const bundle = await build({ stdin: { contents: `import { continuationNotice } from './apps/desktop/src/application/continuation-copy.ts';
-    import { WindowCoordinator } from './apps/desktop/src/application/window-coordinator.ts';
-    import { WindowRuntime } from './apps/desktop/src/application/window-runtime.ts';
-    import { UiConnection } from './apps/desktop/src/application/ui-connection.ts';
-    import { ServiceConnectionLost, ServiceError } from '@openpane/client/service';
-    import { fixture as controllerFixture } from './tests/application/controller-fixture.mjs';
-    import { BrowserViewStorage } from './apps/desktop/src/application/browser-storage.ts';
-    import { createConversationStore } from './packages/client/src/index.ts';
-    import { transcriptProjection } from '@openpane/contracts/conversation';
-    import { recordNativeEditorOrigin } from './apps/desktop/src/application/native-editor-origin.ts';
-    import * as carries from './apps/desktop/src/application/draft-carry.ts';
-    Object.assign(globalThis, { continuationNotice, recordNativeEditorOrigin, ServiceError, ServiceConnectionLost, controllerFixture, WindowCoordinator, WindowRuntime, UiConnection, BrowserViewStorage, carries, createConversationStore, transcriptProjection });`, resolveDir: root }, bundle: true, write: false, format: 'iife' });
-  const browser = await chromium.launch(); t.after(() => browser.close());
-  const page = await browser.newPage();
-  await page.route('http://localhost/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Native placement policy</title>' }));
-  await page.goto('http://localhost/policy'); await page.addScriptTag({ content: bundle.outputFiles[0].text });
-  return page;
-}
+
 
 for (const mode of ['passive', 'check', 'catalog-open', 'continue', 'default-capture']) test(`main native capture preserves draft merge consent (${mode})`, async t => {
   const page = await fixture(t), result = await page.evaluate(async mode => {

@@ -1,3 +1,4 @@
+import { desktopSourceModules } from './desktop-source-modules.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -6,7 +7,7 @@ import { build } from 'esbuild';
 import { chromium } from 'playwright';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-async function fixture(t, { sharedViewState = false, captureRuntimeFactory = false } = {}) {
+async function fixture(t, { captureRuntimeFactory = false } = {}) {
   const bundle = await build({ stdin: { contents: `import { WindowCoordinator } from './apps/desktop/src/application/window-coordinator.ts';
     import { WindowRuntime } from './apps/desktop/src/application/window-runtime.ts';
     import { fixture as controllerFixture } from './tests/application/controller-fixture.mjs';
@@ -16,10 +17,10 @@ async function fixture(t, { sharedViewState = false, captureRuntimeFactory = fal
     import { recordNativeEditorOrigin, nativeEditorOrigin } from './apps/desktop/src/application/native-editor-origin.ts';
     import * as carries from './apps/desktop/src/application/draft-carry.ts';
     Object.assign(globalThis, { recordNativeEditorOrigin, nativeEditorOrigin, controllerFixture, WindowCoordinator, WindowRuntime, BrowserViewStorage, carries, createConversationStore, transcriptProjection });`, resolveDir: root }, bundle: true, write: false, format: 'iife', plugins: [
-    ...(sharedViewState ? [{ name: 'shared-controller-view-state', setup(builder) { builder.onResolve({ filter: /^\.\/view-state\.js$/ }, () => ({ path: `${root}apps/desktop/dist/application/view-state.js` })); } }] : []),
+    desktopSourceModules,
     ...(captureRuntimeFactory ? [{ name: 'actual-runtime-factory', setup(builder) {
       builder.onResolve({ filter: /^\.\/application-controller\.js$/ }, args => args.importer.endsWith('/window-runtime.ts') ? { path: 'captured-controller', namespace: 'runtime-factory' } : undefined);
-      builder.onLoad({ filter: /.*/, namespace: 'runtime-factory' }, () => ({ contents: `import { createApplicationController as create } from ${JSON.stringify(`${root}apps/desktop/dist/application/application-controller.js`)}; export function createApplicationController(deps) { globalThis.runtimeFactory = deps.ownedViewStorage; return create(deps); }`, resolveDir: root }));
+      builder.onLoad({ filter: /.*/, namespace: 'runtime-factory' }, () => ({ contents: `import { createApplicationController as create } from ${JSON.stringify(`${root}apps/desktop/src/application/application-controller.ts`)}; export function createApplicationController(deps) { globalThis.runtimeFactory = deps.ownedViewStorage; return create(deps); }`, resolveDir: root }));
       builder.onLoad({ filter: /\/window-runtime\.ts$/ }, async args => ({ contents: (await readFile(args.path, 'utf8')).replaceAll('window.location.reload()', 'globalThis.recordReload()'), loader: 'ts', resolveDir: `${root}apps/desktop/src/application` }));
     } }] : []),
   ] });
@@ -151,7 +152,7 @@ for (const scenario of ['inline-closed', 'separate-closed', 'separate-new', 'inl
       if(failedChain)chainFailed=true;
       if(failedLookup)f.behavior.agentLookup=async selected=>{if(selected.conversationId===target.conversationId)throw new Error('Recorded successor lookup failed');return f.descriptor();};
       coordinator.setPresentation(policy==='inline'?null:separate);f.connectionLost(new Error('Recorded reconnect'));const reconnecting=f.app.reconnect();
-      if(closeDuringAgent){await agentEntered;await childStore.dispose();childStore=null;await childOwner.close();childOwner=null;closed=true;releaseAgent();}
+      if(closeDuringAgent){await Promise.race([agentEntered,reconnecting.then(()=>{throw new Error('Reconnect completed without the successor agent lookup');})]);await childStore.dispose();childStore=null;await childOwner.close();childOwner=null;closed=true;releaseAgent();}
       await reconnecting;
       await f.app.getSnapshot().active?.store.captureDraft();await new Promise(resolve=>setTimeout(resolve,0));
       const after={active:f.app.getSnapshot().active?.scope??null,launches:launches.length,continuationReads:continuationReads-readsBefore,text:await readSource(),route:f.app.getSnapshot().saved.route,error:f.app.getSnapshot().error};
@@ -386,12 +387,15 @@ for (const point of ['held', 'pending']) test(`an explicit reopen claims a view 
     const catalog = await S.open(() => {}, 'openpane.catalogViewId'), catalogId = catalog.viewId; await catalog.saveNavigation('host', a); await catalog.close();
     const reservation = { scope: b, viewId: before.viewId, label: 'native-b', transitionId: 'completed-native-b', creationAgentId: null, phase: 'target-ready', bindingRevision: before.revision, writerGeneration: before.writerGeneration };
     const coordinator = new globalThis.WindowCoordinator({ context: { role: 'main', label: 'main', liveRelay: true }, async request(command) { if (command.kind === 'lookup') return command.scope.conversationId === b.conversationId ? { kind: 'closed', reservation } : { kind: 'absent' }; throw new Error(command.kind); } });
-    const f = globalThis.controllerFixture({ placement: coordinator }); let release, entered, blocked = false, editorLoads = 0;
+    const f = globalThis.controllerFixture({ placement: coordinator }); let release, entered, blocked = false, editorLoads = 0, startupComplete = false;
     const gate = new Promise(resolve => { release = resolve; }), began = new Promise(resolve => { entered = resolve; });
+    let delivered, openingRequested = false; const preflightDelivered = new Promise(resolve => { delivered = resolve; }), continuation = f.behavior.continuation;
+    f.behavior.continuation = async input => { const value = await continuation(input); if (openingRequested && input.scope.conversationId === b.conversationId) delivered(); return value; };
     Object.defineProperty(f.storage, 'catalogViewId', { get: () => catalogId }); f.storage.open = failure => S.reopen(catalogId, failure, { catalog: true });
     f.storage.reopen = async (viewId, failure, options) => { const binding = await S.bindingForView(viewId); if (!binding) return S.reopen(viewId, failure, { catalog: viewId === catalogId }); if (viewId === before.viewId) editorLoads++; return S.claimEditor({ scope: binding.scope, viewId, label: 'main', transitionId: binding.kind === 'handoff-reserved' ? binding.transitionId : null, creation: null, ...(options?.purpose ? { purpose: options.purpose } : {}) }, failure); };
     f.storage.readLegacyDraft = S.readLegacyDraft; f.storage.locate = async selected => (await S.locateEditor(selected)).binding?.viewId ?? null;
     f.storage.recoverClosedView = async (viewId, failure) => {
+      if (viewId === before.viewId && !startupComplete) return null;
       const owner = await S.reopenForRecovery(viewId, failure);
       if (owner && viewId === before.viewId && !blocked) {
         blocked = true;
@@ -402,9 +406,10 @@ for (const point of ['held', 'pending']) test(`an explicit reopen claims a view 
     };
     const bounded = (promise, message) => { let timer; return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), 2500); })]).finally(() => clearTimeout(timer)); };
     try {
-      await f.app.start(); await bounded(began, 'Frontend recovery did not acquire B'); const original = f.app.getSnapshot().active; await original.store.setDraft('Updated A while B recovery drains');
-      let settled = false; const opening = f.app.reopenView(before.viewId).then(value => { settled = true; return value; });
-      await new Promise(resolve => setTimeout(resolve, 25)); const during = { settled, active: f.app.getSnapshot().active?.scope, editorLoads, generation: (await S.locateEditor(b)).binding.writerGeneration };
+      await f.app.start(); startupComplete = true; await f.app.refreshMetadata(); await bounded(began, 'Frontend recovery did not acquire B'); const original = f.app.getSnapshot().active; await original.store.setDraft('Updated A while B recovery drains');
+      openingRequested = true; let settled = false; const opening = f.app.reopenView(before.viewId).then(value => { settled = true; return value; });
+      await bounded(preflightDelivered, 'Saved B preflight reply was not delivered');
+      await new Promise(resolve => { const channel = new MessageChannel(); channel.port1.onmessage = () => { channel.port1.close(); channel.port2.close(); resolve(); }; channel.port2.postMessage(null); }); const during = { settled, active: f.app.getSnapshot().active?.scope, editorLoads, generation: (await S.locateEditor(b)).binding.writerGeneration };
       release(); const opened = await bounded(opening, 'Explicit reopen did not drain recovery');
       const binding = (await S.locateEditor(b)).binding, origin = await globalThis.nativeEditorOrigin(binding), active = f.app.getSnapshot().active;
       const after = { opened, active: active?.scope, text: active?.store.getSnapshot().draft, editorLoads, generation: binding.writerGeneration, origin };
@@ -415,13 +420,13 @@ for (const point of ['held', 'pending']) test(`an explicit reopen claims a view 
   }, point);
   assert.equal(result.during.settled, false, JSON.stringify(result)); assert.equal(result.during.editorLoads, 0); assert.equal(result.during.generation, result.before.writerGeneration);
   assert.deepEqual(result.during.active, { hostId: 'host', conversationId: 'recovery-owner-a' });
-  assert.equal(result.after.opened, true, JSON.stringify(result)); assert.equal(result.after.editorLoads, 1); assert.ok(result.after.generation > result.before.writerGeneration); assert.equal(result.after.origin, null);
+  assert.equal(result.after.opened, true, JSON.stringify(result)); assert.equal(result.after.editorLoads, 1); assert.equal(result.after.generation, result.before.writerGeneration + 1); assert.equal(result.after.origin, null);
   assert.deepEqual(result.after.active, { hostId: 'host', conversationId: 'recovery-owner-b' }); assert.equal(result.after.text, 'Exact native B bytes'); assert.deepEqual(result.restarted, result.after.active);
   assert.equal(result.sourceText, 'Updated A while B recovery drains'); assert.equal(result.error, ''); assert.equal(result.sent, 0);
 });
 
 test('Open remaining saved work explicitly opens its actual predecessor successor', { timeout: 10000 }, async t => {
-  const page = await fixture(t, { sharedViewState: true }), result = await page.evaluate(async () => {
+  const page = await fixture(t, {}), result = await page.evaluate(async () => {
     const S = globalThis.BrowserViewStorage, copy = { hostId: 'host', conversationId: 'independent-copy' }, earlier = { hostId: 'host', conversationId: 'remaining-earlier' }, target = { hostId: 'host', conversationId: 'remaining-native' };
     const legacy = await S.reopen('remaining-legacy', () => {}); await legacy.saveView('host', { version: 2, route: earlier, pendingCreation: null });
     for (const [scope, text] of [[copy, 'Independent copied bytes'], [earlier, 'Remaining predecessor bytes']]) await legacy.drafts(() => {}).save({ version: 3, scope, draft: text, draftRevision: 1, outbox: [], frontendSends: [], image: null }); await legacy.close();
@@ -467,7 +472,7 @@ test('a real legacy successor migration preserves the retained predecessor store
 });
 
 for (const action of ['reopen', 'remaining', 'prepare-abort', 'other-document']) test(`independent work remains recoverable during ${action} inspection and journal repair`, { timeout: 12000 }, async t => {
-  const page = await fixture(t, { sharedViewState: true }), result = await page.evaluate(async action => {
+  const page = await fixture(t, {}), result = await page.evaluate(async action => {
     const S = globalThis.BrowserViewStorage, a = { hostId: 'host', conversationId: 'inspect-active' }, x = { hostId: 'host', conversationId: 'inspect-copy' }, p = { hostId: 'host', conversationId: 'inspect-pending' }, b = { hostId: 'host', conversationId: 'inspect-native' };
     const seed = async (scope, viewId, label, text) => { const owner = await S.claimEditor({ scope, viewId, label, transitionId: null, creation: { agentId: 'default' } }, () => {}); await owner.saveView('host', { version: 2, route: scope, pendingCreation: null }); const drafts = owner.drafts(() => {}); await drafts.load(scope); await drafts.save({ version: 3, scope, draft: text, draftRevision: 1, outbox: [], frontendSends: [], image: null }); return owner; };
     const activeSeed = await seed(a, 'inspect-active-view', 'main', 'Exact current A'); await activeSeed.close();
@@ -531,7 +536,7 @@ test('read-only saved-draft inspection cannot refuse an assigned native child cl
 });
 
 test('a native child can reclaim its editor after close completion fails while main reopens its saved view', { timeout: 12000 }, async t => {
-  const page = await fixture(t, { sharedViewState: true, captureRuntimeFactory: true }), result = await page.evaluate(async () => {
+  const page = await fixture(t, { captureRuntimeFactory: true }), result = await page.evaluate(async () => {
     const S = globalThis.BrowserViewStorage, a = { hostId: 'host', conversationId: 'main-before-child-reload' }, b = { hostId: 'host', conversationId: 'native-child-reload' }, catalogId = 'native-reopen-catalog'; let reloads = 0, focused = 0, resumed = null;
     globalThis.recordReload = () => { reloads++; };
     const seed = async (scope, viewId, label, text) => { const owner = await S.claimEditor({ scope, viewId, label, transitionId: null, creation: { agentId: 'default' } }, () => {}); await owner.saveView('host', { version: 2, route: scope, pendingCreation: null }); const drafts = owner.drafts(() => {}); await drafts.load(scope); await drafts.save({ version: 3, scope, draft: text, draftRevision: 1, outbox: [], frontendSends: [], image: null }); return owner; };

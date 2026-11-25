@@ -14,6 +14,11 @@ export type DraftCarry = CarryIdentity & (
 );
 export const carryKey = (source: ConversationScope, requestId: string): IDBValidKey => ['draft-carry', source.hostId, source.conversationId, requestId];
 export const carryTargetKey = (source: ConversationScope, requestId: string, target: ConversationScope): IDBValidKey => ['draft-carry-target', target.hostId, target.conversationId, source.hostId, source.conversationId, requestId];
+export const keptDraftKey = (source: ConversationScope, target: ConversationScope): IDBValidKey => ['draft-carry-kept', source.hostId, source.conversationId, target.conversationId];
+export function keptDraftCarry(carry: Extract<DraftCarry, { readonly kind: 'offered' | 'applied' | 'refused' }>): Extract<DraftCarry, { readonly kind: 'cancelled' }> {
+  const { expected, ...identity } = carry;
+  return { ...identity, kind: 'cancelled', outcome: 'kept-at-source', retainedText: expected.text };
+}
 export const carryPrefix = (parts: readonly IDBValidKey[]) => IDBKeyRange.bound([...parts], [...parts, []], false, true);
 export function parseCarry(value: unknown): DraftCarry {
   const input = record(value);
@@ -57,7 +62,7 @@ export function keyedCarry(value: unknown, savedKey: unknown): DraftCarry {
 }
 export function readKeptDraft(store: IDBObjectStore, source: ConversationScope, target: ConversationScope, read: (kept: boolean) => void, fail: (error: unknown) => void): void {
   if (source.hostId !== target.hostId || sameScope(source, target)) throw new Error('Invalid draft carry target');
-  const markerKey = ['draft-carry-kept', source.hostId, source.conversationId, target.conversationId], marker = store.get(markerKey), found = store.getKey(markerKey); let pending = 2;
+  const markerKey = keptDraftKey(source, target), marker = store.get(markerKey), found = store.getKey(markerKey); let pending = 2;
   const inspect = () => {
     try {
       if (found.result !== undefined && marker.result !== true) throw new Error('The saved Keep decision is unreadable. Its original record is preserved.');
@@ -146,8 +151,8 @@ export function commitCarriedDraft(store: IDBObjectStore, viewId: string, record
       const carry = namedCarry(request.result, transfer.source, transfer.requestId);
       if (carry.kind === 'cancelled' || carry.kind === 'settled' || carry.kind === 'refused') { result(false); return; }
       const keepAtSource = () => {
-        store.put({ version: 1, kind: 'cancelled', source: carry.source, sourceViewId: carry.sourceViewId, requestId: carry.requestId,
-          target: carry.target, outcome: 'kept-at-source', retainedText: carry.expected.text, ...(carry.emptyOnly ? { emptyOnly: true } : {}) } satisfies DraftCarry, carryKey(carry.source, carry.requestId));
+        store.put(keptDraftCarry(carry), carryKey(carry.source, carry.requestId));
+        if (carry.target) store.put(true, keptDraftKey(carry.source, carry.target));
         if (carry.target) store.delete(carryTargetKey(carry.source, carry.requestId, carry.target));
         result(false);
       };

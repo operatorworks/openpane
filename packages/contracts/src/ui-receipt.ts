@@ -3,6 +3,9 @@ import type { ApplyReceipt, CohortSlot, NativePlacementTarget, PlacementOutcome,
 import { count, hex, identifier, record } from './decode.js';
 import { parseScope, sameScope } from './durable.js';
 
+export const isUiRecoveryRequest = (requestId: string): boolean => /^recovery:/iu.test(requestId);
+export const receiptCohortLimit = (requestId: string): number => isUiRecoveryRequest(requestId) ? 64 : 32;
+
 export function parseNativePlacementTarget(value: unknown): NativePlacementTarget {
   const input = record(value, ['scope', 'viewId', 'label', 'nativeTransitionId', 'bindingRevision']);
   const bindingRevision = count(input.bindingRevision);
@@ -19,8 +22,8 @@ export function parseCohortSlot(value: unknown): CohortSlot {
   const target = input.target === null ? null : parseNativePlacementTarget(input.target), resolved = input.resolved === null ? null : parseWindowContext(input.resolved);
   if (target && target.scope.hostId !== source.hostId) throw new Error('Foreign placement target');
   if (resolved && (resolved.role !== 'chat' || !target || !sameScope(target.scope, resolved.scope) || target.label !== resolved.label || target.viewId !== resolved.viewId || resolved.brokerInstance !== source.brokerInstance || resolved.profileId !== source.profileId)) throw new Error('Placement target identity mismatch');
-  if (resolved && resolved.role !== 'chat') throw new Error('Invalid placement target role');
-  return { kind: 'transition', transitionId: identifier(input.transitionId, 200), source, target, resolved };
+  const slot = { kind: 'transition', transitionId: identifier(input.transitionId, 200), source } as const;
+  return target === null ? { ...slot, target: null, resolved: null } : { ...slot, target, resolved };
 }
 export function parseVisualOutcome(value: unknown): VisualOutcome {
   const input = record(value);
@@ -38,14 +41,14 @@ export function parsePlacementOutcome(value: unknown): PlacementOutcome {
 export function parseApplyReceipt(value: unknown): ApplyReceipt {
   const input = record(value, ['requestId', 'deliveryGeneration', 'selectionRevision', 'digest', 'requestDigest', 'participants']);
   const envelope = parseDelivery({ requestId: input.requestId, deliveryGeneration: input.deliveryGeneration, selectionRevision: input.selectionRevision, digest: input.digest });
-  const cohortLimit = envelope.requestId.startsWith('recovery:') ? 64 : 32;
+  const cohortLimit = receiptCohortLimit(envelope.requestId);
   if (!Array.isArray(input.participants) || input.participants.length > cohortLimit) throw new Error('Invalid receipt cohort');
-  const participants = input.participants.map(value => {
+  const participants = Array.from(input.participants, value => {
     const input = record(value, ['slot', 'visual', 'placement']), slot = parseCohortSlot(input.slot), placement = parsePlacementOutcome(input.placement);
     if (slot.kind === 'transition' && 'transitionId' in placement && placement.transitionId !== slot.transitionId) throw new Error('Placement outcome names another transition');
     if (slot.kind === 'transition' && placement.kind === 'ready') {
       if (!slot.resolved) throw new Error('Ready placement has no resolved child document');
-      if (!slot.target || placement.bindingRevision !== slot.target.bindingRevision) throw new Error('Ready placement does not match its reserved binding');
+      if (placement.bindingRevision !== slot.target.bindingRevision) throw new Error('Ready placement does not match its reserved binding');
     }
     const visual = parseVisualOutcome(input.visual);
     if (slot.kind === 'transition' && !slot.resolved && (slot.target !== null || placement.kind !== 'unchanged') && visual.kind === 'rendered') throw new Error('Rendered transition has no painted document');

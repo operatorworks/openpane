@@ -58,7 +58,7 @@ export async function runHostMain(uiEntry: string): Promise<void> {
     ];
     const setupCapability = process.env.OPENPANE_SETUP_CAPABILITY ?? '';
     delete process.env.OPENPANE_SETUP_CAPABILITY;
-    const host = await startBrowserHost({ directory, port, hostArtifactDirectory: dirname(uiEntry), hostSdkDirectory: dirname(uiEntry), uiCli: { node: process.execPath, entry: uiEntry, directory }, observability: readObservabilityConfiguration(process.env), assetsDirectory: values.assets ? resolve(values.assets) : fileURLToPath(new URL('../../desktop/web-dist-browser/', pathToFileURL(uiEntry))),
+    const host = await startBrowserHost({ directory, port, hostArtifactDirectory: dirname(uiEntry), hostSdkDirectory: dirname(uiEntry), uiCli: { node: process.execPath, entry: uiEntry }, observability: readObservabilityConfiguration(process.env), assetsDirectory: values.assets ? resolve(values.assets) : fileURLToPath(new URL('../../desktop/web-dist-browser/', pathToFileURL(uiEntry))),
       ...(extensions === undefined ? {} : { extensions }),
       ...(values['refresh-builder'] === undefined ? {} : { refreshBuilder: values['refresh-builder'] }),
       ...(command === 'desktop' ? { setupCapability } : {}),

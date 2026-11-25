@@ -139,3 +139,14 @@ test('home composition and v2 presentation agree with published schema including
     const value = experience(); mutate(value); assert.equal(validateExperience(value), false); assert.throws(() => parseExperience(value));
   }
 });
+
+const sparse = () => { const values = []; values.length = 1; return values; };
+for (const field of ['assets', 'participants', 'series', 'points']) test(`visual protocol rejects sparse ${field} before returning validated data`, () => {
+  if (field === 'assets') assert.throws(() => parseExperience({ ...experience(),assets:sparse() }));
+  else if (field === 'participants') assert.throws(() => parseApplyReceipt({ requestId:'1:sparse-receipt',deliveryGeneration:1,selectionRevision:1,digest:null,requestDigest:'b'.repeat(64),participants:sparse() }));
+  else {
+    const value = metrics();
+    if (field === 'series') value.series = sparse(); else value.series[0].points = sparse();
+    assert.throws(() => parseMetricsCard(value));
+  }
+});

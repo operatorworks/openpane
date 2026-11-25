@@ -24,6 +24,14 @@ export function displayMetadataReservation(scope: ConversationScope, publication
   return Buffer.byteLength(canonicalJson(key)) + 256 + (key.mode === 'query' ? Buffer.byteLength(canonicalJson(maxReceipt(scope, publicationId))) : 0);
 }
 export const DISPLAY_REMOVAL_ENTRIES = 2, DISPLAY_REMOVAL_OVERHEAD = 1024;
+export function displayMetadataUsage(db: DatabaseSync): { readonly entries: number; readonly bytes: number } {
+  const row = db.prepare(`SELECT coalesce(sum(entries),0) AS count,coalesce(sum(bytes),0) AS bytes FROM (
+    SELECT 1+CASE WHEN reserved_event_bytes>0 THEN 1 ELSE 0 END+CASE WHEN state IN ('running','published','failed','interrupted') THEN ${DISPLAY_REMOVAL_ENTRIES} ELSE 0 END AS entries,
+      metadata_bytes+reserved_event_bytes+CASE WHEN state IN ('running','published','failed','interrupted') THEN ${DISPLAY_REMOVAL_ENTRIES}*(length(CAST(scope AS BLOB))+length(CAST(id AS BLOB)))+${DISPLAY_REMOVAL_OVERHEAD} ELSE 0 END AS bytes FROM ui_display_keys
+    UNION ALL SELECT 1,bytes FROM ui_display_events UNION ALL SELECT 1,bytes FROM ui_display_removals)`).get();
+  if (!row) throw new Error('Display metadata usage unavailable');
+  return { entries: count(row.count), bytes: count(row.bytes) };
+}
 export function displayRemovalReservation(scope: ConversationScope, publicationId: string): number {
   return DISPLAY_REMOVAL_ENTRIES * (Buffer.byteLength(displayScope(scope)) + Buffer.byteLength(publicationId)) + DISPLAY_REMOVAL_OVERHEAD;
 }

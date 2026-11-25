@@ -63,6 +63,13 @@ export function createFrontendSends(deps: {
   const writers = new Map<string, Set<{ retired: boolean }>>();
   const entries = new Map<string, Entry>(), provisional = new Map<object, ScopeHold & { retained: RetainedFrontendTools; borrow: CaptureBorrow }>();
   const recent = new Map<string, CapturedSend & { ownerId: string }>();
+  function releaseProvisional(token: object): boolean {
+    const item = provisional.get(token);
+    if (!item) return false;
+    provisional.delete(token);
+    try { item.retained.release(); } finally { item.borrow.release(); }
+    return true;
+  }
   const keyFor = (viewId: string, command: OfferedCommand) => canonicalJson([viewId, command.scope, command.clientCommandId]);
   const matches = (reference: FrontendRecoveryReference) => authority.session !== null && reference.ownerId === authority.session.principalId && reference.command.scope.hostId === authority.session.hostId;
   const held = (viewId: string, scope: ConversationScope | undefined, item: ScopeHold) => item.viewId === viewId && (!scope || sameScope(scope, item.scope));
@@ -163,8 +170,7 @@ export function createFrontendSends(deps: {
         schedule(); return;
       }
       const transition = become(null); recent.clear(); clearTimeout(timer); syncRows();
-      for (const item of provisional.values()) { item.retained.release(); item.borrow.release(); }
-      provisional.clear();
+      for (const token of provisional.keys()) releaseProvisional(token);
       await Promise.allSettled([...entries.values()].map(unavailable));
       if (closed || transition.lifetime.signal.aborted) return;
       become(metadata ? { ...metadata, connection } : null);
@@ -191,7 +197,7 @@ export function createFrontendSends(deps: {
           }
           let borrow: CaptureBorrow;
           try { borrow = capture.borrow(); } catch (error) { retained.release(); throw error; }
-          let ownership: 'provisional' | 'transferred' | 'released' = 'provisional';
+          let settled = false;
           const captureToken = {}, ownerId = session.principalId;
           provisional.set(captureToken, { viewId, scope, retained, borrow });
           try {
@@ -205,18 +211,24 @@ export function createFrontendSends(deps: {
             return {
               ownerId, offer: { platform: 'desktop', tools },
               commit(command, journal) {
-                const acquired = provisional.delete(captureToken);
+                const acquired = provisional.has(captureToken);
                 const valid = !closed && acquired && !current.lifetime.signal.aborted && !failedViews.has(viewId);
-                if (!valid) { retained.release(); return false; }
+                if (!valid) { releaseProvisional(captureToken); return false; }
                 const reference: FrontendRecoveryReference = { command, ownerId, state: 'retained' };
                 const key = keyFor(viewId, command);
-                ownership = 'transferred';
+                provisional.delete(captureToken);
+                settled = true;
                 entries.set(key, { key, viewId, reference, journal, retained, borrow, recoveryNeeded, row: Object.freeze({ key, viewId, command, status: 'waiting', binding: null }), pending: false });
                 syncRows(); schedule(); return true;
               },
-              release() { if (ownership !== 'provisional') return; ownership = 'released'; provisional.delete(captureToken); retained.release(); borrow.release(); recoveryNeeded(); },
+              release() {
+                if (settled) return;
+                settled = true;
+                releaseProvisional(captureToken);
+                recoveryNeeded();
+              },
             };
-          } catch (error) { provisional.delete(captureToken); retained.release(); borrow.release(); throw error; }
+          } catch (error) { releaseProvisional(captureToken); throw error; }
         },
         canRetry(command) {
           const entry = entries.get(keyFor(viewId, command));
@@ -233,20 +245,19 @@ export function createFrontendSends(deps: {
     quiesceView(viewId: string): void { for (const writer of writers.get(viewId) ?? []) writer.retired = true; },
     async releaseView(viewId: string): Promise<void> {
       for (const writer of writers.get(viewId) ?? []) writer.retired = true;
-      for (const [key, item] of provisional) if (item.viewId === viewId) { item.retained.release(); item.borrow.release(); provisional.delete(key); }
+      for (const [key, item] of provisional) if (item.viewId === viewId) releaseProvisional(key);
       await Promise.all([...entries.values()].filter(entry => entry.viewId === viewId).map(unavailable));
     },
     resumeView(viewId: string): void { for (const writer of writers.get(viewId) ?? []) writer.retired = false; },
     storageFailed(viewId: string): void {
       failedViews.add(viewId);
       for (const [key, entry] of entries) if (entry.viewId === viewId) { entries.delete(key); entry.retained.release(); entry.borrow.release(); remember(viewId, entry.reference); }
-      for (const [key, item] of provisional) if (item.viewId === viewId) { item.retained.release(); item.borrow.release(); provisional.delete(key); }
+      for (const [key, item] of provisional) if (item.viewId === viewId) releaseProvisional(key);
       syncRows(); schedule();
     },
     async dispose(): Promise<void> {
       closed = true; become(null); recent.clear(); clearTimeout(timer); syncRows();
-      for (const item of provisional.values()) { item.retained.release(); item.borrow.release(); }
-      provisional.clear();
+      for (const token of provisional.keys()) releaseProvisional(token);
       await Promise.allSettled([...entries.values()].map(unavailable));
     },
   };

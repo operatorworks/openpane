@@ -1,14 +1,8 @@
+import { fixture } from './native-runtime-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { build } from 'esbuild';
-import { chromium } from 'playwright';
 
-const root = fileURLToPath(new URL('../../', import.meta.url));
-async function fixture(t) {
-  const bundle = await build({ stdin: { contents: `import { fixture as controllerFixture } from './tests/application/controller-fixture.mjs'; import { BrowserViewStorage } from './apps/desktop/src/application/browser-storage.ts'; import { WindowCoordinator } from './apps/desktop/src/application/window-coordinator.ts'; import { ServiceConnectionLost } from '@openpane/client/service'; import { WindowRuntime } from './apps/desktop/src/application/window-runtime.ts'; import { createConversationStore } from './packages/client/src/index.ts'; import { transcriptProjection } from '@openpane/contracts/conversation'; import * as carries from './apps/desktop/src/application/draft-carry.ts'; Object.assign(globalThis, { controllerFixture, BrowserViewStorage, WindowCoordinator, ServiceConnectionLost, WindowRuntime, createConversationStore, transcriptProjection, carries });`, resolveDir: root }, bundle: true, write: false, format: 'iife', plugins: [{ name: 'one-controller-module', setup(builder) { builder.onResolve({ filter: /application-controller\.js$/ }, () => ({ path: `${root}apps/desktop/src/application/application-controller.ts` })); } }] });
-  const browser = await chromium.launch(); t.after(() => browser.close()); const page = await browser.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message)); t.after(() => assert.deepEqual(errors, [])); await page.route('http://localhost/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Continuation consent</title>' })); await page.goto('http://localhost/consent'); await page.addScriptTag({ content: bundle.outputFiles[0].text }); return page;
-}
+
 
 for (const scenario of [
   { prior: true, timing: 'before-reconnect', identity: 'same' },

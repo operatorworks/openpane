@@ -20,7 +20,7 @@ impl Geometry {
         identifier(&self.title, 200)
     }
 }
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UiRecoveryContext {
     pub host_id: String,
@@ -62,6 +62,7 @@ pub enum Command {
         incarnation: String,
         scope: Scope,
         expected_transition_id: String,
+        expected_context: UiRecoveryContext,
     },
     Lookup {
         incarnation: String,
@@ -175,14 +176,29 @@ pub enum Command {
     #[serde(rename_all = "camelCase")]
     RestoreBuiltin {
         incarnation: String,
+        request_id: Option<String>,
         expected_context: Option<UiRecoveryContext>,
     },
     ReadRecovery {
         incarnation: String,
     },
+    ReadRecoveryCancellation {
+        incarnation: String,
+        sequence: u64,
+    },
+    #[serde(rename_all = "camelCase")]
+    ScopeRecovery {
+        incarnation: String,
+        sequence: u64,
+        expected_context: UiRecoveryContext,
+        submitted: bool,
+    },
+    #[serde(rename_all = "camelCase")]
     ConfirmRecovery {
         incarnation: String,
         sequence: u64,
+        delivery_generation: u64,
+        expected_context: UiRecoveryContext,
     },
     #[serde(rename_all = "camelCase")]
     CloseCancelled {
@@ -214,4 +230,15 @@ pub struct Binding {
     pub(super) view_id: String,
     pub(super) revision: u64,
     pub(super) writer_generation: u64,
+}
+
+impl Binding {
+    pub(super) fn admits(&self, scope: &Scope, view_id: &str) -> bool {
+        self.schema_version == 1
+            && self.kind == "editing"
+            && self.scope == *scope
+            && self.view_id == view_id
+            && (1..=MAX_SAFE_INTEGER).contains(&self.revision)
+            && (1..=MAX_SAFE_INTEGER).contains(&self.writer_generation)
+    }
 }

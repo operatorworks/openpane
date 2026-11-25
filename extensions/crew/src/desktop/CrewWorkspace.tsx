@@ -98,17 +98,20 @@ export function CrewWorkspace(props: WorkspaceViewProps) {
   const sidebarId = `crew-members-${installation?.installationId ?? 'none'}`;
   /** open and create reject only outside this namespace; any other failure is in the host status strip. */
   const opening = useRef<object | null>(null);
-  useEffect(() => { opening.current = null; setNotice(''); }, [choiceKey, activeMember, adding, available]);
+  const [openingConversation, setOpeningConversation] = useState(false);
+  const noticeOwner = useRef<object | null>(null);
+  useEffect(() => { noticeOwner.current = null; setNotice(''); }, [choiceKey, activeMember, adding, available]);
   function attempt(action: () => ReturnType<WorkspaceViewProps['open']>) {
-    if (opening.current) return;
-    const token = {}; opening.current = token;
-    setNotice('');
+    if (opening.current) return false;
+    const token = {}; opening.current = token; noticeOwner.current = token;
+    setNotice(''); setOpeningConversation(true);
     void action().then(result => {
-      if (opening.current !== token) return;
+      if (noticeOwner.current !== token) return;
       if (result.kind === 'inline') setNotice('');
       if (result.kind === 'detached') setNotice('Conversation opened in its own window.');
       else if (result.kind === 'refused' || result.kind === 'pending') setNotice(result.reason);
-    }).catch(() => { if (opening.current === token) setNotice('That conversation could not be opened. Refresh and try again.'); }).finally(() => { if (opening.current === token) opening.current = null; });
+    }).catch(() => { if (noticeOwner.current === token) setNotice('That conversation could not be opened. Refresh and try again.'); }).finally(() => { if (opening.current === token) { opening.current = null; setOpeningConversation(false); } });
+    return true;
   }
 
   if (!installation) {
@@ -147,8 +150,8 @@ export function CrewWorkspace(props: WorkspaceViewProps) {
               </button>
               {selected && own.length > 0 && <ul className="crew-conversation-list" aria-label={`Conversations with ${item.label}`}>
                 {own.map(entry => <li key={entry.scope.conversationId}>
-                  <button type="button" className="crew-conversation-row" aria-current={props.selected?.conversationId === entry.scope.conversationId ? 'page' : undefined}
-                    onClick={() => { attempt(() => props.open(entry.scope)); setDrawer(false); }}>{entry.preview ?? 'New conversation'}</button>
+                  <button type="button" className="crew-conversation-row" disabled={openingConversation} aria-current={props.selected?.conversationId === entry.scope.conversationId ? 'page' : undefined}
+                    onClick={() => { if (attempt(() => props.open(entry.scope))) setDrawer(false); }}>{entry.preview ?? 'New conversation'}</button>
                 </li>)}
               </ul>}
             </li>;
@@ -183,7 +186,7 @@ export function CrewWorkspace(props: WorkspaceViewProps) {
                   : props.conversations.hasMore
                     ? `No conversation with ${member.label} is on the loaded pages.`
                     : `No conversation with ${member.label} yet.`}</p>
-                <button type="button" disabled={member.availability.kind !== 'ready'} onClick={() => attempt(() => props.create(member.id))}>Start conversation</button>
+                <button type="button" disabled={openingConversation || member.availability.kind !== 'ready'} onClick={() => attempt(() => props.create(member.id))}>Start conversation</button>
               </div>}
         </div>
         {panel && member && <aside className="crew-details" aria-label="Member details">

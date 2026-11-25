@@ -1,5 +1,5 @@
 import { UiActionsContext, VisualContext, ExperienceBootstrapContext, ExperienceCommittedContext, type ExperienceBootstrap, type VisualSelection } from './experience-state.js';
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { ThemeScope } from '@openpane/ui-primitives/desktop';
 import { canonicalJson, homePaneOrder, type UiClientSnapshot } from '@openpane/contracts';
@@ -190,7 +190,7 @@ function validateHome(root: HTMLElement, visual: VisualSelection): void {
 /** Measures mounted destinations synchronously and restores their DOM before the browser can paint. */
 function validateDestination(root: HTMLElement, visual: VisualSelection, destination: 'home' | 'chats' | 'settings' | 'extensions'): void {
   const home = root.querySelector<HTMLElement>('[data-home-destination]');
-  const view = destination === 'home' || destination === 'chats' ? home?.closest<HTMLElement>('.shell-view') : root.querySelector<HTMLElement>(`[data-shell-destination="${destination}"]`);
+  const view = destination === 'home' || destination === 'chats' ? home?.closest<HTMLElement>('[data-shell-destination]') : root.querySelector<HTMLElement>(`[data-shell-destination="${destination}"]`);
   if (!view || !home || home.dataset.homeDestination === destination && !home.closest('[hidden]')) return;
   const undo: (() => void)[] = [];
   const attribute = (node: HTMLElement, name: string, value: string | null) => {
@@ -201,7 +201,7 @@ function validateDestination(root: HTMLElement, visual: VisualSelection, destina
   const restoreFrame = captureFrame(root);
   try {
     if (view.parentElement) for (const sibling of view.parentElement.children) {
-      if (sibling instanceof HTMLElement && sibling.classList.contains('shell-view')) attribute(sibling, 'hidden', sibling === view ? null : '');
+      if (sibling instanceof HTMLElement && sibling.hasAttribute('data-shell-destination')) attribute(sibling, 'hidden', sibling === view ? null : '');
     }
     for (const button of root.querySelectorAll<HTMLElement>('[data-openpane-role="navigation"][data-openpane-essential]')) {
       const selected = button.dataset.openpaneEssential === destination;
@@ -209,19 +209,19 @@ function validateDestination(root: HTMLElement, visual: VisualSelection, destina
     }
     if (destination === 'settings' || destination === 'extensions') { essentialControls(root); return; }
     const layout = homeLayout(visual.manifest.presentation.home, destination);
-    attribute(home, 'data-home-destination', destination);
-    attribute(home, 'data-home-columns', layout.columns ? 'two' : 'one');
-    attribute(home, 'data-home-balance', layout.balance);
+    for (const [name, value] of Object.entries(layout.surface)) attribute(home, name, value);
     const heading = home.querySelector<HTMLElement>('.home-heading');
-    if (heading) attribute(heading, 'hidden', destination === 'home' ? null : '');
+    if (heading) attribute(heading, 'hidden', layout.heading.hidden ? '' : null);
+    const style = (node: HTMLElement, projection: Readonly<Record<string, string>>) => {
+      attribute(node, 'style', node.getAttribute('style'));
+      for (const [name, value] of Object.entries(projection)) node.style.setProperty(name.replace(/[A-Z]/gu, letter => `-${letter.toLowerCase()}`), value);
+    };
     const host = home.querySelector<HTMLElement>('.pane-host');
-    if (host) { attribute(host, 'style', host.getAttribute('style')); host.style.gridTemplateRows = layout.gridTemplateRows; }
+    if (host) style(host, layout.hostStyle);
     for (const pane of home.querySelectorAll<HTMLElement>('[data-home-pane]')) {
-      const kind = pane.dataset.homePane as HomePaneKind;
-      attribute(pane, 'hidden', layout.visible.includes(kind) ? null : '');
-      attribute(pane, 'style', pane.getAttribute('style'));
-      const placement = layout.placement(kind);
-      pane.style.gridColumn = String(placement.gridColumn ?? ''); pane.style.gridRow = String(placement.gridRow ?? '');
+      const projection = layout.pane(pane.dataset.homePane as HomePaneKind);
+      attribute(pane, 'hidden', projection.hidden ? '' : null);
+      style(pane, projection.style);
     }
     essentialControls(root); validateHome(root, visual);
   } finally { for (const restore of undo.reverse()) restore(); restoreFrame(); }
@@ -230,6 +230,7 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
   const [connection] = useState(() => supplied ?? new UiConnection());
   const transport = useSyncExternalStore(connection.subscribe, connection.getSnapshot, connection.getSnapshot);
   const installedStylesheet = useRef<HTMLLinkElement | null>(null);
+  const stylesheetLifetime = useRef<object | null>(null);
   const [installedAppearance, setInstalledAppearance] = useState<InstalledAppearance | null>(null);
   const validatedVisual = useRef<VisualSelection | null>(null);
   const mountedVisual = useRef<VisualSelection | null>(null);
@@ -253,18 +254,30 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
   const [visual, setVisual] = useState<VisualSelection | null>(null);
   useLayoutEffect(() => { mountedVisual.current = visual; }, [visual]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const restoreAttempt = useRef<object | null>(null);
+  const restore = useCallback(() => {
+    const attempt = {}; restoreAttempt.current = attempt; setRestoreError(null);
+    const request = connection.restore();
+    void request.catch((error: unknown) => { if (restoreAttempt.current === attempt) setRestoreError(error instanceof Error ? error.message : 'Appearance recovery failed. Retry Restore.'); });
+    return request;
+  }, [connection]);
   const [phase, setPhase] = useState<'staging' | 'composition-deferred' | 'validating' | 'committed' | 'failed'>('staging');
   const [visible, setVisible] = useState(document.visibilityState === 'visible');
   useEffect(() => {
+    const lifetime = {}; stylesheetLifetime.current = lifetime;
     connectionSubscribers.set(connection, (connectionSubscribers.get(connection) ?? 0) + 1);
     connection.start();
     const visibility = () => setVisible(document.visibilityState === 'visible');
     const recover = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'Backspace') { event.preventDefault(); void connection.restore(); }
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'Backspace') { event.preventDefault(); restore(); }
     };
     document.addEventListener('visibilitychange', visibility); window.addEventListener('keydown', recover, { capture: true });
-    return () => { if (readabilityFrame.current !== null) cancelAnimationFrame(readabilityFrame.current); readabilityFrame.current = null; document.removeEventListener('visibilitychange', visibility); window.removeEventListener('keydown', recover, { capture: true }); const remaining = (connectionSubscribers.get(connection) ?? 1) - 1; if (remaining) connectionSubscribers.set(connection, remaining); else connectionSubscribers.delete(connection); queueMicrotask(() => { if (!connectionSubscribers.has(connection)) connection.close(); }); };
-  }, [connection]);
+    return () => { restoreAttempt.current = null; if (readabilityFrame.current !== null) cancelAnimationFrame(readabilityFrame.current); readabilityFrame.current = null; document.removeEventListener('visibilitychange', visibility); window.removeEventListener('keydown', recover, { capture: true }); const remaining = (connectionSubscribers.get(connection) ?? 1) - 1; if (remaining) connectionSubscribers.set(connection, remaining); else connectionSubscribers.delete(connection); queueMicrotask(() => {
+      if (stylesheetLifetime.current === lifetime) { installedStylesheet.current?.remove(); installedStylesheet.current = null; }
+      if (!connectionSubscribers.has(connection)) connection.close();
+    }); };
+  }, [connection, restore]);
   const state = transport.state;
   const deliveryKey = state ? canonicalJson([transport.deliveryContext, state.selection.deliveryGeneration, state.selection.revision, state.bundle?.digest ?? null]) : null;
   useEffect(() => {
@@ -409,17 +422,18 @@ export function ExperienceScope({ children, connection: supplied }: { readonly c
     };
   }, [connection, installedAppearance]);
   const waitingNotice = notice === 'Appearance is visible locally; waiting for host confirmation.' && transport.confirmedGeneration === state?.selection.deliveryGeneration ? null : notice;
+  const recoveryNotice = restoreError ?? waitingNotice ?? transport.diagnostic;
   return <div className="experience-frame">
     <div ref={content} className="experience-content" data-openpane-experience={visual?.digest} data-openpane-navigation={visual?.manifest.presentation.navigation}
       data-openpane-transcript={visual?.manifest.presentation.transcript} data-experience-phase={phase}
       onCompositionStartCapture={event => { if (event.target instanceof HTMLElement) composing.current = event.target; }}
       onCompositionEndCapture={() => { composing.current = null; deferredReadability.current?.(); }}
       onBlurCapture={event => { if (composing.current === event.target) { composing.current = null; deferredReadability.current?.(); } }}>
-      <ExperienceCommittedContext value={phase === 'committed'}><ExperienceBootstrapContext value={bootstrap}><DisplayTransportContext value={connection}><UiActionsContext value={{ restore: () => connection.restore() }}><VisualContext value={visual}>{children}</VisualContext></UiActionsContext></DisplayTransportContext></ExperienceBootstrapContext></ExperienceCommittedContext>
+      <ExperienceCommittedContext value={phase === 'committed'}><ExperienceBootstrapContext value={bootstrap}><DisplayTransportContext value={connection}><UiActionsContext value={{ restore }}><VisualContext value={visual}>{children}</VisualContext></UiActionsContext></DisplayTransportContext></ExperienceBootstrapContext></ExperienceCommittedContext>
     </div>
-    {(visual || transport.localBuiltin || waitingNotice || transport.diagnostic) && <ThemeScope className="experience-recovery" aria-label="Appearance recovery">
-      <button data-openpane-part="button" type="button" onClick={() => void connection.restore()}>Restore OpenPane appearance</button>
-      {(waitingNotice || transport.diagnostic) && <p data-openpane-part="status" role="status">{waitingNotice ?? transport.diagnostic}</p>}
+    {(visual || transport.localBuiltin || recoveryNotice) && <ThemeScope className="experience-recovery" aria-label="Appearance recovery">
+      <button data-openpane-part="button" type="button" onClick={restore}>Restore OpenPane appearance</button>
+      {recoveryNotice && <p data-openpane-part="status" role="status">{recoveryNotice}</p>}
     </ThemeScope>}
   </div>;
 }

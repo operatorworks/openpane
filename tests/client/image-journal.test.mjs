@@ -221,3 +221,24 @@ for (const failure of ['read', 'validation']) test(`a failed replacement image $
   await rejected; assert.equal(await sent, 'refused'); assert.equal(port.submitted.length, 0); assert.deepEqual(drafts.value, original);
   await store.send(); assert.equal(port.submitted.length, 1); assert.equal(port.submitted[0].body.imageId, attachment.imageId);
 });
+
+for (const finishRead of ['immediate', 'pending', 'reject', 'resolve']) test(`cancelling a replacement read releases text send without its late result (read ${finishRead})`, async t => {
+  const read = deferred(), cancel = new AbortController();
+  t.after(() => read.reject(new Error('Cancelled replacement read')));
+  const f = fixture(t);
+  await f.store.setDraft('Text after Remove'); await f.store.selectImage({ name: attachment.name, bytes });
+  const selecting = f.store.selectImage({ name: 'replacement.png', bytes: read.promise }, cancel.signal);
+  const selected = selecting.then(() => 'cancelled', () => 'rejected');
+  if (finishRead !== 'immediate') await new Promise(resolve => setImmediate(resolve));
+  cancel.abort();
+  const removed = f.store.removeImage(); let sent = false;
+  const sending = f.store.send().then(() => { sent = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sent, true, 'a cancelled file read does not retain the composer queue');
+  assert.equal(await selected, 'cancelled'); await removed; await sending;
+  assert.equal(f.port.submitted.length, 1); assert.equal(f.port.submitted[0].body.text, 'Text after Remove');
+  assert.equal(Object.hasOwn(f.port.submitted[0].body, 'imageId'), false);
+  const writes = structuredClone(f.drafts.imageWrites);
+  if (finishRead === 'reject') { read.reject(new Error('Cancelled replacement read')); await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(f.drafts.imageWrites, writes); assert.equal(f.store.getSnapshot().image, null); }
+  if (finishRead === 'resolve') { read.resolve(bytes); await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(f.drafts.imageWrites, writes); assert.equal(f.store.getSnapshot().image, null); }
+});

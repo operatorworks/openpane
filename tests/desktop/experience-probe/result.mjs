@@ -1,5 +1,12 @@
+const validPaint = report => report.kind === 'paint' && typeof report.detail?.label === 'string' && Number.isSafeInteger(report.detail?.generation) && report.detail.generation > 0;
+export function finalNativePaints(reports) {
+  const frozen = reports.findLast(report => report.kind === 'relay-frozen');
+  const generation = frozen?.detail?.generation ?? null;
+  return { generation, paints: generation > 0 ? reports.filter(report => validPaint(report) && report.at >= frozen.at && report.detail?.generation === generation) : [] };
+}
+
 export function assessNativeProbe(reports, timedOut) {
-  const paints = reports.filter(report => report.kind === 'paint'), interactions = reports.filter(report => report.kind === 'interaction');
+  const paints = reports.filter(validPaint), interactions = reports.filter(report => report.kind === 'interaction');
   const minimized = reports.find(report => report.kind === 'minimized');
   const minimizedAt = minimized?.at ?? Infinity, nativeMinimizedAt = minimized?.detail?.sampleAtMs ?? Infinity;
   const samples = reports.filter(report => report.kind === 'minimized-state' && report.at >= minimizedAt).sort((a, b) => a.detail.sampleAtMs - b.detail.sampleAtMs);
@@ -9,8 +16,8 @@ export function assessNativeProbe(reports, timedOut) {
   const minimizeSampling = { clock: 'native-monotonic', nativeClockValid, count: samples.length, spanMs: Number.isFinite(lastSample - firstSample) ? lastSample - firstSample : 0, maxGapMs: Number.isFinite(maxSampleGapMs) ? maxSampleGapMs : null,
     allMinimized: samples.length > 0 && samples.every(report => report.detail.minimized === true) };
   const late = report => report.at >= minimizedAt + 300000;
-  const latestGeneration = Math.max(0, ...reports.filter(report => report.kind === 'relay').map(report => report.detail.generation));
-  const lateLabels = new Set(paints.filter(report => late(report) && latestGeneration > 0 && report.detail.generation === latestGeneration).map(report => report.detail.label));
+  const finalPaints = finalNativePaints(reports);
+  const lateLabels = new Set(finalPaints.paints.filter(late).map(report => report.detail.label));
   const lateActions = new Set(interactions.filter(late).map(report => `${report.detail.slot}:${report.detail.action}`));
   const result = { timedOut, minimizeSampling, failures: reports.filter(report => report.kind === 'failure'), minimized: Number.isFinite(minimizedAt),
     wrongDocumentDenied: reports.some(report => report.kind === 'wrong-document-denied'), recoveredDraft: reports.some(report => report.kind === 'child-ready' && report.detail.recovered),

@@ -1,40 +1,32 @@
+import { fixture } from './native-runtime-policy-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { build } from 'esbuild';
-import { chromium } from 'playwright';
 
-const root = fileURLToPath(new URL('../../', import.meta.url));
-async function fixture(t) {
-  const bundle = await build({ stdin: { contents: `import { windowContext } from './tests/application/window-context-fixture.mjs';
-    import { WindowCoordinator } from './apps/desktop/src/application/window-coordinator.ts';
-    import { WindowRuntime } from './apps/desktop/src/application/window-runtime.ts';
-    import { UiConnection } from './apps/desktop/src/application/ui-connection.ts';
-    import { ServiceConnectionLost, ServiceError } from '@openpane/client/service';
-    import { fixture as controllerFixture } from './tests/application/controller-fixture.mjs';
-    import { BrowserViewStorage } from './apps/desktop/src/application/browser-storage.ts';
-    import { createConversationStore } from './packages/client/src/index.ts';
-    import { transcriptProjection } from '@openpane/contracts/conversation';
-    import { recordNativeEditorOrigin } from './apps/desktop/src/application/native-editor-origin.ts';
-    import * as carries from './apps/desktop/src/application/draft-carry.ts';
-    Object.assign(globalThis, { windowContext, recordNativeEditorOrigin, ServiceError, ServiceConnectionLost, controllerFixture, WindowCoordinator, WindowRuntime, UiConnection, BrowserViewStorage, carries, createConversationStore, transcriptProjection });`, resolveDir: root }, bundle: true, write: false, format: 'iife' });
-  const browser = await chromium.launch(); t.after(() => browser.close());
-  const page = await browser.newPage();
-  await page.route('http://localhost/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Native placement policy</title>' }));
-  await page.goto('http://localhost/policy'); await page.addScriptTag({ content: bundle.outputFiles[0].text });
-  return page;
-}
 
-for (const mode of ['drive', 'resume-inline', 'sync-direct']) test(`a main inline receive settles its source without a native echo (${mode})`, async t => {
+
+for (const mode of ['drive', 'resume-inline', 'sync-direct', 'resume-inline-paged']) test(`a main inline receive settles its source without a native echo (${mode})`, async t => {
   const page = await fixture(t), result = await page.evaluate(async mode => {
     const S = globalThis.BrowserViewStorage, c = globalThis.carries, scope = { hostId: 'host', conversationId: 'local-main-source' }, targetScope = { hostId: 'host', conversationId: 'local-main-target' };
     const source = await S.claimEditor({ scope, viewId: 'local-main-source-view', label: 'closed-source', transitionId: null, creation: { agentId: 'default' } }, () => {}), a = globalThis.createConversationStore({ scope, port: { scope }, projection: globalThis.transcriptProjection, drafts: source.drafts(() => {}) }); await a.ready; await a.setDraft('Local receive exact source text');
     const requestId = '1:local-main-receive'; await c.offerDraftCarry({ source: scope, sourceViewId: source.viewId, requestId, writerGeneration: source.editorBinding().writerGeneration, expected: await a.captureDraft() }); await c.bindDraftCarry(scope, requestId, targetScope); await a.dispose(); await source.close();
     let target; const f = globalThis.controllerFixture(); f.storage.open = async failure => { target = await S.claimEditor({ scope: targetScope, viewId: 'local-main-target-view', label: 'main', transitionId: null, creation: { agentId: 'default' } }, failure); await target.saveView('host', { version: 2, route: targetScope, pendingCreation: null }); return target; }; f.storage.locate = async selected => (await S.locateEditor(selected)).binding?.viewId ?? null; f.storage.recoverClosedView = (viewId, failure) => S.reopenForRecovery(viewId, failure); await f.app.start(); await f.app.getSnapshot().active.store.setDraft('Original inline target');
+    if (mode === 'resume-inline-paged') {
+      const opening = indexedDB.open('openpane-browser-views');
+      const db = await new Promise((resolve, reject) => { opening.onsuccess = () => resolve(opening.result); opening.onerror = () => reject(opening.error); });
+      try { await new Promise((resolve, reject) => { const tx = db.transaction('records', 'readwrite');
+        for (let n = 0; n < 8; n++) {
+          const source = { hostId:'host',conversationId:'history-' + n }, target = { hostId:'host',conversationId:'history-target-' + n }, requestId = '1:history-' + n;
+          tx.objectStore('records').put({ version:1,kind:'settled',source,sourceViewId:'history-view-' + n,requestId,target,outcome:'cleared' }, ['draft-carry','host',source.conversationId,requestId]);
+        }
+        tx.oncomplete = resolve; tx.onabort = () => reject(tx.error);
+      }); } finally { db.close(); }
+      const active = f.app.getSnapshot().active.store, before = await active.captureDraft();
+      await active.transferDraft(before, 'Local receive exact source text\n\n' + before.text, { kind:'receive',source:scope,requestId });
+    }
     const runtime = Object.assign(new globalThis.WindowRuntime({ role: 'main', version: 1, label: 'main', brokerInstance: 'broker', documentIncarnation: 'main', viewId: 'catalog', reservation: null, liveRelay: true }), { controller: f.app, ui: { async restore() {}, getSnapshot: () => ({ state: null }) }, recoveryDirty: false, confirmedPolicyDelivery: () => null });
     let echoes = 0, drives = 0; const tasks = []; runtime.port.request = async command => { if (command.kind === 'carry-applied') { echoes++; return { ok: true }; } if (command.kind === 'pending-intents' || command.kind === 'reservations') return []; if (command.kind === 'recover-inline') return { scope: targetScope, viewId: target.viewId, nativeLabel: 'old-child', fromTransitionId: 'old-attempt', transitionId: 'inline:local-receive', targetLabel: 'main', creationAgentId: null }; if (command.kind === 'phase') return {}; if (command.kind === 'lookup') return { kind: 'closed', reservation: { scope: targetScope, viewId: target.viewId, label: 'old-child', transitionId: 'old-attempt', creationAgentId: null, phase: 'inline-ready', bindingRevision: target.editorBinding().revision, writerGeneration: target.editorBinding().writerGeneration } }; throw new Error(command.kind); }; const drive = runtime.drive.bind(runtime); runtime.drive = () => { drives++; if (drives > 5) throw new Error('Applied acknowledgments must not create a loop'); const task = drive(); tasks.push(task); return task; };
     let recovered;
-    try { if (mode === 'resume-inline') await runtime.resumeWindow({ scope: targetScope, viewId: target.viewId, label: 'old-child', transitionId: 'old-attempt', creationAgentId: null, phase: 'failed', bindingRevision: 1, writerGeneration: 1 }, true); else if (mode === 'sync-direct') await runtime.syncDraftCarries(); else await runtime.drive(); const deadline = performance.now() + 1500; let carry; for (;;) { carry = (await c.sourceCarries(scope))[0]; if (carry.kind === 'settled' && !runtime.processing) { recovered = await S.reopenForRecovery(source.viewId, () => {}); if (recovered) break; } if (performance.now() > deadline) throw new Error(`Local receive left its source ${carry.kind}; drives=${drives}`); await new Promise(resolve => setTimeout(resolve, 5)); }
+    try { if (mode.startsWith('resume-inline')) await runtime.resumeWindow({ scope: targetScope, viewId: target.viewId, label: 'old-child', transitionId: 'old-attempt', creationAgentId: null, phase: 'failed', bindingRevision: 1, writerGeneration: 1 }, true); else if (mode === 'sync-direct') await runtime.syncDraftCarries(); else await runtime.drive(); const deadline = performance.now() + 1500; let carry; for (;;) { carry = (await c.sourceCarries(scope))[0]; if (carry.kind === 'settled' && !runtime.processing) { recovered = await S.reopenForRecovery(source.viewId, () => {}); if (recovered) break; } if (performance.now() > deadline) throw new Error(`Local receive left its source ${carry.kind}; drives=${drives}`); await new Promise(resolve => setTimeout(resolve, 5)); }
       const text = (await recovered.drafts(() => {}).load(scope)).draft, targetText = (await f.app.getSnapshot().active.store.captureDraft()).text; await runtime.drive(); await Promise.all(tasks); return { text, targetText, carry, echoes, drives, sent: f.submitted.length };
     } finally { runtime.closed = true; await Promise.all(tasks); await recovered?.close(); await f.app.dispose(); }
   }, mode);

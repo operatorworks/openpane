@@ -286,7 +286,16 @@ test('production browser switches recovery views and releases the old lock befor
       if (lock) await new Promise(release => { window.releaseOldViewProbe = release; });
     });
   }), oldView), 'another owner can acquire the old view while host replies remain held');
-  await page.evaluate(id => {
+  await page.evaluate(async ({ id, activeId }) => {
+    const locks = await navigator.locks.query();
+    if (!locks.held.some(lock => lock.name === `openpane-view:${activeId}`)) throw new Error('The lock observer does not match the actual active editor lock');
+    const opening = indexedDB.open('openpane-browser-views');
+    const db = await new Promise((resolve, reject) => { opening.onsuccess = () => resolve(opening.result); opening.onerror = () => reject(opening.error); });
+    try {
+      const request = db.transaction('records').objectStore('records').getAllKeys();
+      const keys = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+      for (const viewId of [id, activeId]) if (!keys.some(key => Array.isArray(key) && key[0] === 'draft' && key[1] === viewId)) throw new Error('The journal observer does not match actual saved draft keys');
+    } finally { db.close(); }
     window.oldViewRecoveryOwners = 0; window.oldViewHeld = 0; window.oldViewWrites = [];
     const request = navigator.locks.request.bind(navigator.locks);
     navigator.locks.request = (name, ...args) => {
@@ -307,7 +316,7 @@ test('production browser switches recovery views and releases the old lock befor
     }
     const update = IDBCursor.prototype.update;
     IDBCursor.prototype.update = function(value) { observe(value, this.primaryKey); return update.call(this, value); };
-  }, oldView);
+  }, { id: oldView, activeId: nextView });
   const before = (await records(page)).flatMap(row => row.frontendSends ?? []);
   const oldResponse = page.waitForResponse(response => { const body = response.request().postDataJSON(); return body?.op === 'frontend-binding' && body?.action === 'unavailable' && body?.id === original.command.clientCommandId; });
   releaseOld();

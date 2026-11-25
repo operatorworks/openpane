@@ -9,13 +9,13 @@ import { UiStore } from '../../apps/host/build/tsc/ui-store.js';
 import { createExperienceBundle } from '../../apps/host/build/tsc/experience-bundle.js';
 const bundle = id => createExperienceBundle({ schemaVersion: 2, id, label: id, theme: { density: 'comfortable', mode: 'system', light: {}, dark: {} },
   presentation: { home: { kind: 'stack', panes: ['conversations', 'conversation'] }, transcript: 'bubbles', navigation: 'rail', chats: 'inline', chatWindow: { width: 640, height: 720, titlebar: 'native', title: 'conversation' } }, stylesheet: null, assets: [] }, null, []);
-async function fixture(t) {
+async function fixture(t, { checkScope } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'ui-store-'));
-  const path = join(directory, 'ui.sqlite'); let store = new UiStore(path, 'host');
+  const path = join(directory, 'ui.sqlite'); let store = new UiStore(path, 'host', undefined, checkScope);
   t.after(async () => { store.close(); await rm(directory, { recursive: true, force: true }); });
   const id = () => `${store.context().requestEpoch}:${randomUUID()}`;
   const window = (name = 'main') => { const context = store.context(); return { hostId: 'host', profileId: context.profileId, role: 'main', brokerInstance: 'browser', label: name, documentIncarnation: randomUUID(), viewId: name }; };
-  return { path, get store() { return store; }, id, window, restart() { store.close(); store = new UiStore(path, 'host'); },
+  return { path, get store() { return store; }, id, window, restart() { store.close(); store = new UiStore(path, 'host', undefined, checkScope); },
     state(context, visible = true, presenceSequence = 1) { return store.execute({ op: 'state', context, visible, presenceSequence, after: null, waitMs: 0 }); } };
 }
 const envelope = receipt => Object.fromEntries(['requestId', 'deliveryGeneration', 'selectionRevision', 'digest'].map(key => [key, receipt[key]]));
@@ -480,11 +480,48 @@ test('restore context guards host and profile before replay without changing leg
   const original = await f.store.execute(request);
   assert.deepEqual(await f.store.execute(parseUiRequest({ ...request, expectedContext })), original, 'adding transport correlation must replay the original durable operation');
   for (const foreign of [{ ...expectedContext, hostId: 'other-host' }, { ...expectedContext, profileId: 'other-profile' }]) {
-    await assert.rejects(f.store.execute(parseUiRequest({ ...request, expectedContext: foreign })), error => error.code === 'conflict');
+    await assert.rejects(f.store.execute(parseUiRequest({ ...request, expectedContext: foreign })), error => error.code === 'wrong-host');
   }
   assert.equal(f.store.context().revision, original.receipt.selectionRevision);
   for (const invalid of [null, {}, { hostId: 'host' }, { profileId: context.profileId }, { ...expectedContext, extra: true }]) assert.throws(() => parseUiRequest({ ...request, expectedContext: invalid }));
   const next = f.store.context(), guarded = { op: 'restore', requestId: `recovery:${next.recoveryGeneration}:${randomUUID()}`, expectedRevision: next.revision, expectedRecoveryGeneration: next.recoveryGeneration };
   const receipt = await f.store.execute({ ...guarded, expectedContext });
   assert.deepEqual(await f.store.execute(guarded), receipt, 'the current-host CLI may replay a scoped operation without changing its input identity');
+});
+
+test('uppercase recovery receipts remain readable with the restore cohort limit', async t => {
+  const f = await fixture(t);
+  for (let index = 0; index < 33; index++) await f.state(f.window(String(index)));
+  const requestId = `RECOVERY:1:${randomUUID()}`;
+  const result = await f.store.execute({ op: 'restore', requestId, expectedRevision: 0, expectedRecoveryGeneration: 1 });
+  assert.equal(result.receipt.participants.length, 33);
+  f.restart();
+  assert.equal((await f.store.execute({ op: 'status', requestId })).receipt.participants.length, 33);
+});
+for (const failedFirst of [true, false]) test(`existing child failure settles regardless of relay order: failedFirst=${failedFirst}`, async t => {
+  const f = await fixture(t), main = f.window(), scope = { hostId: 'host', conversationId: 'existing' };
+  const child = { ...main, role: 'chat', label: 'child', documentIncarnation: 'child', viewId: 'child', scope };
+  await f.store.execute({ op: 'state', context: main, visible: true, presenceSequence: 1, after: null, waitMs: 0, nativePlacement: true });
+  await f.store.execute({ op: 'relay', main, children: [{ context: child, visible: true, presenceSequence: 1 }], departed: [] });
+  const base = bundle('existing-child'), separate = createExperienceBundle({ ...base.manifest, presentation: { ...base.manifest.presentation, chats: 'separate' } }, null, []);
+  const receipt = (await f.store.execute({ op: 'apply', requestId: f.id(), expectedRevision: 0, bundle: separate })).receipt;
+  await paint(f.store, main, receipt);
+  await f.store.execute({ op: 'ack', session: main.documentIncarnation, envelope: envelope(receipt), result: { kind: 'rendered' } });
+  const transition = receipt.participants.find(participant => participant.slot.kind === 'transition').slot;
+  const target = { scope, viewId: 'child', label: 'child', nativeTransitionId: 'native', bindingRevision: 2 };
+  await f.store.execute({ op: 'placement-reserve', session: main.documentIncarnation, envelope: envelope(receipt), transitionId: transition.transitionId, target });
+  const fail = () => f.store.execute({ op: 'ack', session: child.documentIncarnation, envelope: envelope(receipt), result: { kind: 'failed', reason: 'fixture render failure' } });
+  const relay = () => f.store.execute({ op: 'relay', main, children: [{ context: child, visible: true, presenceSequence: 2, placement: { nativeTransitionId: 'native', bindingRevision: 2 } }], departed: [] });
+  if (failedFirst) { await fail(); await relay(); } else { await relay(); await fail(); }
+  const status = await f.store.execute({ op: 'status', requestId: receipt.requestId });
+  assert.equal(status.outcome, 'partial');
+  assert.equal(status.receipt.participants.find(participant => participant.slot.kind === 'transition').visual.kind, 'failed');
+});
+
+test('display reads do not persist appearance state', async t => {
+  const f = await fixture(t, { checkScope: () => true });
+  f.store.db.exec('CREATE TABLE appearance_writes(value INTEGER); CREATE TRIGGER count_appearance_writes AFTER INSERT ON ui_state BEGIN INSERT INTO appearance_writes VALUES(1); END');
+  const subscription = { scope: { hostId: 'host', conversationId: 'read-only-cards' }, subscriptionId: randomUUID(), cursor: null };
+  for (let n = 0; n < 2; n++) assert.equal(f.store.readDisplay(subscription).kind, 'snapshot');
+  assert.equal(f.store.db.prepare('SELECT count(*) AS count FROM appearance_writes').get().count, 0);
 });

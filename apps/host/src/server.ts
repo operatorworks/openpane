@@ -52,7 +52,7 @@ export type { BrowserProviderExtension } from './provider-extensions.js';
 
 export interface BrowserHostOptions {
   readonly directory: string;
-  readonly uiCli?: { readonly node: string; readonly entry: string; readonly directory: string };
+  readonly uiCli?: { readonly node: string; readonly entry: string };
   readonly assetsDirectory: string;
   readonly hostArtifactDirectory?: string;
   readonly hostSdkDirectory?: string;
@@ -132,7 +132,7 @@ export async function startBrowserHost(options: BrowserHostOptions) {
       const drainFailed = drainResults.some(result => result.status === 'rejected');
       const deadline = setTimeout(() => http.closeAllConnections(), 2000);
       try {
-        const results = [...drainResults, ...await Promise.allSettled([
+        const stopped = await Promise.allSettled([
           new Promise<void>(done => { http.close(() => done()); http.closeIdleConnections(); }),
           Promise.resolve().then(() => control?.close()),
           Promise.resolve().then(() => uiControl?.close()),
@@ -141,9 +141,10 @@ export async function startBrowserHost(options: BrowserHostOptions) {
             host?.close();
             return host?.drained;
           }),
-        ])];
-        if (!drainFailed && results.at(-1)?.status === 'fulfilled') {
-          try { uiStore?.close(); } catch (reason) { results.push({ status: 'rejected', reason }); }
+        ]);
+        const results = [...drainResults, ...stopped];
+        try { uiStore?.close(); } catch (reason) { results.push({ status: 'rejected', reason }); }
+        if (!drainFailed && stopped.at(-1)?.status === 'fulfilled') {
           database.database.close();
           owner.close();
         }
@@ -276,7 +277,7 @@ export async function startBrowserHost(options: BrowserHostOptions) {
               if (startup.kind === 'desktop') await promisify(execFile)(provider.executable ?? 'codex', ['login', 'status'], { timeout: 5000, maxBuffer: 4096, env });
               const codex = createCodexDriver({ cwd: provider.cwd, version: CODEX_RUNTIME.version,
                 ...(provider.executable ? { executable: provider.executable } : {}), env, append, readImage,
-                ...(uiCli ? { uiContext: (scope: ConversationScope) => `<openpane-ui version="1">\nThis host provides a UI CLI. argvPrefix: ${JSON.stringify([uiCli.node, uiCli.entry, 'ui', '--data-dir', uiCli.directory])}\nConversationScope: ${canonicalJson(scope)}\nAppend context, experience schema, display schema or targets to argvPrefix to discover the contract. Author visual data in the user-requested workspace and apply through this CLI, with existing approvals. Publish display data only to this exact scope. Keep provider credentials out of UI data.\n</openpane-ui>` } : {}) });
+                ...(uiCli ? { uiContext: (scope: ConversationScope) => `<openpane-ui version="1">\nThis host provides a UI CLI. argvPrefix: ${JSON.stringify([uiCli.node, uiCli.entry, 'ui', '--data-dir', owner.directory])}\nConversationScope: ${canonicalJson(scope)}\nAppend context, experience schema, display schema or targets to argvPrefix to discover the contract. Author visual data in the user-requested workspace and apply through this CLI, with existing approvals. Publish display data only to this exact scope. Keep provider credentials out of UI data.\n</openpane-ui>` } : {}) });
               driver = codex;
               break;
             }

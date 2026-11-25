@@ -15,6 +15,7 @@ interface Options {
   readonly db: DatabaseSync; readonly hostId: string; readonly epoch: () => number;
   readonly checkScope: (scope: ConversationScope) => boolean;
   readonly transaction: <T>(run: () => T) => T;
+  readonly readTransaction: <T>(run: () => T) => T;
   readonly capacity: (bytes: number, entries: number) => void;
   readonly notify: () => void;
 }
@@ -62,7 +63,7 @@ export class UiDisplayStore {
     return key;
   }
   read(subscription: DisplaySubscription, options?: { readonly items?: number; readonly bytes?: number }): DisplayPage | null {
-    return this.options.transaction(() => this.pages.read(subscription, options));
+    return this.options.readTransaction(() => this.pages.read(subscription, options));
   }
   execute(request: DisplayRequest, owner: string | null = null): unknown {
     if (this.closed) throw new UiRefusal('unavailable', 'Display service is closed');

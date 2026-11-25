@@ -149,7 +149,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
     if (!saved.route) return;
     const binding = await readEditorBinding(this.db, saved.route);
     if (binding && binding.viewId !== this.viewId) {
-      await this.transaction('readwrite', store => store.put({ ...saved, route: null }, ['view', this.viewId, hostId]));
+      await this.transaction('readwrite', store => this.catalog ? store.delete(['catalog-route', this.viewId, hostId]) : store.put({ ...saved, route: null }, ['view', this.viewId, hostId]));
     }
   }
 
@@ -190,18 +190,6 @@ export class BrowserViewStorage implements OwnedViewStorage {
       const legacyViewIds = await new Promise<readonly string[]>((resolve, reject) => {
         const transaction = db.transaction('records'), store = transaction.objectStore('records'), request = store.openKeyCursor();
         const found = new Set<string>(), unreadable = new Set<string>(); let scanned = 0, failure: unknown;
-        if (preferredViewId) {
-          const draft = store.getKey(['draft', preferredViewId, scope.hostId, scope.conversationId]);
-          const imagePrefix = ['draft-image', preferredViewId, scope.hostId, scope.conversationId];
-          const image = store.getKey(IDBKeyRange.bound(imagePrefix, [...imagePrefix, []], false, true));
-          const view = store.get(['view', preferredViewId, scope.hostId]);
-          draft.onsuccess = () => { if (draft.result !== undefined) found.add(preferredViewId); };
-          image.onsuccess = () => { if (image.result !== undefined) found.add(preferredViewId); };
-          view.onsuccess = () => {
-            try { const saved = decodeView(view.result, scope.hostId); if (saved.route && sameScope(saved.route, scope) || saved.pendingCreation && sameScope(saved.pendingCreation.scope, scope)) found.add(preferredViewId); }
-            catch (error) { failure = error; transaction.abort(); }
-          };
-        }
         request.onsuccess = () => {
           const cursor = request.result;
           if (!cursor) return;
@@ -238,7 +226,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
             cursor.continue();
           } catch (error) { failure = error; transaction.abort(); }
         };
-        transaction.oncomplete = () => { if ([...found].some(viewId => unreadable.has(viewId))) reject(new Error('The saved editor for this conversation is unreadable. Its original records are preserved.')); else resolve([...found]); };
+        transaction.oncomplete = () => { if ([...found].some(viewId => unreadable.has(viewId))) reject(new Error('The saved editor for this conversation is unreadable. Its original records are preserved.')); else resolve([...found].sort((a, b) => Number(b === preferredViewId) - Number(a === preferredViewId))); };
         transaction.onabort = () => reject(failure ?? transaction.error ?? new Error('Saved editor scan interrupted.'));
       });
       return { binding: null, legacyViewIds };
@@ -506,6 +494,7 @@ export class BrowserViewStorage implements OwnedViewStorage {
     if (this.catalog) {
       if (checked.pendingCreation) throw new Error('A catalog cannot own conversation creation.');
       if (checked.route) await this.saveNavigation(hostId, checked.route);
+      else await this.transaction('readwrite', store => store.delete(['catalog-route', this.viewId, hostId]));
       return;
     }
     if ([checked.route, checked.pendingCreation?.scope, this.editor?.scope].some(scope => scope && this.frozen.has(JSON.stringify(scope)))) throw new SupersededDraftsError();

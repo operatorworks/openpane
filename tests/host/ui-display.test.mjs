@@ -273,3 +273,21 @@ test('subscription churn evicts old cursors while fresh reads and refresh remain
   assert.equal((await f.execute({ op: 'display-list', subscription: { ...first, cursor: initial.next } })).kind, 'reset');
   assert.equal((await f.execute({ op: 'display-list', subscription: f.subscription() })).kind, 'snapshot');
 });
+
+for (const mode of ['snapshot', 'changes']) test(`display ${mode} pages fit the exact byte budget of the cursor they return`, async t => {
+  const { canonicalJson } = await import('@openpane/contracts');
+  const f = await fixture(t), subscription = f.subscription();
+  if (mode === 'changes') subscription.cursor = f.store.readDisplay(subscription).next;
+  await f.execute({ op:'display-publish',scope,publicationId:f.id(),event:event() });
+  if (mode === 'changes') {
+    await f.execute({ op:'display-publish',scope,publicationId:f.id(),event:event() });
+    const other = { ...scope,conversationId:'other-budget' }; f.members.add(JSON.stringify(other));
+    for (let n = 0; n < 8; n++) await f.execute({ op:'display-publish',scope:other,publicationId:f.id(),event:event() });
+  }
+  const page = f.store.readDisplay(subscription, { items:1 }); assert.ok(page);
+  const budget = Buffer.byteLength(canonicalJson({ ok:true,value:page }));
+  const exact = f.store.readDisplay(subscription, { items:1,bytes:budget }); assert.ok(exact, `the ${budget}-byte page is available`);
+  assert.equal(exact.kind, mode);
+  assert.equal(mode === 'snapshot' ? exact.publications.length : exact.changes.length, 1);
+  assert.equal(Buffer.byteLength(canonicalJson({ ok:true,value:exact })), budget);
+});

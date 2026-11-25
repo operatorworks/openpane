@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+pub const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub const MAX_WINDOWS: usize = 512;
 pub const MAX_INTENTS: usize = 1024;
 pub const MAX_PENDING_INTENTS: usize = 32;
@@ -92,24 +93,29 @@ pub struct Reservation {
     pub binding_revision: Option<u64>,
     pub writer_generation: Option<u64>,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-enum CompletedPlacement {
+pub enum CompletedPlacement {
     Inline { scope: Scope },
     Detached { scope: Scope, label: String },
     Refused { reason: String },
 }
+impl CompletedPlacement {
+    fn validate(&self) -> Result<(), &'static str> {
+        match self {
+            Self::Inline { scope } => scope.validate(),
+            Self::Detached { scope, label } => {
+                scope.validate()?;
+                identifier(label, 200)
+            }
+            Self::Refused { reason } => identifier(reason, 1000),
+        }
+    }
+}
 fn completed_placement(value: &serde_json::Value) -> Result<CompletedPlacement, &'static str> {
     let result = serde_json::from_value::<CompletedPlacement>(value.clone())
         .map_err(|_| "invalid-intent-result")?;
-    match &result {
-        CompletedPlacement::Inline { scope } => scope.validate()?,
-        CompletedPlacement::Detached { scope, label } => {
-            scope.validate()?;
-            identifier(label, 200)?;
-        }
-        CompletedPlacement::Refused { reason } => identifier(reason, 1000)?,
-    }
+    result.validate()?;
     Ok(result)
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -119,17 +125,18 @@ pub struct Intent {
     pub request_id: String,
     pub action: Action,
     pub target: Option<Reservation>,
-    pub result: Option<serde_json::Value>,
+    pub result: Option<CompletedPlacement>,
 }
 impl Intent {
-    fn completion_is_inline(&self, value: &serde_json::Value) -> Result<bool, &'static str> {
-        match completed_placement(value)? {
+    fn completion_is_inline(&self, value: &CompletedPlacement) -> Result<bool, &'static str> {
+        value.validate()?;
+        match value {
             CompletedPlacement::Refused { .. } => Ok(false),
             CompletedPlacement::Inline { scope } => {
                 if self
                     .target
                     .as_ref()
-                    .is_none_or(|target| target.scope != scope)
+                    .is_none_or(|target| &target.scope != scope)
                 {
                     return Err("intent-result-target-mismatch");
                 }
@@ -139,7 +146,7 @@ impl Intent {
                 if self
                     .target
                     .as_ref()
-                    .is_none_or(|target| target.scope != scope || target.label != label)
+                    .is_none_or(|target| &target.scope != scope || &target.label != label)
                 {
                     return Err("intent-result-target-mismatch");
                 }
@@ -179,8 +186,8 @@ impl Reservation {
     pub fn confirm_binding(&mut self, revision: u64, writer: u64) -> Result<(), &'static str> {
         if revision == 0
             || writer == 0
-            || revision > 9_007_199_254_740_991
-            || writer > 9_007_199_254_740_991
+            || revision > MAX_SAFE_INTEGER
+            || writer > MAX_SAFE_INTEGER
             || self
                 .binding_revision
                 .is_some_and(|current| revision < current)
@@ -207,7 +214,7 @@ impl Reservation {
             .into_iter()
             .flatten()
         {
-            if count == 0 || count > 9_007_199_254_740_991 {
+            if count == 0 || count > MAX_SAFE_INTEGER {
                 return Err("invalid-binding-generation");
             }
         }
@@ -221,6 +228,8 @@ fn initial_intent_epoch() -> u64 {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Profile {
     pub origin: String,
+    #[serde(default)]
+    pub inline_completion_version: u8,
     #[serde(default = "initial_intent_epoch")]
     pub intent_epoch: u64,
     pub catalog_view_id: String,
@@ -264,7 +273,7 @@ impl Profile {
                 !transition.is_empty()
                     && epoch
                         .parse::<u64>()
-                        .is_ok_and(|epoch| epoch > 0 && epoch <= 9_007_199_254_740_991)
+                        .is_ok_and(|epoch| epoch > 0 && epoch <= MAX_SAFE_INTEGER)
             })
         {
             return Ok(());
@@ -272,8 +281,11 @@ impl Profile {
         Err("unknown-carry-request")
     }
     pub fn validate(&self) -> Result<(), &'static str> {
+        if self.inline_completion_version > 1 {
+            return Err("unsupported-inline-completions");
+        }
         identifier(&self.origin, 2048)?;
-        if self.intent_epoch == 0 || self.intent_epoch > 9_007_199_254_740_991 {
+        if self.intent_epoch == 0 || self.intent_epoch > MAX_SAFE_INTEGER {
             return Err("invalid-intent-epoch");
         }
         identifier(&self.catalog_view_id, 200)?;
@@ -338,25 +350,25 @@ impl Profile {
     ) -> Result<(), &'static str> {
         let key = Self::intent_key(source, request_id);
         let intent = self.intents.get(&key).ok_or("unknown-intent")?;
+        let parsed = completed_placement(&result);
         if let Some(previous) = &intent.result {
-            return if previous == &result {
+            return if parsed.as_ref().is_ok_and(|result| result == previous) {
                 Ok(())
             } else {
                 Err("intent-result-conflict")
             };
         }
+        let result = parsed?;
         if intent
             .target
             .as_ref()
             .is_some_and(|target| target.phase == Phase::TargetReady)
-            && matches!(
-                completed_placement(&result)?,
-                CompletedPlacement::Refused { .. }
-            )
+            && matches!(&result, CompletedPlacement::Refused { .. })
         {
             return Err("confirmed-opening-cannot-be-refused");
         }
-        if intent.completion_is_inline(&result)? {
+        let inline = intent.completion_is_inline(&result)?;
+        if inline {
             let target = intent.target.as_ref().ok_or("unassigned-intent")?;
             let entry = self
                 .windows
@@ -371,15 +383,24 @@ impl Profile {
                 entry.phase = Phase::InlineReady;
             }
         }
-        self.intents.get_mut(&key).ok_or("unknown-intent")?.result = Some(result);
+        let intent = self.intents.get_mut(&key).ok_or("unknown-intent")?;
+        if inline {
+            if let Some(target) = &mut intent.target {
+                if matches!(target.phase, Phase::Assigned | Phase::Requested) {
+                    target.phase = Phase::InlineReady;
+                }
+            }
+        }
+        intent.result = Some(result);
         Ok(())
     }
     pub fn reconcile_inline_completions(&mut self) -> Result<bool, &'static str> {
-        let mut changed = false;
+        if self.inline_completion_version == 1 {
+            return Ok(false);
+        }
         for entry in self.windows.values_mut() {
             if entry.phase == Phase::TargetReady && entry.transition_id.starts_with("inline:") {
                 entry.phase = Phase::InlineReady;
-                changed = true;
             }
         }
         for intent in self.intents.values_mut() {
@@ -387,7 +408,6 @@ impl Profile {
                 if target.phase == Phase::TargetReady && target.transition_id.starts_with("inline:")
                 {
                     target.phase = Phase::InlineReady;
-                    changed = true;
                 }
             }
         }
@@ -404,6 +424,14 @@ impl Profile {
         }
         for target in completed {
             if let Some(entry) = self.windows.get_mut(&target.scope.key()) {
+                if entry.phase == Phase::TargetReady
+                    && entry.binding_revision >= target.binding_revision
+                    && entry.writer_generation >= target.writer_generation
+                    && (entry.binding_revision > target.binding_revision
+                        || entry.writer_generation > target.writer_generation)
+                {
+                    continue;
+                }
                 if matches!(
                     entry.phase,
                     Phase::Assigned | Phase::Requested | Phase::TargetReady
@@ -412,11 +440,11 @@ impl Profile {
                     && entry.label == target.label
                 {
                     entry.phase = Phase::InlineReady;
-                    changed = true;
                 }
             }
         }
-        Ok(changed)
+        self.inline_completion_version = 1;
+        Ok(true)
     }
     pub fn retire_closed_windows(
         &mut self,
@@ -450,7 +478,7 @@ impl Profile {
         if self.intents.len() < MAX_INTENTS && retire_after != Some(self.intent_epoch) {
             return Ok(());
         }
-        if self.intent_epoch >= 9_007_199_254_740_991 {
+        if self.intent_epoch >= MAX_SAFE_INTEGER {
             return Err("native-intent-epoch-exhausted");
         }
         self.intents.retain(|_, intent| intent.result.is_none());
@@ -464,13 +492,7 @@ impl Profile {
     ) -> Result<Intent, &'static str> {
         let key = Self::intent_key(source, request_id);
         let current = self.intents.get(&key).ok_or("unknown-intent")?;
-        if current
-            .result
-            .as_ref()
-            .and_then(|result| result.get("kind"))
-            .and_then(serde_json::Value::as_str)
-            != Some("refused")
-        {
+        if !matches!(&current.result, Some(CompletedPlacement::Refused { .. })) {
             return Ok(current.clone());
         }
         if self.pending_intents(&source.host_id).count() >= MAX_PENDING_INTENTS {
@@ -698,6 +720,7 @@ mod tests {
     fn profile() -> Profile {
         Profile {
             origin: "http://127.0.0.1:7140".into(),
+            inline_completion_version: 1,
             intent_epoch: 1,
             catalog_view_id: "catalog".into(),
             windows: BTreeMap::new(),
@@ -767,7 +790,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             p.retry_intent(&source, "1:retry").unwrap().result,
-            Some(success)
+            Some(completed_placement(&success).unwrap())
         );
         assert_eq!(p.pending_intents("host").count(), 0);
     }
@@ -1009,7 +1032,9 @@ mod tests {
             p.intents
                 .get_mut(&Profile::intent_key(&source, &id))
                 .unwrap()
-                .result = Some(serde_json::json!({"kind":"refused","reason":"done"}));
+                .result = Some(CompletedPlacement::Refused {
+                reason: "done".into(),
+            });
         }
         p.compact_terminal_intents(None).unwrap();
         assert_eq!(p.intents.len(), 1);
@@ -1093,9 +1118,10 @@ mod tests {
         p.intents
             .get_mut(&Profile::intent_key(&completed_source, "1:done"))
             .unwrap()
-            .result = Some(
-            serde_json::json!({"kind":"detached","scope":scope("window-2"),"label":"label-2"}),
-        );
+            .result = Some(CompletedPlacement::Detached {
+            scope: scope("window-2"),
+            label: "label-2".into(),
+        });
         p.retire_closed_windows(&std::collections::BTreeSet::from(["label-0".into()]))
             .unwrap();
         assert_eq!(p.intent_epoch, 2);
@@ -1202,10 +1228,11 @@ mod completed_placement_tests {
         }
         let result = json!({"kind":"refused","reason":"Explicit refusal"});
         assert!(completed_placement(&result).is_ok());
-        let saved = serde_json::to_string(&Some(result.clone())).unwrap();
+        let typed = completed_placement(&result).unwrap();
+        let saved = serde_json::to_string(&Some(typed.clone())).unwrap();
         assert_eq!(
-            serde_json::from_str::<Option<serde_json::Value>>(&saved).unwrap(),
-            Some(result)
+            serde_json::from_str::<Option<CompletedPlacement>>(&saved).unwrap(),
+            Some(typed)
         );
     }
 }
@@ -1222,6 +1249,7 @@ mod readiness_regressions {
     fn profile() -> Profile {
         Profile {
             origin: "http://localhost".into(),
+            inline_completion_version: 1,
             intent_epoch: 1,
             catalog_view_id: "catalog".into(),
             windows: BTreeMap::new(),
@@ -1514,10 +1542,35 @@ mod readiness_regressions {
             Phase::TargetReady
         );
         p.validate().unwrap();
+        for legacy in [false, true] {
+            let mut value = serde_json::to_value(&p).unwrap();
+            if legacy {
+                value
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("inlineCompletionVersion");
+                value["intents"][Profile::intent_key(&scope("source"), "1:first")]["target"]
+                    ["phase"] = serde_json::json!("requested");
+            }
+            value["intents"]
+                .as_object_mut()
+                .unwrap()
+                .remove(&Profile::intent_key(&scope("source"), "1:second"));
+            let mut restarted: Profile = serde_json::from_value(value).unwrap();
+            restarted.reconcile_inline_completions().unwrap();
+            assert_eq!(
+                restarted.windows[&old.scope.key()].phase,
+                Phase::TargetReady
+            );
+            assert_eq!(restarted.inline_completion_version, 1);
+            assert!(!restarted.reconcile_inline_completions().unwrap());
+            restarted.validate().unwrap();
+        }
     }
     #[test]
     fn legacy_inline_bootstrap_completion_repairs_phase_without_inventing_child_readiness() {
         let mut p = profile();
+        p.inline_completion_version = 0;
         let mut allocated = ready();
         allocated.phase = Phase::Assigned;
         p.windows.insert(allocated.scope.key(), allocated.clone());
@@ -1529,7 +1582,9 @@ mod readiness_regressions {
         p.intents
             .get_mut(&Profile::intent_key(&scope("source"), "1:inline-old"))
             .unwrap()
-            .result = Some(serde_json::json!({"kind":"inline","scope":allocated.scope}));
+            .result = Some(CompletedPlacement::Inline {
+            scope: allocated.scope.clone(),
+        });
         p.windows.get_mut(&allocated.scope.key()).unwrap().phase = Phase::TargetReady;
         assert!(p.reconcile_inline_completions().unwrap());
         assert_eq!(p.windows[&allocated.scope.key()].phase, Phase::InlineReady);
@@ -1619,7 +1674,7 @@ mod readiness_regressions {
                     p.intents
                         .get_mut(&Profile::intent_key(&scope("source"), "1:known-opening"))
                         .unwrap()
-                        .result = Some(refusal.clone());
+                        .result = Some(completed_placement(&refusal).unwrap());
                     p.retry_intent(&scope("source"), "1:known-opening").unwrap();
                 }
                 let before = serde_json::to_value(&p).unwrap();
@@ -1669,6 +1724,7 @@ mod passive_reclaim_tests {
     fn profile() -> Profile {
         Profile {
             origin: "http://localhost".into(),
+            inline_completion_version: 1,
             intent_epoch: 1,
             catalog_view_id: "catalog".into(),
             windows: BTreeMap::new(),

@@ -13,9 +13,9 @@ import { IndependentDraftsError } from './view-state.js';
 import type { ViewStorageFactory } from './view-state.js';
 import { ChildUiConnection, NativeMainUiRelay } from './native-ui-relay.js';
 import { UiConnection } from './ui-connection.js';
-import type { UiTransport } from './ui-connection.js';
+import type { UiTransport, RecoveryResult } from './ui-connection.js';
 import type { RecoveryOriginator, UiRecoveryHost } from './ui-recovery.js';
-import { childPlacementResult, DesktopWindowPort, parseNativePlacementIntent, parseNativeReservation, parseEditorRecoveryGrant, parseNativeWindowLookup } from './window-context.js';
+import { sameNativeAttempt, childPlacementResult, DesktopWindowPort, parseNativePlacementIntent, parseNativeReservation, parseEditorRecoveryGrant, parseNativeWindowLookup } from './window-context.js';
 import type { DesktopWindowContext, NativePlacementIntent, NativeReservation } from './window-context.js';
 import type { DraftCarry } from './draft-carry.js';
 import { bindDraftCarry, offerDraftCarry, sourceCarries, targetCarries, cancelDraftCarry, refuseDraftCarry, retryDraftCarry, hostCarries, removeRetainedCarry } from './draft-carry.js';
@@ -34,9 +34,15 @@ function nativeRecoveryHost(value: Record<string, unknown>): UiRecoveryHost | nu
   if (value.hostId === null && value.profileId === null) return null;
   return { hostId: identifier(value.hostId), profileId: identifier(value.profileId, 200) };
 }
+type RecoveryObserver = { sequence: number | null; receipt: UiRecoveryHost | null } & (
+  | { readonly kind: 'join' }
+  | { readonly kind: 'initiating'; host: UiRecoveryHost | null }
+);
 export class MainUiConnection extends UiConnection {
-  private restoration: { readonly sequence: number; readonly host: UiRecoveryHost | null; readonly promise: Promise<boolean> } | null = null;
-  private recoveryAttempt: { readonly sequence: number; readonly host: UiRecoveryHost | null } | null = null;
+  private restoration: { readonly sequence: number; readonly host: UiRecoveryHost | null; readonly promise: Promise<RecoveryResult> } | null = null;
+  private recoveryAttempt: { readonly sequence: number; readonly host: UiRecoveryHost; readonly basis: Extract<RecoveryResult, { readonly recorded: true }>['basis'] } | null = null;
+  private readonly receiptJoins = new Set<RecoveryObserver>();
+  private readonly initiatingRestores = new Map<string, Extract<RecoveryObserver, { readonly kind: 'initiating' }>>();
   constructor(private readonly port: DesktopWindowPort) {
     super(new NativeMainUiRelay(port), async context => parseWindowContext(await port.request({ kind: 'bind-ui', hostId: context.hostId, profileId: context.profileId })), port.context.liveRelay);
   }
@@ -46,11 +52,25 @@ export class MainUiConnection extends UiConnection {
   }
   override async restore(expectedHost?: UiRecoveryHost): Promise<void> {
     if (expectedHost && this.recoveryHost(expectedHost.hostId).profileId !== expectedHost.profileId) throw new Error('Appearance recovery belongs to a different host profile');
-    const reply = record(await this.port.request({ kind: 'restore-builtin', ...(expectedHost ? { expectedContext: { hostId: expectedHost.hostId, profileId: expectedHost.profileId } } : {}) }), ['sequence', 'hostId', 'profileId']);
-    const authority = nativeRecoveryHost(reply);
-    if (!await this.restoreNative(count(reply.sequence), authority) || !this.recoveryIsCurrent(authority)) throw new Error('Appearance recovery changed hosts. Retry in the current host.');
+    const requestId = crypto.randomUUID(), initiating: Extract<RecoveryObserver, { readonly kind: 'initiating' }> = { kind: 'initiating', sequence: null, host: expectedHost ?? null, receipt: null };
+    this.initiatingRestores.set(requestId, initiating); this.receiptJoins.add(initiating);
+    try {
+      const allocation = await this.port.request({ kind: 'restore-builtin', requestId, ...(expectedHost ? { expectedContext: { hostId: expectedHost.hostId, profileId: expectedHost.profileId } } : {}) }).catch((error: unknown) => {
+        if (initiating.sequence === null || initiating.receipt === null) throw error;
+        return { sequence: initiating.sequence, hostId: initiating.receipt.hostId, profileId: initiating.receipt.profileId };
+      });
+      const reply = record(allocation, ['sequence', 'hostId', 'profileId']);
+      const authority = nativeRecoveryHost(reply), sequence = count(reply.sequence);
+      while (this.bindingInFlight) await this.bindingInFlight;
+      const recorded = await this.restoreNative(sequence, authority, requestId);
+      // Keep the final authority check here: another bind may start while the previous one settles.
+      while (this.bindingInFlight) await this.bindingInFlight;
+      if (!this.recoveryIsCurrent(initiating.host ?? authority)) throw new Error('Appearance recovery changed hosts. Retry in the current host.');
+      if (!recorded) throw new Error(this.getSnapshot().diagnostic ?? 'Appearance recovery could not be recorded. Retry Restore.');
+    } finally { this.initiatingRestores.delete(requestId); this.receiptJoins.delete(initiating); }
   }
   private recoveryIsCurrent(host: UiRecoveryHost | null): boolean {
+    if (!this.recoveryBindingConfirmed()) return false;
     const delivery = this.getSnapshot().deliveryContext;
     if (host === null || delivery === null) return true;
     const bound = parseWindowContext(JSON.parse(delivery));
@@ -58,24 +78,94 @@ export class MainUiConnection extends UiConnection {
     try { return this.recoveryHost(host.hostId).profileId === host.profileId; }
     catch { return false; }
   }
-  restoreNative(sequence: number, host: UiRecoveryHost | null): Promise<boolean> {
+  private rememberAttempt(sequence: number, outcome: Extract<RecoveryResult, { readonly recorded: true }>): Extract<RecoveryResult, { readonly recorded: true }> {
+    const previous = this.recoveryAttempt;
+    const basis = previous?.sequence === sequence && previous.host.hostId === outcome.host.hostId && previous.host.profileId === outcome.host.profileId && previous.basis === 'receipt' ? 'receipt' : outcome.basis;
+    for (const join of this.receiptJoins) if (join.sequence === sequence) { if (join.kind === 'initiating') join.host ??= outcome.host; if (basis === 'receipt') join.receipt ??= outcome.host; }
+    if (!previous || sequence >= previous.sequence) this.recoveryAttempt = { sequence, host: outcome.host, basis };
+    return { ...outcome, basis };
+  }
+  private async joinedRecoveryResult(sequence: number, result: Promise<RecoveryResult>, exact: boolean, initiating?: Extract<RecoveryObserver, { readonly kind: 'initiating' }>): Promise<boolean> {
+    const previous = this.recoveryAttempt;
+    const join: RecoveryObserver = { kind: 'join', sequence, receipt: exact && previous?.sequence === sequence && previous.basis === 'receipt' ? previous.host : null };
+    if (exact) this.receiptJoins.add(join);
+    try {
+      const returned = await result;
+      const outcome: RecoveryResult = returned.recorded ? returned : exact && join.receipt ? { recorded: true, host: join.receipt, basis: 'receipt' } : returned;
+      if (!outcome.recorded) return false;
+      if (initiating) initiating.host ??= outcome.host;
+      const exactReceipt = () => exact && (outcome.basis === 'receipt' || join.receipt?.hostId === outcome.host.hostId && join.receipt.profileId === outcome.host.profileId);
+      return await this.withStableBinding<boolean | { readonly error: unknown }, boolean>({
+        read: async () => {
+          if (exactReceipt()) return false;
+          try {
+            const reply = record(await this.port.request({ kind: 'read-recovery-cancellation', sequence }), ['cancelled']);
+            if (typeof reply.cancelled !== 'boolean') throw new Error('Invalid native recovery cancellation reply');
+            return reply.cancelled;
+          } catch (error) { return { error }; }
+        },
+        terminal: cancelled => typeof cancelled !== 'boolean' || cancelled && !exactReceipt(),
+        use: cancelled => {
+          const current = this.recoveryIsCurrent(outcome.host);
+          if (exactReceipt() && current) return true;
+          if (typeof cancelled !== 'boolean') throw cancelled.error;
+          return current && !cancelled;
+        },
+      });
+    } finally { this.receiptJoins.delete(join); }
+  }
+  restoreNative(sequence: number, host: UiRecoveryHost | null, initiator: string | null = null): Promise<boolean> {
+    const originator = { kind: 'native' as const, brokerInstance: this.port.context.brokerInstance, sequence };
+    const initiating = initiator === null ? undefined : this.initiatingRestores.get(initiator);
+    if (initiating) {
+      if (initiating.sequence !== null && initiating.sequence !== sequence) return Promise.reject(new Error('Native Restore correlation changed sequence'));
+      initiating.sequence = sequence; initiating.host ??= host;
+      if (initiating.receipt) {
+        const receipt = initiating.receipt;
+        if (host && (host.hostId !== receipt.hostId || host.profileId !== receipt.profileId)) return Promise.resolve(false);
+        const retainedReceipt = () => this.joinedRecoveryResult(sequence, Promise.resolve({ recorded: true, host: receipt, basis: 'receipt' }), true, initiating);
+        const confirmation = this.confirmPendingRecovery(originator, receipt);
+        return confirmation ? confirmation.then(recorded => recorded || retainedReceipt()) : retainedReceipt();
+      }
+    }
     if (!this.recoveryIsCurrent(host)) return Promise.resolve(false);
     const sameHost = (other: UiRecoveryHost | null) => other?.hostId === host?.hostId && other?.profileId === host?.profileId;
     const active = this.restoration, completed = this.recoveryAttempt;
-    if (active && sequence <= active.sequence) return sameHost(active.host) ? active.promise.then(recorded => recorded && this.recoveryIsCurrent(host)) : Promise.resolve(false);
-    if (completed && sequence <= completed.sequence) return Promise.resolve(sameHost(completed.host));
+    const agrees = (other: { readonly sequence: number; readonly host: UiRecoveryHost | null }) => sameHost(other.host) || sequence === other.sequence && (host === null || other.host === null);
+    if (active && sequence <= active.sequence) {
+      if (!agrees(active)) return Promise.resolve(false);
+      return this.confirmPendingRecovery(originator, host) ?? this.joinedRecoveryResult(sequence, active.promise, sequence === active.sequence, initiating);
+    }
+    if (completed && sequence <= completed.sequence) {
+      if (!(sameHost(completed.host) || sequence === completed.sequence && host === null) || !this.recoveryIsCurrent(completed.host)) return Promise.resolve(false);
+      return this.confirmPendingRecovery(originator, host) ?? this.joinedRecoveryResult(sequence, Promise.resolve({ recorded: true, host: completed.host, basis: completed.basis }), sequence === completed.sequence, initiating);
+    }
     const task = (active?.promise.catch(() => {}) ?? Promise.resolve()).then(async () => {
-      if (!this.recoveryIsCurrent(host)) return false;
-      const recorded = await this.requestRecovery({ kind: 'native', brokerInstance: this.port.context.brokerInstance, sequence }, host);
-      if (!this.recoveryIsCurrent(host)) return false;
-      if (recorded) this.recoveryAttempt = { sequence, host };
-      return recorded;
+      if (!this.recoveryIsCurrent(host)) return { recorded: false } as const;
+      const result = await this.requestRecovery(originator, host);
+      if (result.recorded && !this.recoveryIsCurrent(result.host)) return { recorded: false } as const;
+      return result.recorded ? this.rememberAttempt(sequence, result) : result;
     }).finally(() => { if (this.restoration?.sequence === sequence) this.restoration = null; });
     this.restoration = { sequence, host, promise: task };
-    return task;
+    return this.joinedRecoveryResult(sequence, task, true, initiating);
   }
-  protected override async recovered(originator: RecoveryOriginator): Promise<void> {
-    if (originator.kind === 'native' && originator.brokerInstance === this.port.context.brokerInstance) await this.port.request({ kind: 'confirm-recovery', sequence: originator.sequence });
+  private ownsNative(originator: RecoveryOriginator): originator is Extract<RecoveryOriginator, { readonly kind: 'native' }> {
+    return originator.kind === 'native' && originator.brokerInstance === this.port.context.brokerInstance;
+  }
+  protected override async recovering(originator: RecoveryOriginator, host: UiRecoveryHost, submitted: boolean): Promise<'accepted' | 'superseded' | 'cancelled'> {
+    if (!this.ownsNative(originator)) return 'accepted';
+    let reply: unknown;
+    try { reply = await this.port.request({ kind: 'scope-recovery', sequence: originator.sequence, expectedContext: host, submitted }); }
+    catch (error) { if (!submitted && error === 'wrong-host') return 'cancelled'; throw error; }
+    const result = record(reply, ['admission']);
+    if (result.admission !== 'accepted' && result.admission !== 'superseded' && result.admission !== 'cancelled') throw new Error('Invalid native recovery scope reply');
+    return result.admission;
+  }
+  protected override async recovered(originator: RecoveryOriginator, deliveryGeneration: number, host: UiRecoveryHost): Promise<void> {
+    if (this.ownsNative(originator)) {
+      this.rememberAttempt(originator.sequence, { recorded: true, host, basis: 'receipt' });
+      await this.port.request({ kind: 'confirm-recovery', sequence: originator.sequence, deliveryGeneration, expectedContext: host });
+    }
   }
 }
 /** One document owns one controller, and only main owns the host UI reader. */
@@ -357,14 +447,14 @@ export class WindowRuntime {
       do {
         this.nativeRecoveryDirty = false;
         for (;;) {
-          const state = record(await port.request({ kind: 'read-recovery' }), ['pending', 'sequence', 'hostId', 'profileId']);
+          const state = record(await port.request({ kind: 'read-recovery' }), ['pending', 'sequence', 'hostId', 'profileId', 'initiator']);
           if (typeof state.pending !== 'boolean') throw new Error('Invalid native recovery state');
           const sequence = count(state.sequence);
           if (!state.pending) { this.nativeRecoverySeen = null; break; }
           const binding = ui.getSnapshot().deliveryContext;
           if (this.nativeRecoverySeen === sequence && (attempt.declined?.sequence !== sequence || attempt.declined.binding === binding)) break;
           this.nativeRecoverySeen = sequence;
-          if (!await ui.restoreNative(sequence, nativeRecoveryHost(state))) { attempt.declined = { sequence, binding }; break; }
+          if (!await ui.restoreNative(sequence, nativeRecoveryHost(state), state.initiator == null ? null : identifier(state.initiator, 200))) { attempt.declined = { sequence, binding }; break; }
           attempt.declined = null;
         }
       } while (this.nativeRecoveryDirty);
@@ -487,13 +577,14 @@ export class WindowRuntime {
       if (!Array.isArray(value) || value.length > 32) throw new Error('Invalid native intent queue');
       for (const raw of value) await this.hostStep(hostId, this.processIntent(parseNativePlacementIntent(raw)));
     } catch (error) { if (!(error instanceof PlacementSuperseded)) this.reportFailure(error, error instanceof Error ? error.message : String(error), hostId); }
-    finally {
-      this.processing = false;
-      const settlementAfter = this.carrySettlementAfter ?? null;
-      const moreCarries = this.context.role === 'main' && settlementAfter !== null && (settlementBefore === null || indexedDB.cmp(settlementAfter, settlementBefore) > 0);
-      const rescanCarries = this.context.role === 'main' && settlementAfter === null && this.carrySettlementDirty;
-      if ((this.recoveryDirty || moreCarries || rescanCarries) && !this.closed) queueMicrotask(() => { void this.drive(); });
-    }
+    finally { this.finishProcessing(settlementBefore); }
+  }
+  private finishProcessing(settlementBefore: IDBValidKey | null, catalogPending = false): void {
+    this.processing = false;
+    const settlementAfter = this.carrySettlementAfter ?? null;
+    const moreCarries = this.context.role === 'main' && settlementAfter !== null && (settlementBefore === null || indexedDB.cmp(settlementAfter, settlementBefore) > 0);
+    const rescanCarries = this.context.role === 'main' && settlementAfter === null && this.carrySettlementDirty;
+    if ((catalogPending || this.recoveryDirty || moreCarries || rescanCarries) && !this.closed) queueMicrotask(() => { void this.drive(); });
   }
   private async readIntent(intent: NativePlacementIntent): Promise<NativePlacementIntent | null> {
     const value = await this.port?.request({ kind: 'read-intent', sourceScope: intent.sourceScope, requestId: intent.requestId });
@@ -561,9 +652,9 @@ export class WindowRuntime {
       const pending = this.controller.getSnapshot().saved.pendingCreation;
       const assigned = target, current = currentTarget.kind === 'ready' || currentTarget.kind === 'closed' ? currentTarget.reservation : null;
       const ready = [target, current].find(candidate => candidate?.phase === 'target-ready'
-        && sameScope(candidate.scope, assigned.scope) && candidate.viewId === assigned.viewId && candidate.label === assigned.label && candidate.transitionId === assigned.transitionId);
+        && sameNativeAttempt(candidate, assigned));
       const failedCreation = intent.action.kind === 'create' && assigned.creationAgentId !== null;
-      if (!ready && (currentTarget.kind === 'opening' || currentTarget.kind === 'closed' && failedCreation) && currentTarget.reservation.phase === 'failed' && currentTarget.reservation.viewId === assigned.viewId && currentTarget.reservation.label === assigned.label && currentTarget.reservation.transitionId === assigned.transitionId) throw new Error(failedCreation
+      if (!ready && (currentTarget.kind === 'opening' || currentTarget.kind === 'closed' && failedCreation) && currentTarget.reservation.phase === 'failed' && sameNativeAttempt(currentTarget.reservation, assigned)) throw new Error(failedCreation
         ? 'Creation was refused in its assigned window. Open that window to review its saved text and retry the same creation.'
         : 'The assigned chat could not be opened. Retry its saved window; its unsent draft is preserved.');
       if (ready) { await this.completeReadyIntent(intent, ready).catch(error => this.reportFailure(error, placementReason(error), hostId)); return; }
@@ -595,7 +686,7 @@ export class WindowRuntime {
     if (host.kind !== 'ready' || host.metadata.hostId !== reservation.scope.hostId) return;
     for (const pending of this.controller.pendingPlacements()) {
       const expected = this.coordinator.pendingReservation(pending);
-      if (!expected || !sameScope(expected.scope, reservation.scope) || expected.viewId !== reservation.viewId || expected.label !== reservation.label || expected.transitionId !== reservation.transitionId) continue;
+      if (!expected || !sameNativeAttempt(expected, reservation)) continue;
       if (this.controller.settlePlacement(pending, { kind: 'detached', scope: reservation.scope, label: reservation.label })) {
         if (this.policyScope && sameScope(this.policyScope, reservation.scope)) this.policyScope = null;
         if (this.snapshot.placementNotice === pending.reason) this.update({ placementNotice: null });
@@ -631,7 +722,7 @@ export class WindowRuntime {
         catch (error) { if (error instanceof HostSuperseded) return; this.reportFailure(error, placementReason(error), hostId); continue; }
         this.requireHost(hostId);
         const expected = this.coordinator.pendingReservation(pending);
-        const matches = expected && native.kind !== 'absent' && sameScope(expected.scope, native.reservation.scope) && expected.viewId === native.reservation.viewId && expected.label === native.reservation.label && expected.transitionId === native.reservation.transitionId;
+        const matches = expected && native.kind !== 'absent' && sameNativeAttempt(expected, native.reservation);
         if (matches && (native.kind === 'opening' || native.kind === 'closed') && native.reservation.phase === 'failed') {
           const result = { kind: 'refused', reason: expected.creationAgentId === null ? 'The assigned chat could not be opened. Retry its saved window; its unsent draft is preserved.' : 'The assigned chat could not be created. Open its saved window to review the refusal; its unsent draft is preserved.' } as const;
           const delivery = this.confirmedPolicyDelivery();
@@ -797,12 +888,15 @@ export class WindowRuntime {
     const hostId = reservation.scope.hostId;
     if (!this.hostIsCurrent(hostId)) return;
     if (!this.port || this.context.role !== 'main' || this.processing || this.controller.getSnapshot().busy) { this.updateForHost(hostId, { placementNotice: 'Finish the current operation, then retry this saved chat.' }); return; }
+    this.retargetHost(hostId);
+    const settlementBefore = this.carrySettlementAfter ?? null;
+    if (settlementBefore === null) this.carrySettlementDirty = false;
     this.processing = true;
     try {
       let inlineTransition: string | null = null;
       if (inline) {
         const appearance = this.ui instanceof MainUiConnection ? this.ui.recoveryHost(hostId) : undefined;
-        const grant = parseEditorRecoveryGrant(await this.hostStep(hostId, this.port.request({ kind: 'recover-inline', scope: reservation.scope, expectedTransitionId: reservation.transitionId })));
+        const grant = parseEditorRecoveryGrant(await this.hostStep(hostId, this.port.request({ kind: 'recover-inline', scope: reservation.scope, expectedTransitionId: reservation.transitionId, ...(appearance ? { expectedContext: { hostId: appearance.hostId, profileId: appearance.profileId } } : {}) })));
         await this.hostStep(hostId, this.ui.restore(appearance));
         inlineTransition = grant.transitionId;
         if (!this.controller.getSnapshot().active || !sameScope(this.controller.getSnapshot().active?.scope ?? reservation.scope, reservation.scope)) {
@@ -827,7 +921,7 @@ export class WindowRuntime {
           const intent = parseNativePlacementIntent(raw);
           if (!intent.target || !sameScope(intent.target.scope, reservation.scope)) continue;
           const target = intent.target;
-          const completion = target.phase === 'target-ready' ? { kind: 'detached', scope: target.scope, label: target.label } as const : target.viewId === reservation.viewId && target.label === reservation.label && target.transitionId === reservation.transitionId ? result : null;
+          const completion = target.phase === 'target-ready' ? { kind: 'detached', scope: target.scope, label: target.label } as const : sameNativeAttempt(target, reservation) ? result : null;
           if (!completion) continue;
           if (intent.action.carry) {
             await this.hostStep(hostId, bindDraftCarry(intent.sourceScope, intent.requestId, reservation.scope));
@@ -842,7 +936,7 @@ export class WindowRuntime {
       if (result.kind === 'inline' || result.kind === 'detached') await this.hostStep(hostId, this.syncDraftCarries()).catch(error => { if (error instanceof HostSuperseded) throw error; this.reportFailure(error, placementReason(error), hostId); });
       await this.hostStep(hostId, this.controller.refreshCatalog()); await this.hostStep(hostId, this.refreshRecovery());
     } catch (error) { this.reportFailure(error, error instanceof Error ? error.message : String(error), hostId); }
-    finally { this.processing = false; if (this.catalogDirty || this.recoveryDirty) queueMicrotask(() => { void this.drive(); }); }
+    finally { this.finishProcessing(settlementBefore, this.catalogDirty); }
   }
   private async syncDraftCarries(): Promise<void> {
     const state = this.controller.getSnapshot(), active = state.active;

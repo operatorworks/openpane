@@ -89,7 +89,11 @@ export interface ConversationStore<P> {
   replaceDraft(expected: { readonly text: string; readonly revision: number }, text: string): Promise<boolean>;
   transferDraft(expected: { readonly text: string; readonly revision: number }, text: string, transfer: DraftTransfer): Promise<'committed' | 'changed' | 'cancelled'>;
   /** Upload failures are reported through the view's image status, not by rejecting. */
-  selectImage(file: { readonly name: string; readonly bytes: Uint8Array | Promise<Uint8Array> }, signal?: { readonly aborted: boolean }): Promise<void>;
+  selectImage(file: { readonly name: string; readonly bytes: Uint8Array | Promise<Uint8Array> }, signal?: {
+    readonly aborted: boolean;
+    addEventListener(type: 'abort', listener: () => void, options: { readonly once: true }): void;
+    removeEventListener(type: 'abort', listener: () => void): void;
+  }): Promise<void>;
   retryImage(): Promise<void>;
   removeImage(): Promise<void>;
   send(text?: string): Promise<SubmitResult>;
